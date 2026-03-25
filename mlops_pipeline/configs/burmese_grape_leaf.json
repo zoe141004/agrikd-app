@@ -1,0 +1,46 @@
+{
+    "leaf_type": "burmese_grape_leaf",
+    "display_name": "Lá mận Miến Điện (Burmese Grape Leaf)",
+    "num_classes": 5,
+    "input_size": [224, 224],
+    "input_channels": 3,
+    "checkpoint_filename": "burmese_grape_leaf_student.pth",
+    "data_dir": "data/burmese_grape_leaf",
+    "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",
+    "classes": {
+        "0": {
+            "name": "Anthracnose_Brown_Spot",
+            "folder_name": "Anthracnose (Brown Spot)",
+            "display_name": "Thán thư - Đốm nâu (Anthracnose)",
+            "description": "Leaves affected by anthracnose (brown spot) disease."
+        },
+        "1": {
+            "name": "Healthy",
+            "folder_name": "Healthy",
+            "display_name": "Khỏe mạnh (Healthy)",
+            "description": "Healthy burmese grape leaves without disease."
+        },
+        "2": {
+            "name": "Insect_Damage",
+            "folder_name": "Insect Damage",
+            "display_name": "Hư hại do côn trùng (Insect Damage)",
+            "description": "Leaves damaged by insect feeding."
+        },
+        "3": {
+            "name": "Leaf_Spot_Yellow",
+            "folder_name": "Leaf Spot (Yellow)",
+            "display_name": "Đốm vàng lá (Leaf Spot Yellow)",
+            "description": "Leaves showing yellow leaf spot disease."
+        },
+        "4": {
+            "name": "Powdery_Mildew",
+            "folder_name": "Powdery Mildew",
+            "display_name": "Phấn trắng (Powdery Mildew)",
+            "description": "Leaves affected by powdery mildew fungus."
+        }
+    },
+    "normalization": {
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225]
+    }
+}

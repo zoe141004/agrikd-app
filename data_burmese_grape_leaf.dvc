@@ -1,0 +1,5 @@
+outs:
+- md5: null
+  path: data/burmese_grape_leaf
+  cache: true
+  persist: false

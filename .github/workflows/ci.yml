@@ -1,0 +1,179 @@
+name: AgriKD CI
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.29.2'
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  # ── Stage 1: Lint & Static Analysis ──
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check Dart formatting
+        run: dart format --set-exit-if-changed .
+
+      - name: Run flutter analyze
+        run: flutter analyze
+
+  # ── Stage 2: Unit & Widget Tests ──
+  test:
+    name: Flutter Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install SQLite dev library
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Run tests
+        run: flutter test
+
+  # ── Stage 3: Model Conversion ──
+  model-conversion:
+    name: Model Conversion
+    runs-on: ubuntu-latest
+    needs: lint
+    if: |
+      contains(github.event.head_commit.message, '[model]') ||
+      github.event_name == 'push' && (
+        contains(join(github.event.commits.*.modified, ','), 'mlops_pipeline/configs/') ||
+        contains(join(github.event.commits.*.modified, ','), 'mlops_pipeline/scripts/')
+      )
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: mlops_pipeline/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r mlops_pipeline/requirements.txt
+
+      - name: Run Tomato pipeline
+        run: |
+          cd mlops_pipeline/scripts
+          python run_pipeline.py --config ../configs/tomato.json
+        continue-on-error: false
+
+      - name: Run Burmese Grape Leaf pipeline
+        run: |
+          cd mlops_pipeline/scripts
+          python run_pipeline.py --config ../configs/burmese_grape_leaf.json
+        continue-on-error: false
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-artifacts
+          path: |
+            models/*/benchmark_report.md
+            models/*/*.tflite
+            models/*/*.onnx
+          retention-days: 30
+
+  # ── Stage 4: Model Validation ──
+  model-validation:
+    name: Model Validation
+    runs-on: ubuntu-latest
+    needs: model-conversion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: mlops_pipeline/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r mlops_pipeline/requirements.txt
+
+      - name: Download model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: model-artifacts
+          path: models/
+
+      - name: Validate models (cross-format comparison)
+        run: |
+          cd mlops_pipeline/scripts
+          python validate_models.py --config ../configs/tomato.json
+          python validate_models.py --config ../configs/burmese_grape_leaf.json
+
+      - name: Evaluate models (accuracy + KL divergence)
+        run: |
+          cd mlops_pipeline/scripts
+          python evaluate_models.py --config ../configs/tomato.json
+          python evaluate_models.py --config ../configs/burmese_grape_leaf.json
+
+  # ── Stage 5: Build APK ──
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agrikd-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30

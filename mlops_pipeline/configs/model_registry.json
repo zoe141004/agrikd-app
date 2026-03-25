@@ -1,0 +1,36 @@
+{
+    "version": "1.0.0",
+    "description": "AgriKD Model Registry - Central index of all available leaf disease models",
+    "models": {
+        "tomato": {
+            "display_name": "Cà chua (Tomato)",
+            "num_classes": 10,
+            "input_size": [224, 224],
+            "architecture": "mobilenetv2_kd_student",
+            "version": "1.0.0",
+            "config_file": "tomato.json",
+            "data_dir": "data/tomato",
+            "formats": {
+                "pth": "model_checkpoints_student/tomato_student.pth",
+                "onnx": "models/tomato/tomato_student.onnx",
+                "tflite": "models/tomato/tomato_student.tflite",
+                "tensorrt": "models/tomato/tomato_student.engine"
+            }
+        },
+        "burmese_grape_leaf": {
+            "display_name": "Lá mận Miến Điện (Burmese Grape Leaf)",
+            "num_classes": 5,
+            "input_size": [224, 224],
+            "architecture": "mobilenetv2_kd_student",
+            "version": "1.0.0",
+            "config_file": "burmese_grape_leaf.json",
+            "data_dir": "data/burmese_grape_leaf",
+            "formats": {
+                "pth": "model_checkpoints_student/burmese_grape_leaf_student.pth",
+                "onnx": "models/burmese_grape_leaf/burmese_grape_leaf_student.onnx",
+                "tflite": "models/burmese_grape_leaf/burmese_grape_leaf_student.tflite",
+                "tensorrt": "models/burmese_grape_leaf/burmese_grape_leaf_student.engine"
+            }
+        }
+    }
+}

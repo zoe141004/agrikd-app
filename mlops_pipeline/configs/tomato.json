@@ -1,0 +1,76 @@
+{
+    "leaf_type": "tomato",
+    "display_name": "Cà chua (Tomato)",
+    "num_classes": 10,
+    "input_size": [224, 224],
+    "input_channels": 3,
+    "checkpoint_filename": "tomato_student.pth",
+    "data_dir": "data/tomato",
+    "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",
+    "classes": {
+        "0": {
+            "name": "Bacterial_spot",
+            "folder_name": "Tomato___Bacterial_spot",
+            "display_name": "Đốm vi khuẩn (Bacterial Spot)",
+            "description": "Leaves affected by bacterial spot disease."
+        },
+        "1": {
+            "name": "Early_blight",
+            "folder_name": "Tomato___Early_blight",
+            "display_name": "Bệnh sương mai sớm (Early Blight)",
+            "description": "Leaves showing symptoms of early blight."
+        },
+        "2": {
+            "name": "Late_blight",
+            "folder_name": "Tomato___Late_blight",
+            "display_name": "Bệnh sương mai muộn (Late Blight)",
+            "description": "Leaves with signs of late blight."
+        },
+        "3": {
+            "name": "Leaf_Mold",
+            "folder_name": "Tomato___Leaf_Mold",
+            "display_name": "Mốc lá (Leaf Mold)",
+            "description": "Tomato leaves affected by leaf mold."
+        },
+        "4": {
+            "name": "Septoria_leaf_spot",
+            "folder_name": "Tomato___Septoria_leaf_spot",
+            "display_name": "Đốm lá Septoria (Septoria Leaf Spot)",
+            "description": "Leaves showing septoria leaf spot disease."
+        },
+        "5": {
+            "name": "Spider_mites",
+            "folder_name": "Tomato___Spider_mites Two-spotted_spider_mite",
+            "display_name": "Nhện đỏ hai chấm (Spider Mites)",
+            "description": "Leaves infested with two-spotted spider mites."
+        },
+        "6": {
+            "name": "Target_Spot",
+            "folder_name": "Tomato___Target_Spot",
+            "display_name": "Đốm đích (Target Spot)",
+            "description": "Leaves showing target spot disease."
+        },
+        "7": {
+            "name": "Yellow_Leaf_Curl_Virus",
+            "folder_name": "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
+            "display_name": "Virus xoăn vàng lá (TYLCV)",
+            "description": "Leaves affected by tomato yellow leaf curl virus."
+        },
+        "8": {
+            "name": "Mosaic_virus",
+            "folder_name": "Tomato___Tomato_mosaic_virus",
+            "display_name": "Virus khảm cà chua (Mosaic Virus)",
+            "description": "Leaves infected with tomato mosaic virus."
+        },
+        "9": {
+            "name": "Healthy",
+            "folder_name": "Tomato___healthy",
+            "display_name": "Khỏe mạnh (Healthy)",
+            "description": "Healthy tomato leaves without any signs of disease."
+        }
+    },
+    "normalization": {
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225]
+    }
+}

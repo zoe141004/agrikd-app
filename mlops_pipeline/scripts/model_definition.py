@@ -1,0 +1,310 @@
+"""
+AgriKD - Student Model Definition
+==================================
+Defines the MobileNetV2-based student model architecture used in
+Knowledge Distillation for leaf disease classification.
+
+Architecture (from KD checkpoint analysis):
+    - Backbone: Truncated MobileNetV2 features[0:12] (output: 96 channels)
+    - Global Average Pooling -> [batch, 96]
+    - Custom Classifier Head:
+        classifier.0: Linear(96, 512) + ReLU + Dropout
+        classifier.3: Linear(512, 256) + ReLU + Dropout
+        classifier.6: Linear(256, num_classes)
+
+Checkpoint key structure:
+    backbone.backbone.features.{0..11}.*   (MobileNetV2 conv layers)
+    classifier.{0,3,6}.*                    (Custom FC layers)
+
+Usage:
+    model = create_student_model(num_classes=10)
+    model = load_student_from_checkpoint("path/to/checkpoint.pth", num_classes=10)
+"""
+
+import os
+
+import torch
+import torch.nn as nn
+from torchvision import models
+
+
+# Number of MobileNetV2 feature blocks used in the student backbone
+# Full MobileNetV2 has features[0:19] (1280 output); student uses [0:12] (96 output)
+_BACKBONE_FEATURE_COUNT = 12
+_BACKBONE_OUTPUT_DIM = 96
+
+# Classifier hidden dimensions (shared across all leaf models)
+_CLASSIFIER_HIDDEN_DIMS = [512, 256]
+_DROPOUT_RATE = 0.3
+
+
+class StudentBackbone(nn.Module):
+    """
+    Truncated MobileNetV2 backbone.
+    
+    Uses only the first 12 feature blocks of MobileNetV2,
+    outputting 96-dimensional features instead of the full 1280.
+    This matches the KD training setup where the student backbone
+    is intentionally smaller for edge deployment.
+    """
+
+    def __init__(self):
+        super().__init__()
+        full_mobilenet = models.mobilenet_v2(weights=None)
+        # Take only the first 12 feature blocks
+        self.backbone = nn.Sequential(
+            *list(full_mobilenet.features.children())[:_BACKBONE_FEATURE_COUNT]
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.backbone(x)
+
+
+class CustomClassifier(nn.Module):
+    """
+    Custom fully connected classifier head.
+    
+    Matches the KD training CustomClassifier:
+        For each hidden_dim in config: Linear -> ReLU -> Dropout
+        Final: Linear(last_hidden, num_classes)
+    
+    With default config [512, 256]:
+        classifier.0: Linear(96, 512)
+        classifier.1: ReLU
+        classifier.2: Dropout
+        classifier.3: Linear(512, 256)
+        classifier.4: ReLU
+        classifier.5: Dropout
+        classifier.6: Linear(256, num_classes)
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        num_classes: int,
+        hidden_dims: list = None,
+        dropout_rate: float = _DROPOUT_RATE,
+    ):
+        super().__init__()
+        
+        if hidden_dims is None:
+            hidden_dims = _CLASSIFIER_HIDDEN_DIMS
+
+        layers = []
+        prev_dim = in_features
+
+        for hidden_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.ReLU(inplace=False),
+                nn.Dropout(dropout_rate),
+            ])
+            prev_dim = hidden_dim
+
+        # Final classification layer
+        layers.append(nn.Linear(prev_dim, num_classes))
+
+        self.classifier = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(x)
+
+
+class LeafDiseaseStudentModel(nn.Module):
+    """
+    Complete student model for leaf disease classification.
+    
+    Combines the truncated MobileNetV2 backbone with the custom
+    classifier head. Designed to match KD checkpoint structure exactly.
+    
+    Checkpoint key mapping:
+        self.backbone.backbone.features.*  -> backbone.backbone.features.*
+        self.classifier.classifier.*       -> classifier.classifier.*
+        
+    Note: We remap keys during loading to strip the extra nesting,
+    matching the flat checkpoint structure.
+    
+    Args:
+        num_classes: Number of disease classes for this leaf type.
+        classifier_hidden_dims: Hidden layer sizes (default: [512, 256]).
+        dropout_rate: Dropout probability in classifier head.
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        classifier_hidden_dims: list = None,
+        dropout_rate: float = _DROPOUT_RATE,
+    ):
+        super().__init__()
+        self.backbone = StudentBackbone()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.classifier = CustomClassifier(
+            in_features=_BACKBONE_OUTPUT_DIM,
+            num_classes=num_classes,
+            hidden_dims=classifier_hidden_dims,
+            dropout_rate=dropout_rate,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+        
+        Args:
+            x: Input tensor [batch, 3, 224, 224]
+        Returns:
+            Logits tensor [batch, num_classes]
+        """
+        features = self.backbone(x)              # [B, 96, H, W]
+        features = self.pool(features)           # [B, 96, 1, 1]
+        features = torch.flatten(features, 1)    # [B, 96]
+        logits = self.classifier(features)       # [B, num_classes]
+        return logits
+
+
+def create_student_model(
+    num_classes: int,
+    classifier_hidden_dims: list = None,
+) -> LeafDiseaseStudentModel:
+    """
+    Factory: create a new (untrained) student model.
+    """
+    return LeafDiseaseStudentModel(
+        num_classes=num_classes,
+        classifier_hidden_dims=classifier_hidden_dims,
+    )
+
+
+def _remap_checkpoint_keys(state_dict: dict) -> dict:
+    """
+    Remap checkpoint keys to match our model structure.
+    
+    Checkpoint keys:           Our model keys:
+    backbone.backbone.features.* -> backbone.backbone.features.*  (same)
+    classifier.0.*              -> classifier.classifier.0.*      (need prefix)
+    
+    The checkpoint stores classifier weights directly as classifier.{idx}.*,
+    but our CustomClassifier wraps them in self.classifier (Sequential),
+    so our model expects classifier.classifier.{idx}.*
+    """
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith("backbone.backbone.features."):
+            # Map 'backbone.backbone.features.X' to 'backbone.backbone.X'
+            new_key = "backbone.backbone." + key[len("backbone.backbone.features."):]
+        elif key.startswith("classifier.") and not key.startswith("classifier.classifier."):
+            # Add the extra .classifier nesting
+            new_key = "classifier.classifier." + key[len("classifier."):]
+        else:
+            new_key = key
+        new_state_dict[new_key] = value
+    return new_state_dict
+
+
+def load_student_from_checkpoint(
+    checkpoint_path: str,
+    num_classes: int,
+    classifier_hidden_dims: list = None,
+    device: str = "cpu",
+) -> LeafDiseaseStudentModel:
+    """
+    Load a trained student model from a KD checkpoint file.
+    
+    Handles key remapping between checkpoint format and model structure.
+    
+    Args:
+        checkpoint_path: Path to the .pth checkpoint file.
+        num_classes: Number of classes for this leaf type.
+        classifier_hidden_dims: Hidden dims (default: [512, 256]).
+        device: Target device.
+        
+    Returns:
+        LeafDiseaseStudentModel with loaded weights, set to eval mode.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    if "student_state_dict" not in checkpoint:
+        raise KeyError(
+            f"Checkpoint at '{checkpoint_path}' does not contain "
+            f"'student_state_dict'. Available keys: {list(checkpoint.keys())}"
+        )
+    
+    # Remap keys to match our model structure
+    raw_state_dict = checkpoint["student_state_dict"]
+    remapped_state_dict = _remap_checkpoint_keys(raw_state_dict)
+    
+    # Create model and load weights
+    model = create_student_model(
+        num_classes=num_classes,
+        classifier_hidden_dims=classifier_hidden_dims,
+    )
+    
+    # Use strict=False to ignore 'num_batches_tracked' buffer mismatches
+    incompatible_keys = model.load_state_dict(remapped_state_dict, strict=False)
+    
+    # Check if any actual trained weights are missing
+    missing_weights = [k for k in incompatible_keys.missing_keys if 'num_batches_tracked' not in k]
+    if missing_weights:
+        print(f"[!] Warning: missing keys from checkpoint: {missing_weights[:5]}...")
+
+    print(f"     Classes: {num_classes}, Device: {device}")
+    print(f"     Backbone: MobileNetV2 features[0:{_BACKBONE_FEATURE_COUNT}] ({_BACKBONE_OUTPUT_DIM}d)")
+    print(f"     Classifier: {_BACKBONE_OUTPUT_DIM} -> {classifier_hidden_dims or _CLASSIFIER_HIDDEN_DIMS} -> {num_classes}")
+    
+    if "epoch" in checkpoint:
+        print(f"     Trained for: {checkpoint['epoch']} epochs")
+    if "val_loss" in checkpoint:
+        print(f"     Val loss: {checkpoint['val_loss']:.4f}")
+    
+    return model
+
+
+def load_leaf_config(config_path):
+    """Load leaf model config JSON and resolve paths relative to project root.
+
+    Returns dict with keys: leaf_type, num_classes, input_size,
+    normalization, checkpoint_filename, data_dir, etc.
+    Also adds resolved absolute paths under '_paths' key.
+    """
+    import json
+
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+
+    # Project root: two levels up from this script (scripts/ -> mlops_pipeline/ -> root)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    leaf = config["leaf_type"]
+    ckpt_name = config.get("checkpoint_filename", f"{leaf}_student.pth")
+
+    config["_paths"] = {
+        "project_root": project_root,
+        "checkpoint": os.path.join(project_root, "model_checkpoints_student", ckpt_name),
+        "onnx": os.path.join(project_root, "models", leaf, f"{leaf}_student.onnx"),
+        "tflite": os.path.join(project_root, "models", leaf, f"{leaf}_student.tflite"),
+        "output_dir": os.path.join(project_root, "models", leaf),
+    }
+
+    if config.get("data_dir"):
+        config["_paths"]["data_dir"] = os.path.join(project_root, config["data_dir"])
+
+    return config
+
+
+if __name__ == "__main__":
+    # Sanity check: verify model architecture
+    for num_cls, name in [(10, "Tomato"), (5, "Burmese Grape Leaf")]:
+        model = create_student_model(num_classes=num_cls)
+        dummy_input = torch.randn(1, 3, 224, 224)
+        output = model(dummy_input)
+        print(f"{name}: input={list(dummy_input.shape)} -> output={list(output.shape)}")
+        assert output.shape == (1, num_cls), f"Expected (1, {num_cls}), got {output.shape}"
+    
+    # Verify key names match checkpoint format after remapping
+    model = create_student_model(num_classes=10)
+    model_keys = set(model.state_dict().keys())
+    print(f"\nModel has {len(model_keys)} parameters")
+    print(f"Sample keys: {sorted(list(model_keys))[:3]}")
+    print(f"Classifier keys: {sorted([k for k in model_keys if 'classifier' in k])}")
+    
+    print("\n[OK] All model architecture checks passed!")
