@@ -1,0 +1,242 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:app/core/config/supabase_config.dart';
+import 'package:app/core/utils/image_compressor.dart';
+import 'package:app/core/utils/model_integrity.dart';
+import 'package:app/data/database/dao/model_dao.dart';
+import 'package:app/data/database/dao/prediction_dao.dart';
+import 'package:app/features/diagnosis/domain/models/prediction.dart';
+import 'sync_queue.dart';
+
+class SupabaseSyncService {
+  final PredictionDao _predictionDao;
+  final SyncQueue _syncQueue;
+  final ModelDao _modelDao;
+
+  SupabaseSyncService({
+    required PredictionDao predictionDao,
+    required SyncQueue syncQueue,
+    required ModelDao modelDao,
+  }) : _predictionDao = predictionDao,
+       _syncQueue = syncQueue,
+       _modelDao = modelDao;
+
+  SupabaseClient get _client => SupabaseConfig.client;
+
+  bool get isAuthenticated =>
+      SupabaseConfig.isInitialized && _client.auth.currentUser != null;
+
+  String? get _userId => _client.auth.currentUser?.id;
+
+  /// Push all pending predictions to Supabase.
+  Future<SyncResult> pushPendingPredictions() async {
+    if (!isAuthenticated) {
+      return const SyncResult(
+        synced: 0,
+        failed: 0,
+        message: 'Not authenticated',
+      );
+    }
+
+    final pending = await _syncQueue.getPending(limit: 50);
+    int synced = 0;
+    int failed = 0;
+
+    for (final item in pending) {
+      final queueId = item['id'] as int;
+      final entityId = item['entity_id'] as int;
+
+      try {
+        // Get prediction from local DB
+        final predMap = await _predictionDao.getById(entityId);
+        if (predMap == null) {
+          await _syncQueue.markFailed(queueId);
+          failed++;
+          continue;
+        }
+
+        final prediction = Prediction.fromMap(predMap);
+
+        // Upload image to Supabase Storage
+        String? imageUrl;
+        if (prediction.imagePath.isNotEmpty) {
+          imageUrl = await _uploadImage(prediction.imagePath, entityId);
+        }
+
+        // Insert prediction into Supabase table
+        final response = await _client
+            .from('predictions')
+            .insert({
+              'user_id': _userId,
+              'image_url': imageUrl,
+              'leaf_type': prediction.leafType,
+              'model_version': prediction.modelVersion,
+              'predicted_class_index': prediction.predictedClassIndex,
+              'predicted_class_name': prediction.predictedClassName,
+              'confidence': prediction.confidence,
+              'all_confidences': prediction.allConfidences,
+              'inference_time_ms': prediction.inferenceTimeMs,
+              'latitude': prediction.latitude,
+              'longitude': prediction.longitude,
+              'notes': prediction.notes,
+              'created_at': prediction.createdAt.toUtc().toIso8601String(),
+              'local_id': entityId,
+            })
+            .select('id')
+            .single();
+
+        final serverId = response['id'].toString();
+
+        // Mark synced in local DB
+        await _predictionDao.markSynced(entityId, serverId);
+        await _syncQueue.markCompleted(queueId);
+        synced++;
+      } catch (e) {
+        await _syncQueue.incrementRetry(queueId);
+        final retryCount = (item['retry_count'] as int) + 1;
+        final maxRetries = item['max_retries'] as int;
+        if (retryCount >= maxRetries) {
+          await _syncQueue.markFailed(queueId);
+        }
+        failed++;
+      }
+    }
+
+    // Clean up old completed/failed entries
+    await _syncQueue.cleanup();
+
+    return SyncResult(
+      synced: synced,
+      failed: failed,
+      message: 'Synced $synced, failed $failed of ${pending.length}',
+    );
+  }
+
+  /// Upload and compress image to Supabase Storage.
+  Future<String?> _uploadImage(String imagePath, int localId) async {
+    try {
+      final compressed = await compute(compressImageSync, imagePath);
+      final path =
+          '$_userId/${DateTime.now().millisecondsSinceEpoch}_$localId.jpg';
+
+      await _client.storage
+          .from('prediction-images')
+          .uploadBinary(
+            path,
+            compressed,
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
+
+      return _client.storage.from('prediction-images').getPublicUrl(path);
+    } catch (e) {
+      // Image upload failure should not block prediction sync
+      return null;
+    }
+  }
+
+  /// Check for model updates from remote registry.
+  Future<List<ModelUpdate>> checkModelUpdates(
+    Map<String, String> localVersions,
+  ) async {
+    try {
+      final response = await _client
+          .from('model_registry')
+          .select()
+          .order('updated_at', ascending: false);
+
+      final updates = <ModelUpdate>[];
+      for (final row in response) {
+        final leafType = row['leaf_type'] as String;
+        final remoteVersion = row['version'] as String;
+        final localVersion = localVersions[leafType];
+
+        if (localVersion == null || localVersion != remoteVersion) {
+          updates.add(
+            ModelUpdate(
+              leafType: leafType,
+              version: remoteVersion,
+              fileUrl: row['file_url'] as String?,
+              sha256Checksum: row['sha256_checksum'] as String,
+              classLabels: (jsonDecode(row['class_labels'] as String) as List)
+                  .cast<String>(),
+            ),
+          );
+        }
+      }
+      return updates;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Download, verify, and apply a model update.
+  /// Returns true if the model was successfully updated.
+  Future<bool> downloadModelUpdate(ModelUpdate update) async {
+    if (update.fileUrl == null || update.fileUrl!.isEmpty) return false;
+
+    try {
+      // 1. Download the file from Supabase Storage
+      final Uint8List bytes = await _client.storage
+          .from('models')
+          .download(update.fileUrl!);
+
+      // 2. Verify SHA-256 checksum
+      final actualHash = ModelIntegrity.sha256Bytes(bytes);
+      if (actualHash != update.sha256Checksum) {
+        return false; // Integrity check failed
+      }
+
+      // 3. Save to local filesystem
+      final dir = await getApplicationDocumentsDirectory();
+      final modelDir = Directory('${dir.path}/models/${update.leafType}');
+      await modelDir.create(recursive: true);
+      final localPath = '${modelDir.path}/${update.leafType}_student.tflite';
+      await File(localPath).writeAsBytes(bytes);
+
+      // 4. Update model record in DB
+      await _modelDao.updateVersion(
+        update.leafType,
+        update.version,
+        localPath,
+        update.sha256Checksum,
+      );
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
+class SyncResult {
+  final int synced;
+  final int failed;
+  final String message;
+
+  const SyncResult({
+    required this.synced,
+    required this.failed,
+    required this.message,
+  });
+}
+
+class ModelUpdate {
+  final String leafType;
+  final String version;
+  final String? fileUrl;
+  final String sha256Checksum;
+  final List<String> classLabels;
+
+  const ModelUpdate({
+    required this.leafType,
+    required this.version,
+    this.fileUrl,
+    required this.sha256Checksum,
+    required this.classLabels,
+  });
+}

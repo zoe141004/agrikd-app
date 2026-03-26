@@ -61,7 +61,7 @@ model_checkpoints_student/
 !assets/models/**/*.tflite
 
 # Datasets (large, tracked via DVC)
-data/
+/data/
 
 # Environment files (secrets)
 .env
