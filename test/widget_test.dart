@@ -11,7 +11,6 @@ import 'package:app/data/database/app_database.dart';
 import 'test_helper.dart';
 
 @Tags(['widget'])
-
 void main() {
   setUpAll(() async {
     initTestDatabase();
