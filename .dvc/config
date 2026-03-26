@@ -2,4 +2,4 @@
     remote = gdrive
     autostage = true
 ['remote "gdrive"']
-    url = gdrive://<folder-id>
+    url = gdrive://1HxkDdlgtwAUREw6i864rFXxBkOeMdagx

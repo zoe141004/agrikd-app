@@ -1,2 +1,5 @@
 /venv*
 /tmp_*
+/config.local
+/tmp
+/cache

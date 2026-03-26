@@ -1,5 +1,6 @@
 outs:
-- md5: null
+- md5: 84cb035f3d0e2fb88b0d912a52277ddf.dir
   path: data/tomato
-  cache: true
-  persist: false
+  size: 670297959
+  nfiles: 1609
+  hash: md5
