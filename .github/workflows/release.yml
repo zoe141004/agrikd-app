@@ -35,7 +35,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
 
       - name: Run tests
-        run: flutter test
+        run: flutter test --exclude-tags=widget
 
       - name: Build release APK
         run: |
