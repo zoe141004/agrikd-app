@@ -1,3 +1,6 @@
+@Tags(['widget'])
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,7 +13,6 @@ import 'package:app/data/database/app_database.dart';
 
 import 'test_helper.dart';
 
-@Tags(['widget'])
 void main() {
   setUpAll(() async {
     initTestDatabase();
