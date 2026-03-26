@@ -93,6 +93,6 @@ class DiagnosisNotifier extends StateNotifier<DiagnosisState> {
 
 final diagnosisProvider =
     StateNotifierProvider<DiagnosisNotifier, DiagnosisState>((ref) {
-  final repository = ref.watch(diagnosisRepositoryProvider);
-  return DiagnosisNotifier(repository);
-});
+      final repository = ref.watch(diagnosisRepositoryProvider);
+      return DiagnosisNotifier(repository);
+    });

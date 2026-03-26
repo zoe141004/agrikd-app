@@ -44,8 +44,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          icon: Icon(Icons.check_circle_outline,
-              size: 48, color: Theme.of(context).colorScheme.primary),
+          icon: Icon(
+            Icons.check_circle_outline,
+            size: 48,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           title: Text(S.get('password_updated_title')),
           content: Text(S.get('password_updated_msg')),
           actions: [
@@ -90,19 +93,17 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 Text(
                   S.get('set_new_password'),
                   textAlign: TextAlign.center,
-                  style:
-                      Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   S.get('set_new_password_sub'),
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color:
-                            Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 48),
                 TextFormField(
@@ -120,8 +121,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                             : Icons.visibility_off_outlined,
                       ),
                       onPressed: () {
-                        setState(
-                            () => _obscurePassword = !_obscurePassword);
+                        setState(() => _obscurePassword = !_obscurePassword);
                       },
                     ),
                   ),
@@ -152,8 +152,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                             : Icons.visibility_off_outlined,
                       ),
                       onPressed: () {
-                        setState(
-                            () => _obscureConfirm = !_obscureConfirm);
+                        setState(() => _obscureConfirm = !_obscureConfirm);
                       },
                     ),
                   ),
@@ -177,17 +176,14 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                     ),
                   ),
                 FilledButton(
-                  onPressed:
-                      authState.isLoading ? null : _handleUpdate,
+                  onPressed: authState.isLoading ? null : _handleUpdate,
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     child: authState.isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(S.get('update_password')),
                   ),

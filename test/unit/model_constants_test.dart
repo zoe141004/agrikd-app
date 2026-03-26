@@ -58,7 +58,10 @@ void main() {
 
     test('hasHealthyClass returns true for both models', () {
       expect(ModelConstants.getModel('tomato').hasHealthyClass, isTrue);
-      expect(ModelConstants.getModel('burmese_grape_leaf').hasHealthyClass, isTrue);
+      expect(
+        ModelConstants.getModel('burmese_grape_leaf').hasHealthyClass,
+        isTrue,
+      );
     });
 
     test('localizedName returns correct language', () {
@@ -74,7 +77,10 @@ void main() {
     });
 
     test('cleanLabel strips prefix and underscores', () {
-      expect(LeafModelInfo.cleanLabel('Tomato___Bacterial_spot'), 'Bacterial spot');
+      expect(
+        LeafModelInfo.cleanLabel('Tomato___Bacterial_spot'),
+        'Bacterial spot',
+      );
       expect(LeafModelInfo.cleanLabel('Healthy'), 'Healthy');
     });
   });

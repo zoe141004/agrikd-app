@@ -32,7 +32,9 @@ void main() {
       addTearDown(container.dispose);
 
       await container.read(settingsProvider.notifier).loadAll();
-      await container.read(settingsProvider.notifier).setValue('test_setting', 'abc');
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('test_setting', 'abc');
 
       final state = container.read(settingsProvider);
       expect(state['test_setting'], 'abc');
@@ -51,7 +53,9 @@ void main() {
 
       await container.read(settingsProvider.notifier).loadAll();
       // Restore theme to system
-      await container.read(settingsProvider.notifier).setValue('theme', 'system');
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('theme', 'system');
 
       final mode = container.read(themeModeProvider);
       expect(mode, ThemeMode.system);
@@ -68,7 +72,9 @@ void main() {
       expect(mode, ThemeMode.dark);
 
       // Cleanup
-      await container.read(settingsProvider.notifier).setValue('theme', 'system');
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('theme', 'system');
     });
   });
 }

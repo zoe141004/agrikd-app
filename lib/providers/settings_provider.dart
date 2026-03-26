@@ -34,8 +34,8 @@ class SettingsNotifier extends StateNotifier<Map<String, String>> {
 
 final settingsProvider =
     StateNotifierProvider<SettingsNotifier, Map<String, String>>((ref) {
-  return SettingsNotifier(ref);
-});
+      return SettingsNotifier(ref);
+    });
 
 final themeModeProvider = Provider<ThemeMode>((ref) {
   final theme = ref.watch(

@@ -27,10 +27,7 @@ void main() {
   Widget buildApp(ProviderContainer container) {
     return UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
-        theme: AppTheme.lightTheme,
-        home: const HomeScreen(),
-      ),
+      child: MaterialApp(theme: AppTheme.lightTheme, home: const HomeScreen()),
     );
   }
 
@@ -58,7 +55,9 @@ void main() {
     container.dispose();
   });
 
-  testWidgets('HomeScreen shows bottom navigation', (WidgetTester tester) async {
+  testWidgets('HomeScreen shows bottom navigation', (
+    WidgetTester tester,
+  ) async {
     final container = await createContainer();
 
     await tester.pumpWidget(buildApp(container));

@@ -12,7 +12,9 @@ class SupabaseConfig {
 
   static SupabaseClient get client {
     if (!_initialized) {
-      throw StateError('Supabase not initialized. Check network or .env config.');
+      throw StateError(
+        'Supabase not initialized. Check network or .env config.',
+      );
     }
     return Supabase.instance.client;
   }

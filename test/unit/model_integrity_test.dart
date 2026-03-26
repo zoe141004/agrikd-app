@@ -8,7 +8,10 @@ void main() {
     test('sha256Bytes computes correct hash for known input', () {
       // SHA-256 of empty string
       final hash = ModelIntegrity.sha256Bytes([]);
-      expect(hash, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+      expect(
+        hash,
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      );
     });
 
     test('sha256Bytes computes correct hash for "hello"', () {

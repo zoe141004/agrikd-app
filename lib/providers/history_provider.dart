@@ -45,16 +45,19 @@ class HistoryState {
       predictions: predictions ?? this.predictions,
       isLoading: isLoading ?? this.isLoading,
       hasMore: hasMore ?? this.hasMore,
-      filterLeafType:
-          clearLeafFilter ? null : (filterLeafType ?? this.filterLeafType),
-      filterStartDate:
-          clearDateFilter ? null : (filterStartDate ?? this.filterStartDate),
-      filterEndDate:
-          clearDateFilter ? null : (filterEndDate ?? this.filterEndDate),
-      minConfidence:
-          clearConfidenceFilter ? null : (minConfidence ?? this.minConfidence),
-      searchQuery:
-          clearSearch ? null : (searchQuery ?? this.searchQuery),
+      filterLeafType: clearLeafFilter
+          ? null
+          : (filterLeafType ?? this.filterLeafType),
+      filterStartDate: clearDateFilter
+          ? null
+          : (filterStartDate ?? this.filterStartDate),
+      filterEndDate: clearDateFilter
+          ? null
+          : (filterEndDate ?? this.filterEndDate),
+      minConfidence: clearConfidenceFilter
+          ? null
+          : (minConfidence ?? this.minConfidence),
+      searchQuery: clearSearch ? null : (searchQuery ?? this.searchQuery),
       sortBy: sortBy ?? this.sortBy,
     );
   }
@@ -130,11 +133,7 @@ class HistoryNotifier extends StateNotifier<HistoryState> {
   }
 
   Future<void> setSortBy(String sortBy) async {
-    state = state.copyWith(
-      sortBy: sortBy,
-      predictions: [],
-      hasMore: true,
-    );
+    state = state.copyWith(sortBy: sortBy, predictions: [], hasMore: true);
     await loadInitial();
   }
 
@@ -172,7 +171,8 @@ class HistoryNotifier extends StateNotifier<HistoryState> {
   }
 }
 
-final historyProvider =
-    StateNotifierProvider<HistoryNotifier, HistoryState>((ref) {
+final historyProvider = StateNotifierProvider<HistoryNotifier, HistoryState>((
+  ref,
+) {
   return HistoryNotifier(ref);
 });

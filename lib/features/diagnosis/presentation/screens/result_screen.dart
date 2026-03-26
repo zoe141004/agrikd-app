@@ -41,9 +41,9 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     setState(() => _notesSaved = true);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(S.get('notes_saved'))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(S.get('notes_saved'))));
     }
   }
 
@@ -60,193 +60,201 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     }
 
     final modelInfo = ModelConstants.getModel(widget.leafType);
-    final displayName =
-        modelInfo.localizedClassName(prediction.predictedClassName, S.locale);
+    final displayName = modelInfo.localizedClassName(
+      prediction.predictedClassName,
+      S.locale,
+    );
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('your_result')),
-      ),
+      appBar: AppBar(title: Text(S.get('your_result'))),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: SingleChildScrollView(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Image preview
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: kIsWeb
-                  ? Image.network(
-                      prediction.imagePath,
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, error, stack) => Container(
-                        height: 200,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        child:
-                            const Icon(Icons.image_not_supported, size: 64),
-                      ),
-                    )
-                  : buildFileImage(
-                      prediction.imagePath,
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, error, stack) => Container(
-                        height: 200,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        child:
-                            const Icon(Icons.image_not_supported, size: 64),
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 12),
-
-            // Result card
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName,
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Chip(
-                          avatar: const Icon(Icons.check_circle, size: 18),
-                          label: Text(
-                            '${(prediction.confidence * 100).toStringAsFixed(1)}%',
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        if (prediction.inferenceTimeMs != null)
-                          Chip(
-                            avatar: const Icon(Icons.speed, size: 18),
-                            label: Text(
-                              '${prediction.inferenceTimeMs!.toStringAsFixed(1)} ms',
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Image preview
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: kIsWeb
+                      ? Image.network(
+                          prediction.imagePath,
+                          height: 200,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, error, stack) => Container(
+                            height: 200,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                            child: const Icon(
+                              Icons.image_not_supported,
+                              size: 64,
                             ),
                           ),
+                        )
+                      : buildFileImage(
+                          prediction.imagePath,
+                          height: 200,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, error, stack) => Container(
+                            height: 200,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                            child: const Icon(
+                              Icons.image_not_supported,
+                              size: 64,
+                            ),
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 12),
+
+                // Result card
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Chip(
+                              avatar: const Icon(Icons.check_circle, size: 18),
+                              label: Text(
+                                '${(prediction.confidence * 100).toStringAsFixed(1)}%',
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (prediction.inferenceTimeMs != null)
+                              Chip(
+                                avatar: const Icon(Icons.speed, size: 18),
+                                label: Text(
+                                  '${prediction.inferenceTimeMs!.toStringAsFixed(1)} ms',
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _dateFormat.format(prediction.createdAt),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _dateFormat.format(prediction.createdAt),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-            // Notes field
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      S.get('notes'),
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _notesController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        hintText: S.get('notes_hint'),
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: prediction.id != null && !_notesSaved
-                            ? () => _saveNotes(prediction.id!)
-                            : null,
-                        icon: Icon(_notesSaved ? Icons.check : Icons.save),
-                        label: Text(_notesSaved ? S.get('saved') : S.get('save_notes')),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // All class probabilities — horizontal bar chart
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      S.get('all_results'),
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 10),
-                    if (prediction.allConfidences != null)
-                      _buildConfidenceChart(context, modelInfo, prediction),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Action buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              CameraScreen(leafType: widget.leafType),
+                // Notes field
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          S.get('notes'),
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.camera_alt),
-                    label: Text(S.get('scan_again')),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _notesController,
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            hintText: S.get('notes_hint'),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: prediction.id != null && !_notesSaved
+                                ? () => _saveNotes(prediction.id!)
+                                : null,
+                            icon: Icon(_notesSaved ? Icons.check : Icons.save),
+                            label: Text(
+                              _notesSaved
+                                  ? S.get('saved')
+                                  : S.get('save_notes'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      Navigator.popUntil(context, (route) => route.isFirst);
-                    },
-                    icon: const Icon(Icons.home),
-                    label: Text(S.get('home')),
+                const SizedBox(height: 12),
+
+                // All class probabilities — horizontal bar chart
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          S.get('all_results'),
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 10),
+                        if (prediction.allConfidences != null)
+                          _buildConfidenceChart(context, modelInfo, prediction),
+                      ],
+                    ),
                   ),
+                ),
+                const SizedBox(height: 12),
+
+                // Action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  CameraScreen(leafType: widget.leafType),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.camera_alt),
+                        label: Text(S.get('scan_again')),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.popUntil(context, (route) => route.isFirst);
+                        },
+                        icon: const Icon(Icons.home),
+                        label: Text(S.get('home')),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
-      ),
+          ),
         ),
       ),
     );
@@ -280,28 +288,33 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
               getTooltipItem: (group, groupIndex, rod, rodIndex) {
                 final idx = indices[group.x.toInt()];
                 final label = modelInfo.localizedClassName(
-                    modelInfo.classLabels[idx], S.locale);
+                  modelInfo.classLabels[idx],
+                  S.locale,
+                );
                 return BarTooltipItem(
                   '$label\n${(rod.toY * 100).toStringAsFixed(1)}%',
-                  TextStyle(
-                    color: colorScheme.onSurface,
-                    fontSize: 12,
-                  ),
+                  TextStyle(color: colorScheme.onSurface, fontSize: 12),
                 );
               },
             ),
           ),
           titlesData: FlTitlesData(
             show: true,
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
                 getTitlesWidget: (value, meta) {
                   final idx = indices[value.toInt()];
                   final label = modelInfo.localizedClassName(
-                      modelInfo.classLabels[idx], S.locale);
+                    modelInfo.classLabels[idx],
+                    S.locale,
+                  );
                   return SideTitleWidget(
                     axisSide: meta.axisSide,
                     child: SizedBox(
@@ -309,11 +322,11 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                       child: Text(
                         label,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              fontWeight: idx == topIndex
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              fontSize: 9,
-                            ),
+                          fontWeight: idx == topIndex
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          fontSize: 9,
+                        ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -359,7 +372,9 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                   toY: conf,
                   color: isTop ? colorScheme.primary : colorScheme.outline,
                   width: 16,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4),
+                  ),
                 ),
               ],
             );

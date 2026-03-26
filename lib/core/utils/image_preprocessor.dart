@@ -16,7 +16,8 @@ Float32List preprocessImageFromPath(String imagePath) {
     throw ArgumentError('Invalid image file');
   }
   final isJpeg = bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
-  final isPng = bytes[0] == 0x89 &&
+  final isPng =
+      bytes[0] == 0x89 &&
       bytes[1] == 0x50 &&
       bytes[2] == 0x4E &&
       bytes[3] == 0x47;
@@ -42,8 +43,12 @@ class ImagePreprocessor {
     const std = AppConstants.imagenetStd;
 
     // 1. Resize to 224x224
-    final resized = img.copyResize(image, width: size, height: size,
-        interpolation: img.Interpolation.linear);
+    final resized = img.copyResize(
+      image,
+      width: size,
+      height: size,
+      interpolation: img.Interpolation.linear,
+    );
 
     // 2. Convert to float [0,1] and normalize (NHWC format for TFLite)
     final input = Float32List(1 * size * size * 3);

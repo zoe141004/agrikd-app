@@ -80,8 +80,9 @@ class SyncNotifier extends StateNotifier<SyncState>
         lastSyncedAt: now,
       );
       // Persist for next app launch
-      _ref.read(settingsProvider.notifier).setValue(
-            'last_synced_at', now.toIso8601String());
+      _ref
+          .read(settingsProvider.notifier)
+          .setValue('last_synced_at', now.toIso8601String());
     } catch (e) {
       state = SyncState(
         status: SyncStatus.error,
@@ -130,8 +131,7 @@ class SyncNotifier extends StateNotifier<SyncState>
   }
 }
 
-final syncProvider =
-    StateNotifierProvider<SyncNotifier, SyncState>((ref) {
+final syncProvider = StateNotifierProvider<SyncNotifier, SyncState>((ref) {
   final syncService = ref.watch(supabaseSyncServiceProvider);
   final notifier = SyncNotifier(syncService, ref);
 

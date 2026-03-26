@@ -28,149 +28,151 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final autoSync = settings['auto_sync'] != 'false';
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('settings')),
-      ),
+      appBar: AppBar(title: Text(S.get('settings'))),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: ListView(
-        children: [
-          _SectionHeader(S.get('account')),
-          if (authState.status == AuthStatus.authenticated) ...[
-            ListTile(
-              leading: const Icon(Icons.person),
-              title: Text(S.get('signed_in')),
-              subtitle: Text(authState.user?.email ?? ''),
-              trailing: TextButton(
-                onPressed: () {
-                  ref.read(authProvider.notifier).signOut();
-                },
-                child: Text(S.get('sign_out')),
-              ),
-            ),
-          ] else ...[
-            ListTile(
-              leading: const Icon(Icons.login),
-              title: Text(S.get('login_to_backup')),
-              subtitle: Text(S.get('login_subtitle')),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const LoginScreen(),
+            children: [
+              _SectionHeader(S.get('account')),
+              if (authState.status == AuthStatus.authenticated) ...[
+                ListTile(
+                  leading: const Icon(Icons.person),
+                  title: Text(S.get('signed_in')),
+                  subtitle: Text(authState.user?.email ?? ''),
+                  trailing: TextButton(
+                    onPressed: () {
+                      ref.read(authProvider.notifier).signOut();
+                    },
+                    child: Text(S.get('sign_out')),
                   ),
-                );
-              },
-            ),
-          ],
-          const Divider(),
-          _SectionHeader(S.get('general')),
-          ListTile(
-            leading: const Icon(Icons.eco),
-            title: Text(S.get('default_crop')),
-            subtitle: Text(
-              ModelConstants.getModel(defaultLeafType).localizedName(S.locale),
-            ),
-            onTap: () => _showLeafTypePicker(notifier, defaultLeafType),
-          ),
-          SwitchListTile(
-            secondary: const Icon(Icons.cloud_upload_outlined),
-            title: Text(S.get('auto_backup')),
-            subtitle: Text(S.get('auto_backup_sub')),
-            value: autoSync,
-            onChanged: (value) {
-              notifier.setValue('auto_sync', value.toString());
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.sync),
-            title: Text(S.get('sync_now')),
-            subtitle: Builder(builder: (context) {
-              final syncState = ref.watch(syncProvider);
-              if (syncState.status == SyncStatus.syncing) {
-                return Text(S.get('sync_syncing'));
-              }
-              if (syncState.status == SyncStatus.error) {
-                return Text(
-                  S.get('sync_failed_short'),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                );
-              }
-              if (syncState.lastSyncedAt != null) {
-                return Text(_formatRelativeTime(syncState.lastSyncedAt!));
-              }
-              return Text(S.get('sync_not_synced_yet'));
-            }),
-            trailing: ref.watch(syncProvider).status == SyncStatus.syncing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            onTap: () async {
-              final syncState = ref.read(syncProvider);
-              if (syncState.status == SyncStatus.syncing) return;
+                ),
+              ] else ...[
+                ListTile(
+                  leading: const Icon(Icons.login),
+                  title: Text(S.get('login_to_backup')),
+                  subtitle: Text(S.get('login_subtitle')),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  },
+                ),
+              ],
+              const Divider(),
+              _SectionHeader(S.get('general')),
+              ListTile(
+                leading: const Icon(Icons.eco),
+                title: Text(S.get('default_crop')),
+                subtitle: Text(
+                  ModelConstants.getModel(
+                    defaultLeafType,
+                  ).localizedName(S.locale),
+                ),
+                onTap: () => _showLeafTypePicker(notifier, defaultLeafType),
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.cloud_upload_outlined),
+                title: Text(S.get('auto_backup')),
+                subtitle: Text(S.get('auto_backup_sub')),
+                value: autoSync,
+                onChanged: (value) {
+                  notifier.setValue('auto_sync', value.toString());
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.sync),
+                title: Text(S.get('sync_now')),
+                subtitle: Builder(
+                  builder: (context) {
+                    final syncState = ref.watch(syncProvider);
+                    if (syncState.status == SyncStatus.syncing) {
+                      return Text(S.get('sync_syncing'));
+                    }
+                    if (syncState.status == SyncStatus.error) {
+                      return Text(
+                        S.get('sync_failed_short'),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      );
+                    }
+                    if (syncState.lastSyncedAt != null) {
+                      return Text(_formatRelativeTime(syncState.lastSyncedAt!));
+                    }
+                    return Text(S.get('sync_not_synced_yet'));
+                  },
+                ),
+                trailing: ref.watch(syncProvider).status == SyncStatus.syncing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+                onTap: () async {
+                  final syncState = ref.read(syncProvider);
+                  if (syncState.status == SyncStatus.syncing) return;
 
-              final authState2 = ref.read(authProvider);
-              if (authState2.status != AuthStatus.authenticated) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(S.get('sync_not_logged_in'))),
-                );
-                return;
-              }
+                  final authState2 = ref.read(authProvider);
+                  if (authState2.status != AuthStatus.authenticated) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(S.get('sync_not_logged_in'))),
+                    );
+                    return;
+                  }
 
-              await ref.read(syncProvider.notifier).syncNow();
-            },
+                  await ref.read(syncProvider.notifier).syncNow();
+                },
+              ),
+              const Divider(),
+              _SectionHeader(S.get('appearance')),
+              ListTile(
+                leading: const Icon(Icons.palette),
+                title: Text(S.get('theme')),
+                subtitle: Text(S.get('theme_$currentTheme')),
+                onTap: () => _showThemePicker(notifier, currentTheme),
+              ),
+              ListTile(
+                leading: const Icon(Icons.language),
+                title: Text(S.get('language')),
+                subtitle: Text(S.locale == 'vi' ? 'Tiếng Việt' : 'English'),
+                onTap: () => _showLanguagePicker(notifier),
+              ),
+              const Divider(),
+              _SectionHeader(S.get('about')),
+              ListTile(
+                leading: const Icon(Icons.speed),
+                title: Text(S.get('benchmark')),
+                subtitle: Text(S.get('benchmark_sub')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BenchmarkScreen()),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: Text(S.get('app_name')),
+                subtitle: Text(S.get('app_version')),
+              ),
+              ListTile(
+                leading: const Icon(Icons.memory),
+                title: Text(S.get('models')),
+                subtitle: Text(
+                  ModelConstants.availableLeafTypes
+                      .map((t) {
+                        final m = ModelConstants.getModel(t);
+                        return '${m.localizedName(S.locale)} — ${S.fmt('n_diseases', [m.diseaseCount])}';
+                      })
+                      .join('\n'),
+                ),
+              ),
+            ],
           ),
-          const Divider(),
-          _SectionHeader(S.get('appearance')),
-          ListTile(
-            leading: const Icon(Icons.palette),
-            title: Text(S.get('theme')),
-            subtitle: Text(S.get('theme_$currentTheme')),
-            onTap: () => _showThemePicker(notifier, currentTheme),
-          ),
-          ListTile(
-            leading: const Icon(Icons.language),
-            title: Text(S.get('language')),
-            subtitle: Text(S.locale == 'vi' ? 'Tiếng Việt' : 'English'),
-            onTap: () => _showLanguagePicker(notifier),
-          ),
-          const Divider(),
-          _SectionHeader(S.get('about')),
-          ListTile(
-            leading: const Icon(Icons.speed),
-            title: Text(S.get('benchmark')),
-            subtitle: Text(S.get('benchmark_sub')),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BenchmarkScreen()),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: Text(S.get('app_name')),
-            subtitle: Text(S.get('app_version')),
-          ),
-          ListTile(
-            leading: const Icon(Icons.memory),
-            title: Text(S.get('models')),
-            subtitle: Text(
-              ModelConstants.availableLeafTypes
-                  .map((t) {
-                    final m = ModelConstants.getModel(t);
-                    return '${m.localizedName(S.locale)} — ${S.fmt('n_diseases', [m.diseaseCount])}';
-                  })
-                  .join('\n'),
-            ),
-          ),
-        ],
-      ),
         ),
       ),
     );
@@ -307,8 +309,8 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
   }

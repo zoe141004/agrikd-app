@@ -28,21 +28,27 @@ void main() {
       final result = ImagePreprocessor.preprocess(image);
 
       // First pixel R channel: (255/255.0 - 0.485) / 0.229
-      final expectedR = (1.0 - AppConstants.imagenetMean[0]) / AppConstants.imagenetStd[0];
+      final expectedR =
+          (1.0 - AppConstants.imagenetMean[0]) / AppConstants.imagenetStd[0];
       expect(result[0], closeTo(expectedR, 0.01));
 
       // First pixel G channel: (0/255.0 - 0.456) / 0.224
-      final expectedG = (0.0 - AppConstants.imagenetMean[1]) / AppConstants.imagenetStd[1];
+      final expectedG =
+          (0.0 - AppConstants.imagenetMean[1]) / AppConstants.imagenetStd[1];
       expect(result[1], closeTo(expectedG, 0.01));
 
       // First pixel B channel: (0/255.0 - 0.406) / 0.225
-      final expectedB = (0.0 - AppConstants.imagenetMean[2]) / AppConstants.imagenetStd[2];
+      final expectedB =
+          (0.0 - AppConstants.imagenetMean[2]) / AppConstants.imagenetStd[2];
       expect(result[2], closeTo(expectedB, 0.01));
     });
 
     test('isValidImageSize accepts files under 10 MB', () {
       expect(ImagePreprocessor.isValidImageSize(1024 * 1024), isTrue); // 1 MB
-      expect(ImagePreprocessor.isValidImageSize(10 * 1024 * 1024), isTrue); // 10 MB exactly
+      expect(
+        ImagePreprocessor.isValidImageSize(10 * 1024 * 1024),
+        isTrue,
+      ); // 10 MB exactly
     });
 
     test('isValidImageSize rejects files over 10 MB', () {

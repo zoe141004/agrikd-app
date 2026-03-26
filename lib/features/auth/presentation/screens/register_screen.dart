@@ -36,10 +36,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
 
-    await ref.read(authProvider.notifier).signUp(
-          _emailController.text.trim(),
-          _passwordController.text,
-        );
+    await ref
+        .read(authProvider.notifier)
+        .signUp(_emailController.text.trim(), _passwordController.text);
   }
 
   @override
@@ -56,8 +55,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            icon: Icon(Icons.mark_email_read_outlined,
-                size: 48, color: Theme.of(context).colorScheme.primary),
+            icon: Icon(
+              Icons.mark_email_read_outlined,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
             title: Text(S.get('check_email_title')),
             content: Text(S.get('check_email_confirm')),
             actions: [
@@ -76,9 +78,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('create_account')),
-      ),
+      appBar: AppBar(title: Text(S.get('create_account'))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Form(
@@ -90,15 +90,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               Text(
                 S.get('join_heading'),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 S.get('register_sub'),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 32),
               TextFormField(

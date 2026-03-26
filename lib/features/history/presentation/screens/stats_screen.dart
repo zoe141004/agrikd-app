@@ -27,8 +27,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
   }
 
   Future<void> _loadStats() async {
-    final stats =
-        await ref.read(predictionDaoProvider).getDetailedStatistics();
+    final stats = await ref.read(predictionDaoProvider).getDetailedStatistics();
     if (mounted) {
       setState(() {
         _stats = stats;
@@ -40,32 +39,34 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('stats_title')),
-      ),
+      appBar: AppBar(title: Text(S.get('stats_title'))),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _stats == null || (_stats!['total'] as int) == 0
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.bar_chart,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline),
-                      const SizedBox(height: 16),
-                      Text(S.get('no_data'),
-                          style: Theme.of(context).textTheme.titleMedium),
-                      Text(S.get('start_scanning')),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.bar_chart,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.outline,
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadStats,
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 600),
-                      child: ListView(
+                  const SizedBox(height: 16),
+                  Text(
+                    S.get('no_data'),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(S.get('start_scanning')),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _loadStats,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: ListView(
                     padding: const EdgeInsets.all(14),
                     children: [
                       _buildSummaryCard(context),
@@ -75,16 +76,18 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                       _buildTopDiseases(context),
                     ],
                   ),
-                    ),
-                  ),
                 ),
+              ),
+            ),
     );
   }
 
   Widget _buildSummaryCard(BuildContext context) {
     final total = _stats!['total'] as int;
     final synced = _stats!['synced'] as int;
-    final syncPercent = total > 0 ? (synced / total * 100).toStringAsFixed(0) : '0';
+    final syncPercent = total > 0
+        ? (synced / total * 100).toStringAsFixed(0)
+        : '0';
 
     return Card(
       child: Padding(
@@ -92,7 +95,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(S.get('overview'), style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              S.get('overview'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -142,7 +148,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(S.get('last_7_days'), style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              S.get('last_7_days'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 200,
@@ -187,9 +196,11 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                       ),
                     ),
                     topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                     rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                   ),
                   borderData: FlBorderData(show: false),
                   gridData: const FlGridData(show: false),
@@ -233,7 +244,9 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
     ];
 
     final total = topDiseases.fold<int>(
-        0, (sum, d) => sum + (d['count'] as int));
+      0,
+      (sum, d) => sum + (d['count'] as int),
+    );
 
     return Card(
       child: Padding(
@@ -241,8 +254,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(S.get('common_findings'),
-                style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              S.get('common_findings'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 10),
             SizedBox(
               height: 160,
@@ -257,8 +272,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                           return PieChartSectionData(
                             color: colors[i % colors.length],
                             value: count.toDouble(),
-                            title:
-                                '${percent.toStringAsFixed(0)}%',
+                            title: '${percent.toStringAsFixed(0)}%',
                             radius: 50,
                             titleStyle: const TextStyle(
                               fontSize: 12,
@@ -280,13 +294,15 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                       children: List.generate(topDiseases.length, (i) {
                         final rawName =
                             topDiseases[i]['predicted_class_name'] as String;
-                        final leafType =
-                            topDiseases[i]['leaf_type'] as String?;
+                        final leafType = topDiseases[i]['leaf_type'] as String?;
                         String displayName = rawName;
                         if (leafType != null) {
                           try {
                             final m = ModelConstants.getModel(leafType);
-                            displayName = m.localizedClassName(rawName, S.locale);
+                            displayName = m.localizedClassName(
+                              rawName,
+                              S.locale,
+                            );
                           } catch (_) {
                             displayName = LeafModelInfo.cleanLabel(rawName);
                           }
@@ -308,16 +324,14 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                               Expanded(
                                 child: Text(
                                   displayName,
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
                                 '$count',
-                                style:
-                                    Theme.of(context).textTheme.bodySmall,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
                           ),
@@ -357,16 +371,15 @@ class _StatTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
           ),
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

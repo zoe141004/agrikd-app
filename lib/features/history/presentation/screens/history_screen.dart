@@ -52,17 +52,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       lastDate: now,
       initialDateRange:
           state.filterStartDate != null && state.filterEndDate != null
-              ? DateTimeRange(
-                  start: state.filterStartDate!,
-                  end: state.filterEndDate!,
-                )
-              : null,
+          ? DateTimeRange(
+              start: state.filterStartDate!,
+              end: state.filterEndDate!,
+            )
+          : null,
     );
 
     if (result != null) {
-      ref
-          .read(historyProvider.notifier)
-          .setDateRange(result.start, result.end);
+      ref.read(historyProvider.notifier).setDateRange(result.start, result.end);
     }
   }
 
@@ -81,8 +79,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 child: Text(
                   S.get('sort_by'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -91,9 +89,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               icon: Icons.arrow_downward,
               isSelected: state.sortBy == 'created_at DESC',
               onTap: () {
-                ref
-                    .read(historyProvider.notifier)
-                    .setSortBy('created_at DESC');
+                ref.read(historyProvider.notifier).setSortBy('created_at DESC');
                 Navigator.pop(context);
               },
             ),
@@ -102,9 +98,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               icon: Icons.arrow_upward,
               isSelected: state.sortBy == 'created_at ASC',
               onTap: () {
-                ref
-                    .read(historyProvider.notifier)
-                    .setSortBy('created_at ASC');
+                ref.read(historyProvider.notifier).setSortBy('created_at ASC');
                 Navigator.pop(context);
               },
             ),
@@ -113,9 +107,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               icon: Icons.trending_up,
               isSelected: state.sortBy == 'confidence DESC',
               onTap: () {
-                ref
-                    .read(historyProvider.notifier)
-                    .setSortBy('confidence DESC');
+                ref.read(historyProvider.notifier).setSortBy('confidence DESC');
                 Navigator.pop(context);
               },
             ),
@@ -141,8 +133,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 Text(
                   S.get('min_confidence'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -236,237 +228,238 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: Column(
-        children: [
-          // ── Search bar ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              decoration: InputDecoration(
-                hintText: S.get('search_history'),
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 20),
-                        onPressed: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                        },
-                      )
-                    : null,
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-            ),
-          ),
-
-          // ── Filter chip bar ──
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Row(
-              children: [
-                // Leaf type dropdown
-                PopupMenuButton<String?>(
-                  initialValue: state.filterLeafType,
-                  onSelected: (value) {
-                    ref.read(historyProvider.notifier).setFilter(value);
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem<String?>(
-                      value: null,
-                      child: Text(S.get('all_types')),
+            children: [
+              // ── Search bar ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  decoration: InputDecoration(
+                    hintText: S.get('search_history'),
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 20),
+                            onPressed: () {
+                              _searchController.clear();
+                              _onSearchChanged('');
+                            },
+                          )
+                        : null,
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    ...ModelConstants.models.values.map((model) {
-                      return PopupMenuItem<String?>(
-                        value: model.leafType,
-                        child: Text(model.localizedName(S.locale)),
-                      );
-                    }),
-                  ],
-                  child: state.filterLeafType != null
-                      ? InputChip(
-                          avatar: const Icon(Icons.filter_list, size: 18),
-                          label: Text(
-                            ModelConstants.getModel(state.filterLeafType!)
-                                .localizedName(S.locale),
-                          ),
-                          onPressed: () {},
-                          onDeleted: () {
-                            ref
-                                .read(historyProvider.notifier)
-                                .setFilter(null);
-                          },
-                          side: BorderSide(color: colorScheme.primary),
-                        )
-                      : Chip(
-                          avatar: const Icon(Icons.filter_list, size: 18),
-                          label: Text(S.get('all_types')),
-                        ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
                 ),
-                const SizedBox(width: 8),
+              ),
 
-                // Sort chip
-                ActionChip(
-                  avatar: const Icon(Icons.swap_vert, size: 18),
-                  label: Text(_sortLabel(state.sortBy)),
-                  onPressed: _showSortOptions,
+              // ── Filter chip bar ──
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
                 ),
-                const SizedBox(width: 8),
-
-                // Date chip
-                hasDateFilter
-                    ? InputChip(
-                        avatar:
-                            const Icon(Icons.calendar_today, size: 16),
-                        label: Text(
-                          '${DateFormat('MM/dd').format(state.filterStartDate!)} – ${DateFormat('MM/dd').format(state.filterEndDate!)}',
+                child: Row(
+                  children: [
+                    // Leaf type dropdown
+                    PopupMenuButton<String?>(
+                      initialValue: state.filterLeafType,
+                      onSelected: (value) {
+                        ref.read(historyProvider.notifier).setFilter(value);
+                      },
+                      itemBuilder: (context) => [
+                        PopupMenuItem<String?>(
+                          value: null,
+                          child: Text(S.get('all_types')),
                         ),
-                        onPressed: _pickDateRange,
-                        onDeleted: () {
-                          ref
-                              .read(historyProvider.notifier)
-                              .setDateRange(null, null);
-                        },
-                      )
-                    : ActionChip(
-                        avatar:
-                            const Icon(Icons.calendar_today, size: 16),
-                        label: Text(S.get('all_time')),
-                        onPressed: _pickDateRange,
-                      ),
-                const SizedBox(width: 8),
-
-                // Confidence chip
-                state.minConfidence != null
-                    ? InputChip(
-                        avatar: const Icon(Icons.speed, size: 16),
-                        label: Text(
-                          '≥ ${(state.minConfidence! * 100).toInt()}%',
-                        ),
-                        onPressed: _showConfidenceFilter,
-                        onDeleted: () {
-                          ref
-                              .read(historyProvider.notifier)
-                              .setMinConfidence(null);
-                        },
-                        side: BorderSide(color: colorScheme.primary),
-                      )
-                    : ActionChip(
-                        avatar: const Icon(Icons.speed, size: 16),
-                        label: Text(S.get('confidence')),
-                        onPressed: _showConfidenceFilter,
-                      ),
-              ],
-            ),
-          ),
-
-          // ── List ──
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () => ref.read(historyProvider.notifier).refresh(),
-              child: state.predictions.isEmpty && !state.isLoading
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.history,
-                            size: 64,
-                            color: colorScheme.outline,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            S.get('no_scans'),
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(color: colorScheme.outline),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            S.get('scans_appear_here'),
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      itemCount: state.predictions.length +
-                          (state.hasMore ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if (index >= state.predictions.length) {
-                          Future.microtask(() {
-                            ref.read(historyProvider.notifier).loadMore();
-                          });
-                          return const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(16),
-                              child: CircularProgressIndicator(),
-                            ),
+                        ...ModelConstants.models.values.map((model) {
+                          return PopupMenuItem<String?>(
+                            value: model.leafType,
+                            child: Text(model.localizedName(S.locale)),
                           );
-                        }
-
-                        final prediction = state.predictions[index];
-                        final confidence =
-                            (prediction.confidence * 100).toStringAsFixed(1);
-                        final predModelInfo =
-                            ModelConstants.getModel(prediction.leafType);
-
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  colorScheme.primaryContainer,
-                              child: Icon(
-                                prediction.leafType == 'tomato'
-                                    ? Icons.grass
-                                    : Icons.eco,
-                                color: colorScheme.onPrimaryContainer,
+                        }),
+                      ],
+                      child: state.filterLeafType != null
+                          ? InputChip(
+                              avatar: const Icon(Icons.filter_list, size: 18),
+                              label: Text(
+                                ModelConstants.getModel(
+                                  state.filterLeafType!,
+                                ).localizedName(S.locale),
                               ),
+                              onPressed: () {},
+                              onDeleted: () {
+                                ref
+                                    .read(historyProvider.notifier)
+                                    .setFilter(null);
+                              },
+                              side: BorderSide(color: colorScheme.primary),
+                            )
+                          : Chip(
+                              avatar: const Icon(Icons.filter_list, size: 18),
+                              label: Text(S.get('all_types')),
                             ),
-                            title: Text(
-                              predModelInfo.localizedClassName(
-                                  prediction.predictedClassName, S.locale),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Sort chip
+                    ActionChip(
+                      avatar: const Icon(Icons.swap_vert, size: 18),
+                      label: Text(_sortLabel(state.sortBy)),
+                      onPressed: _showSortOptions,
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Date chip
+                    hasDateFilter
+                        ? InputChip(
+                            avatar: const Icon(Icons.calendar_today, size: 16),
+                            label: Text(
+                              '${DateFormat('MM/dd').format(state.filterStartDate!)} – ${DateFormat('MM/dd').format(state.filterEndDate!)}',
                             ),
-                            subtitle: Text(
-                              S.fmt('sure_pct', [confidence]),
+                            onPressed: _pickDateRange,
+                            onDeleted: () {
+                              ref
+                                  .read(historyProvider.notifier)
+                                  .setDateRange(null, null);
+                            },
+                          )
+                        : ActionChip(
+                            avatar: const Icon(Icons.calendar_today, size: 16),
+                            label: Text(S.get('all_time')),
+                            onPressed: _pickDateRange,
+                          ),
+                    const SizedBox(width: 8),
+
+                    // Confidence chip
+                    state.minConfidence != null
+                        ? InputChip(
+                            avatar: const Icon(Icons.speed, size: 16),
+                            label: Text(
+                              '≥ ${(state.minConfidence! * 100).toInt()}%',
                             ),
-                            trailing: Text(
-                              _formatDate(prediction.createdAt),
-                              style:
-                                  Theme.of(context).textTheme.bodySmall,
-                            ),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => DetailScreen(
-                                      prediction: prediction),
+                            onPressed: _showConfidenceFilter,
+                            onDeleted: () {
+                              ref
+                                  .read(historyProvider.notifier)
+                                  .setMinConfidence(null);
+                            },
+                            side: BorderSide(color: colorScheme.primary),
+                          )
+                        : ActionChip(
+                            avatar: const Icon(Icons.speed, size: 16),
+                            label: Text(S.get('confidence')),
+                            onPressed: _showConfidenceFilter,
+                          ),
+                  ],
+                ),
+              ),
+
+              // ── List ──
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => ref.read(historyProvider.notifier).refresh(),
+                  child: state.predictions.isEmpty && !state.isLoading
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.history,
+                                size: 64,
+                                color: colorScheme.outline,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                S.get('no_scans'),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(color: colorScheme.outline),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                S.get('scans_appear_here'),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          itemCount:
+                              state.predictions.length +
+                              (state.hasMore ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (index >= state.predictions.length) {
+                              Future.microtask(() {
+                                ref.read(historyProvider.notifier).loadMore();
+                              });
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: CircularProgressIndicator(),
                                 ),
                               );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-            ),
+                            }
+
+                            final prediction = state.predictions[index];
+                            final confidence = (prediction.confidence * 100)
+                                .toStringAsFixed(1);
+                            final predModelInfo = ModelConstants.getModel(
+                              prediction.leafType,
+                            );
+
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: colorScheme.primaryContainer,
+                                  child: Icon(
+                                    prediction.leafType == 'tomato'
+                                        ? Icons.grass
+                                        : Icons.eco,
+                                    color: colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                                title: Text(
+                                  predModelInfo.localizedClassName(
+                                    prediction.predictedClassName,
+                                    S.locale,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(S.fmt('sure_pct', [confidence])),
+                                trailing: Text(
+                                  _formatDate(prediction.createdAt),
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          DetailScreen(prediction: prediction),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
         ),
       ),
     );

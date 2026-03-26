@@ -46,8 +46,9 @@ class Prediction {
       'predicted_class_index': predictedClassIndex,
       'predicted_class_name': predictedClassName,
       'confidence': confidence,
-      'all_confidences':
-          allConfidences != null ? jsonEncode(allConfidences) : null,
+      'all_confidences': allConfidences != null
+          ? jsonEncode(allConfidences)
+          : null,
       'inference_time_ms': inferenceTimeMs,
       'latitude': latitude,
       'longitude': longitude,
@@ -70,8 +71,8 @@ class Prediction {
       confidence: (map['confidence'] as num).toDouble(),
       allConfidences: map['all_confidences'] != null
           ? (jsonDecode(map['all_confidences'] as String) as List)
-              .map((e) => (e as num).toDouble())
-              .toList()
+                .map((e) => (e as num).toDouble())
+                .toList()
           : null,
       inferenceTimeMs: (map['inference_time_ms'] as num?)?.toDouble(),
       latitude: (map['latitude'] as num?)?.toDouble(),

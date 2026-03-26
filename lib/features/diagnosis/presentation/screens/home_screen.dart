@@ -24,11 +24,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: const [
-          _HomeBody(),
-          HistoryScreen(),
-          SettingsScreen(),
-        ],
+        children: const [_HomeBody(), HistoryScreen(), SettingsScreen()],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
@@ -67,9 +63,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final leafType = ref.read(selectedLeafTypeProvider);
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => CameraScreen(leafType: leafType),
-      ),
+      MaterialPageRoute(builder: (_) => CameraScreen(leafType: leafType)),
     );
   }
 }
@@ -100,11 +94,13 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
     final filteredModels = _searchQuery.isEmpty
         ? allModels
         : allModels
-            .where((m) =>
-                m.englishName.toLowerCase().contains(_searchQuery) ||
-                m.vietnameseName.toLowerCase().contains(_searchQuery) ||
-                m.leafType.toLowerCase().contains(_searchQuery))
-            .toList();
+              .where(
+                (m) =>
+                    m.englishName.toLowerCase().contains(_searchQuery) ||
+                    m.vietnameseName.toLowerCase().contains(_searchQuery) ||
+                    m.leafType.toLowerCase().contains(_searchQuery),
+              )
+              .toList();
 
     return SafeArea(
       child: Center(
@@ -134,7 +130,8 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
                     children: [
                       Text(
                         S.get('app_name'),
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: colorScheme.onSurface,
                             ),
@@ -143,8 +140,8 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
                       Text(
                         S.get('app_subtitle'),
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -154,7 +151,10 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
 
               // ── Quick guide ── (1 row of 4)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(12),
@@ -165,9 +165,9 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
                     Text(
                       S.get('quick_guide'),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface,
-                          ),
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -213,9 +213,9 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
               // ── Leaf type selector ──
               Text(
                 S.get('select_leaf_type'),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
 
@@ -254,8 +254,8 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
                     child: Text(
                       S.get('no_match'),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
@@ -325,8 +325,9 @@ class _LeafTypeItem extends StatelessWidget {
                     isSelected
                         ? Icons.check_circle_rounded
                         : Icons.radio_button_unchecked,
-                    color:
-                        isSelected ? colorScheme.primary : colorScheme.outline,
+                    color: isSelected
+                        ? colorScheme.primary
+                        : colorScheme.outline,
                     size: 24,
                   ),
                   const SizedBox(width: 14),
@@ -336,9 +337,7 @@ class _LeafTypeItem extends StatelessWidget {
                       children: [
                         Text(
                           modelInfo.localizedName(S.locale),
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
+                          style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(
                                 fontWeight: isSelected
                                     ? FontWeight.w600
@@ -351,20 +350,23 @@ class _LeafTypeItem extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           S.fmt('n_diseases', [modelInfo.diseaseCount]),
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: isSelected
-                                        ? colorScheme.onPrimaryContainer
-                                            .withValues(alpha: 0.7)
-                                        : colorScheme.onSurfaceVariant,
-                                  ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: isSelected
+                                    ? colorScheme.onPrimaryContainer.withValues(
+                                        alpha: 0.7,
+                                      )
+                                    : colorScheme.onSurfaceVariant,
+                              ),
                         ),
                       ],
                     ),
                   ),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: isSelected
                           ? colorScheme.primary.withValues(alpha: 0.15)
@@ -373,13 +375,12 @@ class _LeafTypeItem extends StatelessWidget {
                     ),
                     child: Text(
                       '${modelInfo.diseaseCount}',
-                      style:
-                          Theme.of(context).textTheme.labelMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: isSelected
-                                    ? colorScheme.primary
-                                    : colorScheme.onSurfaceVariant,
-                              ),
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: isSelected
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
@@ -396,14 +397,13 @@ class _LeafTypeItem extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Divider(
-                                height: 1,
-                                color: colorScheme.outlineVariant),
+                              height: 1,
+                              color: colorScheme.outlineVariant,
+                            ),
                             const SizedBox(height: 10),
                             Text(
                               S.get('detectable_diseases'),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelMedium
+                              style: Theme.of(context).textTheme.labelMedium
                                   ?.copyWith(
                                     fontWeight: FontWeight.w600,
                                     color: colorScheme.onPrimaryContainer,
@@ -411,23 +411,23 @@ class _LeafTypeItem extends StatelessWidget {
                             ),
                             const SizedBox(height: 6),
                             ...modelInfo.diseaseLabels.map((label) {
-                              final displayName =
-                                  modelInfo.localizedClassName(
-                                      label, S.locale);
+                              final displayName = modelInfo.localizedClassName(
+                                label,
+                                S.locale,
+                              );
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
                                 child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Padding(
-                                      padding:
-                                          const EdgeInsets.only(top: 6),
-                                      child: Icon(Icons.circle,
-                                          size: 6,
-                                          color: colorScheme
-                                              .onPrimaryContainer
-                                              .withValues(alpha: 0.6)),
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Icon(
+                                        Icons.circle,
+                                        size: 6,
+                                        color: colorScheme.onPrimaryContainer
+                                            .withValues(alpha: 0.6),
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
@@ -439,8 +439,7 @@ class _LeafTypeItem extends StatelessWidget {
                                             ?.copyWith(
                                               color: colorScheme
                                                   .onPrimaryContainer
-                                                  .withValues(
-                                                      alpha: 0.85),
+                                                  .withValues(alpha: 0.85),
                                             ),
                                       ),
                                     ),
@@ -453,9 +452,11 @@ class _LeafTypeItem extends StatelessWidget {
                                 padding: const EdgeInsets.only(top: 4),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.check_circle_outline,
-                                        size: 14,
-                                        color: Colors.green.shade700),
+                                    Icon(
+                                      Icons.check_circle_outline,
+                                      size: 14,
+                                      color: Colors.green.shade700,
+                                    ),
                                     const SizedBox(width: 6),
                                     Text(
                                       S.get('plus_healthy'),
@@ -510,18 +511,18 @@ class _StepItem extends StatelessWidget {
             child: Text(
               number,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: colorScheme.onPrimaryContainer,
-                  ),
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onPrimaryContainer,
+              ),
             ),
           ),
         ),
         const SizedBox(height: 4),
         Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,

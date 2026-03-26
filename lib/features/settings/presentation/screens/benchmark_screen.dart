@@ -70,15 +70,18 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         await service.loadModel(modelInfo.assetPath, leafType: leafType);
 
         // Warm-up
-        setState(() =>
-            _status = '${modelInfo.englishName}: ${S.get('warm_up')}...');
+        setState(
+          () => _status = '${modelInfo.englishName}: ${S.get('warm_up')}...',
+        );
         for (int i = 0; i < _warmUpRuns; i++) {
           service.runInference(dummyInput, modelInfo.numClasses);
         }
 
         // Timed runs
-        setState(() => _status =
-            '${modelInfo.englishName}: ${S.fmt('iterations', [_benchmarkRuns])}...');
+        setState(
+          () => _status =
+              '${modelInfo.englishName}: ${S.fmt('iterations', [_benchmarkRuns])}...',
+        );
         final latencies = <double>[];
         for (int i = 0; i < _benchmarkRuns; i++) {
           final result = service.runInference(dummyInput, modelInfo.numClasses);
@@ -89,20 +92,24 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         final mean = latencies.reduce((a, b) => a + b) / latencies.length;
         final minMs = latencies.first;
         final maxMs = latencies.last;
-        final p99Index = ((latencies.length * 0.99).ceil() - 1)
-            .clamp(0, latencies.length - 1);
+        final p99Index = ((latencies.length * 0.99).ceil() - 1).clamp(
+          0,
+          latencies.length - 1,
+        );
         final p99 = latencies[p99Index];
 
-        _results.add(_ModelBenchmark(
-          leafType: leafType,
-          delegate: service.delegateUsed,
-          modelSize: _modelSizes[leafType] ?? '~1 MB',
-          meanMs: mean,
-          minMs: minMs,
-          maxMs: maxMs,
-          p99Ms: p99,
-          fps: 1000.0 / mean,
-        ));
+        _results.add(
+          _ModelBenchmark(
+            leafType: leafType,
+            delegate: service.delegateUsed,
+            modelSize: _modelSizes[leafType] ?? '~1 MB',
+            meanMs: mean,
+            minMs: minMs,
+            maxMs: maxMs,
+            p99Ms: p99,
+            fps: 1000.0 / mean,
+          ),
+        );
 
         // Dispose between models for clean measurement
         service.dispose();
@@ -143,17 +150,37 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     final buf = StringBuffer();
     buf.writeln('# TFLite On-Device Benchmark');
     buf.writeln();
-    buf.writeln('| Metric | ${_results.map((r) => ModelConstants.getModel(r.leafType).englishName).join(' | ')} |');
+    buf.writeln(
+      '| Metric | ${_results.map((r) => ModelConstants.getModel(r.leafType).englishName).join(' | ')} |',
+    );
     buf.writeln('|--------|${_results.map((_) => '--------').join('|')}|');
-    buf.writeln('| Delegate | ${_results.map((r) => r.delegate).join(' | ')} |');
-    buf.writeln('| Model size | ${_results.map((r) => r.modelSize).join(' | ')} |');
-    buf.writeln('| Warm-up | ${_results.map((_) => '$_warmUpRuns runs').join(' | ')} |');
-    buf.writeln('| Iterations | ${_results.map((_) => '$_benchmarkRuns').join(' | ')} |');
-    buf.writeln('| Mean | ${_results.map((r) => '${r.meanMs.toStringAsFixed(2)} ms').join(' | ')} |');
-    buf.writeln('| Min | ${_results.map((r) => '${r.minMs.toStringAsFixed(2)} ms').join(' | ')} |');
-    buf.writeln('| Max | ${_results.map((r) => '${r.maxMs.toStringAsFixed(2)} ms').join(' | ')} |');
-    buf.writeln('| P99 | ${_results.map((r) => '${r.p99Ms.toStringAsFixed(2)} ms').join(' | ')} |');
-    buf.writeln('| FPS | ${_results.map((r) => r.fps.toStringAsFixed(1)).join(' | ')} |');
+    buf.writeln(
+      '| Delegate | ${_results.map((r) => r.delegate).join(' | ')} |',
+    );
+    buf.writeln(
+      '| Model size | ${_results.map((r) => r.modelSize).join(' | ')} |',
+    );
+    buf.writeln(
+      '| Warm-up | ${_results.map((_) => '$_warmUpRuns runs').join(' | ')} |',
+    );
+    buf.writeln(
+      '| Iterations | ${_results.map((_) => '$_benchmarkRuns').join(' | ')} |',
+    );
+    buf.writeln(
+      '| Mean | ${_results.map((r) => '${r.meanMs.toStringAsFixed(2)} ms').join(' | ')} |',
+    );
+    buf.writeln(
+      '| Min | ${_results.map((r) => '${r.minMs.toStringAsFixed(2)} ms').join(' | ')} |',
+    );
+    buf.writeln(
+      '| Max | ${_results.map((r) => '${r.maxMs.toStringAsFixed(2)} ms').join(' | ')} |',
+    );
+    buf.writeln(
+      '| P99 | ${_results.map((r) => '${r.p99Ms.toStringAsFixed(2)} ms').join(' | ')} |',
+    );
+    buf.writeln(
+      '| FPS | ${_results.map((r) => r.fps.toStringAsFixed(1)).join(' | ')} |',
+    );
     return buf.toString();
   }
 
@@ -162,9 +189,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('benchmark')),
-      ),
+      appBar: AppBar(title: Text(S.get('benchmark'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -178,8 +203,8 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                   Text(
                     S.get('benchmark_sub'),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
@@ -216,27 +241,31 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                     children: [
                       Text(
                         modelInfo.localizedName(S.locale),
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 8),
                       _BenchRow(S.get('delegate'), r.delegate),
                       _BenchRow(S.get('model_size'), r.modelSize),
                       _BenchRow(S.get('warm_up'), '$_warmUpRuns runs'),
-                      _BenchRow(
-                          S.get('iterations'),
-                          '$_benchmarkRuns'),
+                      _BenchRow(S.get('iterations'), '$_benchmarkRuns'),
                       const Divider(height: 16),
-                      _BenchRow(S.get('lat_mean'),
-                          '${r.meanMs.toStringAsFixed(2)} ms'),
-                      _BenchRow(S.get('lat_min'),
-                          '${r.minMs.toStringAsFixed(2)} ms'),
-                      _BenchRow(S.get('lat_max'),
-                          '${r.maxMs.toStringAsFixed(2)} ms'),
-                      _BenchRow(S.get('lat_p99'),
-                          '${r.p99Ms.toStringAsFixed(2)} ms'),
+                      _BenchRow(
+                        S.get('lat_mean'),
+                        '${r.meanMs.toStringAsFixed(2)} ms',
+                      ),
+                      _BenchRow(
+                        S.get('lat_min'),
+                        '${r.minMs.toStringAsFixed(2)} ms',
+                      ),
+                      _BenchRow(
+                        S.get('lat_max'),
+                        '${r.maxMs.toStringAsFixed(2)} ms',
+                      ),
+                      _BenchRow(
+                        S.get('lat_p99'),
+                        '${r.p99Ms.toStringAsFixed(2)} ms',
+                      ),
                       _BenchRow(S.get('fps'), r.fps.toStringAsFixed(1)),
                     ],
                   ),
@@ -258,7 +287,8 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                   child: FilledButton.icon(
                     onPressed: () {
                       Clipboard.setData(
-                          ClipboardData(text: _buildMarkdownReport()));
+                        ClipboardData(text: _buildMarkdownReport()),
+                      );
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text(S.get('report_copied'))),
                       );
@@ -292,14 +322,14 @@ class _BenchRow extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           Text(
             value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
           ),
         ],
       ),

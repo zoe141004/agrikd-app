@@ -29,17 +29,17 @@ class ConfidenceBar extends StatelessWidget {
                 child: Text(
                   label,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: isTop ? FontWeight.bold : null,
-                      ),
+                    fontWeight: isTop ? FontWeight.bold : null,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 '$percentage%',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: isTop ? FontWeight.bold : null,
-                      color: isTop ? colorScheme.primary : null,
-                    ),
+                  fontWeight: isTop ? FontWeight.bold : null,
+                  color: isTop ? colorScheme.primary : null,
+                ),
               ),
             ],
           ),

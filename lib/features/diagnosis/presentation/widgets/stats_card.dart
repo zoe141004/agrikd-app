@@ -22,8 +22,7 @@ class _StatsCardState extends ConsumerState<StatsCard> {
   }
 
   Future<void> _loadStats() async {
-    final stats =
-        await ref.read(predictionDaoProvider).getDetailedStatistics();
+    final stats = await ref.read(predictionDaoProvider).getDetailedStatistics();
     if (mounted) {
       setState(() => _stats = stats);
     }
@@ -48,8 +47,10 @@ class _StatsCardState extends ConsumerState<StatsCard> {
           children: [
             Row(
               children: [
-                Icon(Icons.analytics,
-                    color: Theme.of(context).colorScheme.primary),
+                Icon(
+                  Icons.analytics,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   S.get('your_stats'),
@@ -75,7 +76,9 @@ class _StatsCardState extends ConsumerState<StatsCard> {
                 if (topDiseases.isNotEmpty)
                   _MiniStat(
                     label: S.get('top_stat'),
-                    value: _shortenName(_localizedTopDisease(topDiseases.first)),
+                    value: _shortenName(
+                      _localizedTopDisease(topDiseases.first),
+                    ),
                     icon: Icons.trending_up,
                   ),
               ],
@@ -126,17 +129,17 @@ class _MiniStat extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

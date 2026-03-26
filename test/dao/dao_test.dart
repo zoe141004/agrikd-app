@@ -55,7 +55,10 @@ void main() {
 
       final burmese = await dao.getAll(leafType: 'burmese_grape_leaf');
       expect(burmese.length, greaterThanOrEqualTo(1));
-      expect(burmese.every((r) => r['leaf_type'] == 'burmese_grape_leaf'), isTrue);
+      expect(
+        burmese.every((r) => r['leaf_type'] == 'burmese_grape_leaf'),
+        isTrue,
+      );
     });
 
     test('getAll with minConfidence filter', () async {
@@ -217,7 +220,12 @@ void main() {
     });
 
     test('updateVersion modifies model entry', () async {
-      await dao.updateVersion('test_model', '1.1.0', 'assets/new.tflite', 'def456');
+      await dao.updateVersion(
+        'test_model',
+        '1.1.0',
+        'assets/new.tflite',
+        'def456',
+      );
       final model = await dao.getActive('test_model');
       expect(model!['version'], '1.1.0');
       expect(model['sha256_checksum'], 'def456');

@@ -62,7 +62,9 @@ void main() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      await container.read(historyProvider.notifier).setSortBy('confidence DESC');
+      await container
+          .read(historyProvider.notifier)
+          .setSortBy('confidence DESC');
 
       final state = container.read(historyProvider);
       expect(state.sortBy, 'confidence DESC');

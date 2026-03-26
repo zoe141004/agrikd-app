@@ -65,10 +65,7 @@ Future<void> main() async {
   }
 
   runApp(
-    UncontrolledProviderScope(
-      container: container,
-      child: const AgriKDApp(),
-    ),
+    UncontrolledProviderScope(container: container, child: const AgriKDApp()),
   );
 }
 
@@ -155,9 +152,7 @@ class _AgriKDAppState extends ConsumerState<AgriKDApp> {
       if (next.status == AuthStatus.passwordRecovery &&
           previous?.status != AuthStatus.passwordRecovery) {
         _navigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (_) => const ResetPasswordScreen(),
-          ),
+          MaterialPageRoute(builder: (_) => const ResetPasswordScreen()),
         );
       }
     });

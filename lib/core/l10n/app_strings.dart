@@ -64,8 +64,7 @@ class S {
     'camera_no_web':
         'Camera is not available on web.\nPick an image from your gallery instead.',
     'pick_gallery': 'Pick from Gallery',
-    'camera_needed':
-        'We need camera access to take photos of your leaves',
+    'camera_needed': 'We need camera access to take photos of your leaves',
     'open_settings': 'Open Settings',
     'camera_unavailable': 'Camera not available',
     'capture_failed': 'Could not take photo',
@@ -225,8 +224,7 @@ class S {
         'This email is already registered. Try logging in instead.',
     'err_email_rate_limit':
         'Too many attempts with this email. Please wait a few minutes and try again.',
-    'err_rate_limit':
-        'Too many requests. Please wait a moment and try again.',
+    'err_rate_limit': 'Too many requests. Please wait a moment and try again.',
     'err_network': 'No internet connection. Please check your network.',
     'err_google_signin_failed':
         'Google sign-in was interrupted. Please try again.',
@@ -240,13 +238,14 @@ class S {
     'err_model_not_loaded':
         'The AI model is still loading. Please wait a moment and try again.',
     'err_invalid_image': 'Could not read this image. Please pick another one.',
-    'err_image_too_large': 'This image is too large. Please use a smaller photo.',
-    'err_unsupported_format': 'Unsupported image format. Please use JPEG or PNG.',
+    'err_image_too_large':
+        'This image is too large. Please use a smaller photo.',
+    'err_unsupported_format':
+        'Unsupported image format. Please use JPEG or PNG.',
     'err_image_not_found': 'The image file was not found. Please try again.',
     'err_diagnosis_failed':
         'Could not analyze the leaf. Please try with a clearer photo.',
-    'err_benchmark_failed':
-        'Benchmark could not complete. Please try again.',
+    'err_benchmark_failed': 'Benchmark could not complete. Please try again.',
 
     // Benchmark
     'benchmark': 'Benchmark',
@@ -469,8 +468,7 @@ class S {
         'Email này đã được đăng ký. Hãy thử đăng nhập.',
     'err_email_rate_limit':
         'Quá nhiều lần thử với email này. Vui lòng đợi vài phút rồi thử lại.',
-    'err_rate_limit':
-        'Quá nhiều yêu cầu. Vui lòng đợi một chút rồi thử lại.',
+    'err_rate_limit': 'Quá nhiều yêu cầu. Vui lòng đợi một chút rồi thử lại.',
     'err_network': 'Không có kết nối mạng. Vui lòng kiểm tra internet.',
     'err_google_signin_failed':
         'Đăng nhập Google bị gián đoạn. Vui lòng thử lại.',
@@ -479,8 +477,7 @@ class S {
     'err_auth_generic': 'Đã xảy ra lỗi. Vui lòng thử lại.',
 
     // Friendly diagnosis errors
-    'err_model_corrupted':
-        'Tệp mô hình AI bị lỗi. Hãy thử cài lại ứng dụng.',
+    'err_model_corrupted': 'Tệp mô hình AI bị lỗi. Hãy thử cài lại ứng dụng.',
     'err_model_not_loaded':
         'Mô hình AI đang tải. Vui lòng đợi một chút rồi thử lại.',
     'err_invalid_image': 'Không thể đọc ảnh này. Vui lòng chọn ảnh khác.',

@@ -91,10 +91,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final currentUser = client.auth.currentUser;
 
       if (currentUser != null) {
-        state = AuthState(
-          status: AuthStatus.authenticated,
-          user: currentUser,
-        );
+        state = AuthState(status: AuthStatus.authenticated, user: currentUser);
       } else {
         state = const AuthState(status: AuthStatus.unauthenticated);
       }
@@ -102,15 +99,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       _authSub = client.auth.onAuthStateChange.listen((event) {
         final user = event.session?.user;
         if (event.event == AuthChangeEvent.passwordRecovery && user != null) {
-          state = AuthState(
-            status: AuthStatus.passwordRecovery,
-            user: user,
-          );
+          state = AuthState(status: AuthStatus.passwordRecovery, user: user);
         } else if (user != null) {
-          state = AuthState(
-            status: AuthStatus.authenticated,
-            user: user,
-          );
+          state = AuthState(status: AuthStatus.authenticated, user: user);
         } else {
           state = const AuthState(status: AuthStatus.unauthenticated);
         }
@@ -153,8 +144,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       // If email confirmation is required, user won't be authenticated yet.
       // Signal success so UI can show "check your email" message.
-      if (response.user != null &&
-          response.user!.emailConfirmedAt == null) {
+      if (response.user != null && response.user!.emailConfirmedAt == null) {
         state = state.copyWith(
           isLoading: false,
           status: AuthStatus.unauthenticated,
@@ -304,7 +294,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 }
 
-final authProvider =
-    StateNotifierProvider<AuthNotifier, AuthState>((ref) {
+final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   return AuthNotifier();
 });

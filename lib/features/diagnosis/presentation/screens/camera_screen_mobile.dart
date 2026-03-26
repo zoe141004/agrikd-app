@@ -120,9 +120,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       await _processImage(xFile.path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(S.get('capture_failed'))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(S.get('capture_failed'))));
         setState(() => _isProcessing = false);
       }
     }
@@ -154,8 +154,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content:
-                  Text(diagState.errorMessage ?? S.get('error_generic'))),
+            content: Text(diagState.errorMessage ?? S.get('error_generic')),
+          ),
         );
         setState(() => _isProcessing = false);
       }
@@ -196,7 +196,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
           children: [
             const CircularProgressIndicator(color: Colors.white),
             const SizedBox(height: 16),
-            Text(S.get('checking'), style: const TextStyle(color: Colors.white)),
+            Text(
+              S.get('checking'),
+              style: const TextStyle(color: Colors.white),
+            ),
           ],
         ),
       );
@@ -215,8 +218,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.camera_alt_outlined,
-                  size: 64, color: Colors.white54),
+              const Icon(
+                Icons.camera_alt_outlined,
+                size: 64,
+                color: Colors.white54,
+              ),
               const SizedBox(height: 16),
               Text(
                 S.get('camera_needed'),
@@ -245,8 +251,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.camera_alt_outlined,
-                size: 64, color: Colors.white54),
+            const Icon(
+              Icons.camera_alt_outlined,
+              size: 64,
+              color: Colors.white54,
+            ),
             const SizedBox(height: 16),
             Text(
               S.get('camera_unavailable'),

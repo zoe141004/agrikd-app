@@ -49,9 +49,18 @@ void main() {
       final enKeys = <String>{};
       // Access keys via get — can't directly access _strings, test behavior
       for (final key in [
-        'app_name', 'history', 'settings', 'scan', 'result',
-        'login', 'email', 'password',
-        'min_confidence', 'confidence', 'clear', 'apply',
+        'app_name',
+        'history',
+        'settings',
+        'scan',
+        'result',
+        'login',
+        'email',
+        'password',
+        'min_confidence',
+        'confidence',
+        'clear',
+        'apply',
         'offline_mode',
       ]) {
         enKeys.add(key);
@@ -59,8 +68,11 @@ void main() {
         final vi = S.get(key);
         S.setLocale('en');
         // Vietnamese should not return the key itself (meaning it exists)
-        expect(vi, isNot(equals(key)),
-            reason: 'Missing Vietnamese translation for key: $key');
+        expect(
+          vi,
+          isNot(equals(key)),
+          reason: 'Missing Vietnamese translation for key: $key',
+        );
       }
     });
   });

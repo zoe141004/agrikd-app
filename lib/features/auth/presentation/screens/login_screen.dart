@@ -36,10 +36,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    await ref.read(authProvider.notifier).signIn(
-          _emailController.text.trim(),
-          _passwordController.text,
-        );
+    await ref
+        .read(authProvider.notifier)
+        .signIn(_emailController.text.trim(), _passwordController.text);
   }
 
   @override
@@ -53,9 +52,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(S.get('login')),
-      ),
+      appBar: AppBar(title: Text(S.get('login'))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Form(
@@ -74,16 +71,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 S.get('login_heading'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 S.get('login_sub'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 48),
               TextFormField(
@@ -183,8 +180,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Text(
                       S.get('or'),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const Expanded(child: Divider()),
@@ -206,9 +203,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const RegisterScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
                   );
                 },
                 child: Text(S.get('no_account')),
