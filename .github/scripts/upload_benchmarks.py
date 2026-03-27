@@ -1,16 +1,66 @@
 """
-Upload benchmark results from evaluate_models.py to Supabase model_benchmarks table.
+Upload pipeline results to Supabase after model-pipeline.yml completes.
 
-Called by .github/workflows/model-pipeline.yml after evaluate completes.
-Reads the benchmark_report.md and parses metrics for each format (PyTorch, ONNX, TFLite).
+1. Upload converted .tflite to Supabase Storage
+2. Parse benchmark_report.md and write metrics to model_benchmarks table
+3. Update model_registry with accuracy, model_url, sha256_checksum
 
-Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION
+Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION,
+          TFLITE_SHA256, TFLITE_SIZE_MB
 """
 
 import json
 import os
 import re
 import sys
+import urllib.request
+import urllib.error
+import urllib.parse
+
+
+def supabase_request(url, headers, body=None, method="POST"):
+    """Make an HTTP request and return (success, response_body)."""
+    data = json.dumps(body, default=str).encode("utf-8") if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return True, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        return False, e.read().decode("utf-8")
+
+
+def upload_tflite_to_storage(supabase_url, service_key, leaf_type, version):
+    """Upload the converted .tflite file to Supabase Storage bucket 'models'."""
+    tflite_path = f"models/{leaf_type}/{leaf_type}_student.tflite"
+    if not os.path.exists(tflite_path):
+        print(f"[WARN] TFLite file not found: {tflite_path}")
+        return None
+
+    storage_path = f"{leaf_type}/v{version}/{leaf_type}_v{version}.tflite"
+    upload_url = f"{supabase_url}/storage/v1/object/models/{storage_path}"
+
+    with open(tflite_path, "rb") as f:
+        file_data = f.read()
+
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Content-Type": "application/octet-stream",
+        "x-upsert": "true",
+    }
+
+    req = urllib.request.Request(upload_url, data=file_data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            public_url = f"{supabase_url}/storage/v1/object/public/models/{storage_path}"
+            size_mb = len(file_data) / (1024 * 1024)
+            print(f"[OK] Uploaded .tflite to Storage: {public_url} ({size_mb:.2f} MB)")
+            return public_url
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8")
+        print(f"[FAIL] Storage upload failed: {e.code} — {error_body}")
+        return None
+
 
 def parse_benchmark_report(report_path):
     """Parse benchmark_report.md and extract metrics per format."""
@@ -20,7 +70,6 @@ def parse_benchmark_report(report_path):
     results = []
 
     # Parse main benchmark table
-    # Format: | Format | Size (MB) | Params (M) | FLOPs (M) | ms/img | FPS | Runtime Mem (MB) | Top-1 % | KL Div |
     table_match = re.search(
         r"### Benchmark Summary\s+\|(.+?)\n\|[-\s|]+\n((?:\|.+\n)+)",
         content, re.DOTALL
@@ -129,22 +178,57 @@ def main():
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     leaf_type = os.environ.get("LEAF_TYPE")
     version = os.environ.get("VERSION")
+    tflite_sha256 = os.environ.get("TFLITE_SHA256", "")
+    tflite_size_mb = os.environ.get("TFLITE_SIZE_MB", "")
 
     if not all([supabase_url, service_key, leaf_type, version]):
         print("[ERROR] Missing env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION")
         sys.exit(1)
 
+    api_headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Content-Type": "application/json",
+    }
+
+    # ── 1. Upload converted .tflite to Supabase Storage ──────────────────────
+    print("\n=== Step 1: Upload .tflite to Supabase Storage ===")
+    tflite_url = upload_tflite_to_storage(supabase_url, service_key, leaf_type, version)
+
+    # ── 2. Update model_registry with model_url + sha256 + accuracy ──────────
+    if tflite_url:
+        print("\n=== Step 2: Update model_registry ===")
+        registry_update = {
+            "model_url": tflite_url,
+            "sha256_checksum": tflite_sha256 or None,
+            "updated_at": "now()",
+        }
+
+        encoded_leaf = urllib.parse.quote(leaf_type, safe="")
+        encoded_ver = urllib.parse.quote(version, safe="")
+        url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
+        ok, resp = supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
+        if ok:
+            print(f"  [OK] model_registry updated: model_url={tflite_url[:60]}...")
+        else:
+            # Version might not match — try matching just leaf_type
+            url2 = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"
+            ok2, resp2 = supabase_request(url2, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
+            if ok2:
+                print(f"  [OK] model_registry updated (by leaf_type): model_url={tflite_url[:60]}...")
+            else:
+                print(f"  [WARN] Could not update model_registry: {resp2}")
+
+    # ── 3. Parse benchmark report and write to model_benchmarks ──────────────
     report_path = f"models/{leaf_type}/benchmark_report.md"
     if not os.path.exists(report_path):
-        print(f"[ERROR] Report not found: {report_path}")
-        sys.exit(1)
+        print(f"\n[WARN] Report not found: {report_path} — skipping benchmark upload")
+        print("[DONE] Pipeline upload complete (partial — no benchmarks).")
+        return
 
-    print(f"[*] Parsing benchmark report: {report_path}")
+    print(f"\n=== Step 3: Upload benchmark results ===")
     results = parse_benchmark_report(report_path)
     print(f"[*] Found {len(results)} format results")
-
-    # Write to Supabase via REST API (no SDK needed)
-    import urllib.request
 
     for r in results:
         payload = {
@@ -167,43 +251,30 @@ def main():
             "is_candidate": True,
         }
 
-        # Upsert: use Prefer: resolution=merge-duplicates header
         url = f"{supabase_url}/rest/v1/model_benchmarks"
-        headers = {
-            "apikey": service_key,
-            "Authorization": f"Bearer {service_key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",
-        }
+        ok, resp = supabase_request(url, {**api_headers, "Prefer": "resolution=merge-duplicates"}, payload)
+        if ok:
+            print(f"  [OK] {r['format']}: accuracy={r.get('accuracy')}, latency={r.get('latency_mean_ms')}ms")
+        else:
+            print(f"  [FAIL] {r['format']}: {resp}")
 
-        body = json.dumps(payload, default=str).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                print(f"  [OK] {r['format']}: accuracy={r.get('accuracy')}, latency={r.get('latency_mean_ms')}ms")
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            print(f"  [FAIL] {r['format']}: {e.code} — {error_body}")
-
-    # Also update model_registry accuracy_top1 from the TFLite result
+    # Update accuracy_top1 in model_registry from TFLite result
     tflite_result = next((r for r in results if r["format"] == "tflite"), None)
     if tflite_result and tflite_result.get("accuracy") is not None:
-        url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{leaf_type}&version=eq.{version}"
-        headers = {
-            "apikey": service_key,
-            "Authorization": f"Bearer {service_key}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        }
-        body = json.dumps({"accuracy_top1": tflite_result["accuracy"]}).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers=headers, method="PATCH")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                print(f"  [OK] Updated model_registry accuracy_top1 = {tflite_result['accuracy']}%")
-        except urllib.error.HTTPError as e:
-            print(f"  [WARN] Could not update model_registry: {e.code}")
+        encoded_leaf = urllib.parse.quote(leaf_type, safe="")
+        url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"
+        ok, resp = supabase_request(
+            url,
+            {**api_headers, "Prefer": "return=minimal"},
+            {"accuracy_top1": tflite_result["accuracy"]},
+            "PATCH"
+        )
+        if ok:
+            print(f"  [OK] model_registry accuracy_top1 = {tflite_result['accuracy']}%")
+        else:
+            print(f"  [WARN] Could not update accuracy: {resp}")
 
-    print("\n[DONE] Benchmark results uploaded to Supabase.")
+    print("\n[DONE] Pipeline upload complete.")
 
 
 if __name__ == "__main__":

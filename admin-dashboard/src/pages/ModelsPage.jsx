@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
-import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit, computeSHA256 } from '../lib/helpers'
+import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 import CustomTooltip from '../components/CustomTooltip'
 
@@ -21,8 +21,6 @@ export default function ModelsPage() {
   // Upload state
   const [uploadForm, setUploadForm] = useState({ leaf_type: '', display_name: '', version: '1.0.0', description: '', num_classes: '', class_labels_raw: '', is_new_leaf: false })
   const [uploadFile, setUploadFile] = useState(null)
-  const [uploadHash, setUploadHash] = useState('')
-  const [hashComputing, setHashComputing] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadMsg, setUploadMsg] = useState(null)
@@ -154,17 +152,6 @@ export default function ModelsPage() {
   }
 
   // ── Upload Tab ─────────────────────────────────────────────────────────────
-  const handleFileSelect = async (file) => {
-    setUploadFile(file)
-    if (!file) { setUploadHash(''); return }
-    setHashComputing(true)
-    try {
-      const hash = await computeSHA256(file)
-      setUploadHash(hash)
-    } catch { setUploadHash('') }
-    setHashComputing(false)
-  }
-
   const handleUpload = async (e) => {
     e.preventDefault()
     if (!uploadFile) { setUploadMsg({ type: 'error', text: 'Please select a model file.' }); return }
@@ -188,12 +175,12 @@ export default function ModelsPage() {
       }
       setUploadProgress(15)
 
-      // 2. Upload to Supabase Storage
+      // 2. Upload .pth checkpoint to Supabase Storage
       await ensureBucket(supabase, 'models')
       setUploadProgress(20)
 
       const ext = uploadFile.name.split('.').pop()
-      const storagePath = `${leaf_type}/v${version}/${display_name || leaf_type}_v${version}.${ext}`
+      const storagePath = `${leaf_type}/v${version}/${leaf_type}_v${version}_checkpoint.${ext}`
       setUploadProgress(40)
 
       const publicUrl = await uploadToStorage(supabase, 'models', storagePath, uploadFile)
@@ -209,8 +196,8 @@ export default function ModelsPage() {
         leaf_type,
         display_name: display_name || leaf_type,
         version,
-        model_url: publicUrl,
-        sha256_checksum: uploadHash || null,
+        model_url: null, // will be set by pipeline after conversion
+        sha256_checksum: null, // will be set by pipeline after conversion
         description: description || null,
         accuracy_top1: null, // will be computed by pipeline
         num_classes: num_classes ? parseInt(num_classes) : (classLabels.length || null),
@@ -225,25 +212,24 @@ export default function ModelsPage() {
 
       logAudit(supabase, 'model_uploaded', 'model', leaf_type, { version, display_name: display_name || leaf_type })
 
-      // 5. Auto-trigger pipeline
+      // 5. Auto-trigger full pipeline (convert + validate + evaluate)
       let pipelineMsg = ''
       try {
         const { ghToken } = getGitHubConfig()
         if (ghToken) {
-          await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type, version })
-          pipelineMsg = ' Evaluation pipeline triggered — results will appear in Benchmarks tab.'
+          await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type, version, model_url: publicUrl })
+          pipelineMsg = ' Full pipeline triggered (PTH → ONNX → TFLite → validate → evaluate). Results will appear in Benchmarks tab.'
           logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version, workflow: 'model-pipeline.yml' })
         } else {
-          pipelineMsg = ' Configure GitHub in Settings to auto-trigger evaluation pipeline.'
+          pipelineMsg = ' Configure GitHub in Settings to auto-trigger the pipeline.'
         }
       } catch (pipeErr) {
         pipelineMsg = ` Pipeline trigger failed: ${pipeErr.message}`
       }
 
       setUploadProgress(100)
-      setUploadMsg({ type: 'success', text: `Model "${display_name || leaf_type}" v${version} uploaded as inactive candidate.${pipelineMsg}` })
+      setUploadMsg({ type: 'success', text: `Checkpoint "${display_name || leaf_type}" v${version} uploaded. Pipeline will convert to ONNX + TFLite, validate, and evaluate.${pipelineMsg}` })
       setUploadFile(null)
-      setUploadHash('')
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadModels()
     } catch (err) {
@@ -267,8 +253,8 @@ export default function ModelsPage() {
       const { ghToken } = getGitHubConfig()
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations.')
       const targetModel = models.find(m => m.leaf_type === valTarget)
-      await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type: valTarget, version: targetModel?.version || '1.0.0' })
-      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}". Includes validation + full evaluation. Check Benchmarks tab for results.` })
+      await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type: valTarget, version: targetModel?.version || '1.0.0', model_url: targetModel?.model_url || '' })
+      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}". Includes convert + validation + full evaluation. Check Benchmarks tab for results.` })
       logAudit(supabase, 'pipeline_triggered', 'model', valTarget, { workflow: 'model-pipeline.yml' })
       setTimeout(loadGhRuns, 3000)
     } catch (err) {
@@ -594,9 +580,12 @@ export default function ModelsPage() {
           <div className="alert alert-info" style={{ marginBottom: 16 }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
             <div>
-              Upload a <strong>.tflite</strong> model file. It will be stored in Supabase Storage and registered as an <strong>inactive candidate</strong>.
-              The evaluation pipeline will run automatically to compute accuracy, latency, and other metrics.
-              Review results in the Benchmarks tab before activating.
+              Upload a <strong>.pth</strong> PyTorch checkpoint. The pipeline will automatically:
+              <br />1. Convert to <strong>ONNX</strong> and <strong>TFLite</strong> formats
+              <br />2. Validate cross-format consistency (PyTorch vs ONNX vs TFLite)
+              <br />3. Run full evaluation (accuracy, precision, recall, F1, latency, etc.)
+              <br />4. Upload the converted <strong>.tflite</strong> to Supabase Storage for OTA
+              <br />The model starts as <strong>inactive</strong> — review benchmarks before activating.
             </div>
           </div>
 
@@ -654,8 +643,8 @@ export default function ModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Model File (.tflite / .onnx / .pt) *</label>
-              <input ref={fileInputRef} type="file" accept=".tflite,.bin,.h5,.onnx,.pt,.keras" className="form-input" onChange={e => handleFileSelect(e.target.files[0])} style={{ padding: '7px 10px' }} />
+              <label className="form-label">Model Checkpoint (.pth) *</label>
+              <input ref={fileInputRef} type="file" accept=".pth,.pt,.bin" className="form-input" onChange={e => setUploadFile(e.target.files[0])} style={{ padding: '7px 10px' }} />
               {uploadFile && (
                 <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
                   Selected: <strong>{uploadFile.name}</strong> ({formatBytes(uploadFile.size)})
@@ -663,21 +652,15 @@ export default function ModelsPage() {
               )}
             </div>
 
-            {/* SHA-256 display */}
-            {(uploadHash || hashComputing) && (
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  SHA-256 Checksum
-                  <span title="SHA-256 is a cryptographic fingerprint of the model file. The mobile app uses it to verify the downloaded model hasn't been corrupted or tampered with." style={{ cursor: 'help', color: '#94a3b8', fontSize: 11, border: '1px solid #94a3b8', borderRadius: '50%', width: 14, height: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>?</span>
-                </label>
-                <div className="form-input font-mono" style={{ fontSize: 11, color: '#3d4f62', background: '#f8fafc', wordBreak: 'break-all', padding: '8px 10px' }}>
-                  {hashComputing ? 'Computing...' : uploadHash}
-                </div>
+            {/* SHA-256 will be computed by pipeline for the converted .tflite */}
+            {uploadFile && (
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, fontStyle: 'italic' }}>
+                SHA-256 checksum will be computed automatically for the converted .tflite file by the pipeline.
               </div>
             )}
 
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#166534' }}>
-              <strong>Pipeline:</strong> After upload, accuracy and metrics will be computed automatically by the evaluation pipeline (GitHub Actions). The model starts as <strong>inactive</strong> — review benchmarks before activating.
+              <strong>Full Pipeline:</strong> .pth → ONNX → TFLite → cross-format validation → full evaluation (accuracy, precision, recall, F1, latency, FPS, memory, model size, KL divergence). The converted <strong>.tflite</strong> and SHA-256 checksum will be set automatically. Model starts as <strong>inactive</strong> — review benchmarks before activating.
             </div>
 
             {uploading && (
@@ -697,8 +680,8 @@ export default function ModelsPage() {
             )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" className="btn" onClick={() => { setUploadFile(null); setUploadHash(''); setUploadMsg(null); if (fileInputRef.current) fileInputRef.current.value = '' }}>Clear</button>
-              <button type="submit" className="btn btn-primary" disabled={uploading || hashComputing}>
+              <button type="button" className="btn" onClick={() => { setUploadFile(null); setUploadMsg(null); if (fileInputRef.current) fileInputRef.current.value = '' }}>Clear</button>
+              <button type="submit" className="btn btn-primary" disabled={uploading}>
                 {uploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : 'Upload & Register'}
               </button>
             </div>
@@ -717,9 +700,10 @@ export default function ModelsPage() {
               Triggers the full model pipeline via GitHub Actions:
             </p>
             <div style={{ fontSize: 13, color: '#3d4f62', marginBottom: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, lineHeight: 1.8 }}>
-              <strong>1. Cross-format validation</strong> — Checks ONNX and TFLite produce consistent outputs vs PyTorch (tolerance: 1e-4, using 5 random inputs).<br />
-              <strong>2. Full evaluation</strong> — Runs all 3 formats on the real test dataset (15% stratified split). Measures accuracy, precision, recall, F1, latency, FPS, memory, model size, KL divergence.<br />
-              <strong>3. Results upload</strong> — Writes metrics to Supabase. View in Benchmarks tab.
+              <strong>1. Format conversion</strong> — Converts .pth checkpoint to ONNX (opset 17) and TFLite (via onnx2tf).<br />
+              <strong>2. Cross-format validation</strong> — Checks ONNX and TFLite produce consistent outputs vs PyTorch (tolerance: 1e-4, using 5 random inputs).<br />
+              <strong>3. Full evaluation</strong> — Runs all 3 formats on the real test dataset (15% stratified split). Measures accuracy, precision, recall, F1, latency, FPS, memory, model size, KL divergence.<br />
+              <strong>4. Upload results</strong> — Uploads converted .tflite to Supabase Storage, writes metrics to database. View in Benchmarks tab.
             </div>
 
             <div className="form-group">

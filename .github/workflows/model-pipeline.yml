@@ -1,4 +1,4 @@
-name: Model Pipeline (Validate + Evaluate)
+name: Model Pipeline (Convert + Validate + Evaluate)
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +8,10 @@ on:
         type: string
       version:
         description: 'Model version (e.g. 1.1.0)'
+        required: true
+        type: string
+      model_url:
+        description: 'Supabase Storage URL of the uploaded .pth checkpoint'
         required: true
         type: string
 
@@ -28,28 +32,57 @@ jobs:
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r mlops_pipeline/requirements.txt
-          pip install supabase
 
-      - name: Pull DVC data
+      - name: Pull DVC test data
         run: |
           pip install dvc dvc-gdrive
           dvc pull data/${{ inputs.leaf_type }}.dvc || echo "DVC pull skipped (no tracked data or credentials)"
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
-      - name: Run validation
+      - name: Download .pth checkpoint from Supabase
+        run: |
+          mkdir -p model_checkpoints_student
+          curl -L -o "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth" "${{ inputs.model_url }}"
+          ls -lh "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
+
+      - name: 'Step 1: Convert PTH → ONNX'
+        run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+
+      - name: 'Step 2: Convert ONNX → TFLite'
+        run: python mlops_pipeline/scripts/convert_onnx_to_tflite.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+
+      - name: 'Step 3: Cross-format validation'
         run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
         continue-on-error: true
 
-      - name: Run evaluation
+      - name: 'Step 4: Full evaluation'
         run: python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
-      - name: Write results to Supabase
+      - name: Compute SHA-256 of TFLite model
+        id: sha256
+        run: |
+          TFLITE_PATH="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student.tflite"
+          if [ -f "$TFLITE_PATH" ]; then
+            HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
+            SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
+            echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+            echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
+            echo "[OK] SHA-256: $HASH  Size: ${SIZE_MB} MB"
+          else
+            echo "[WARN] TFLite file not found: $TFLITE_PATH"
+            echo "hash=" >> "$GITHUB_OUTPUT"
+            echo "size_mb=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload .tflite to Supabase Storage + write results
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
           VERSION: ${{ inputs.version }}
+          TFLITE_SHA256: ${{ steps.sha256.outputs.hash }}
+          TFLITE_SIZE_MB: ${{ steps.sha256.outputs.size_mb }}
         run: python .github/scripts/upload_benchmarks.py
 
       - name: Upload artifacts
