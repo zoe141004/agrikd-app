@@ -1,0 +1,60 @@
+name: Model Pipeline (Validate + Evaluate)
+on:
+  workflow_dispatch:
+    inputs:
+      leaf_type:
+        description: 'Leaf type (e.g. tomato, burmese_grape_leaf)'
+        required: true
+        type: string
+      version:
+        description: 'Model version (e.g. 1.1.0)'
+        required: true
+        type: string
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: mlops_pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r mlops_pipeline/requirements.txt
+          pip install supabase
+
+      - name: Pull DVC data
+        run: |
+          pip install dvc dvc-gdrive
+          dvc pull data/${{ inputs.leaf_type }}.dvc || echo "DVC pull skipped (no tracked data or credentials)"
+        env:
+          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Run validation
+        run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        continue-on-error: true
+
+      - name: Run evaluation
+        run: python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+
+      - name: Write results to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          VERSION: ${{ inputs.version }}
+        run: python .github/scripts/upload_benchmarks.py
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-${{ inputs.leaf_type }}-v${{ inputs.version }}
+          path: models/${{ inputs.leaf_type }}/

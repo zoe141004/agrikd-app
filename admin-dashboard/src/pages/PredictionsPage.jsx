@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
+import { cleanLabel, downloadFile } from '../lib/helpers'
+import CustomTooltip from '../components/CustomTooltip'
 
 const PAGE_SIZE = 25
 
@@ -8,165 +11,249 @@ export default function PredictionsPage() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
-  const [filters, setFilters] = useState({ leafType: '', startDate: '', endDate: '' })
+  const [filters, setFilters] = useState({ leafType: '', startDate: '', endDate: '', minConf: '' })
+  const [selected, setSelected] = useState(null)
+  const [error, setError] = useState(null)
+  const [summary, setSummary] = useState({ avgConf: 0, highConf: 0, lowConf: 0, topDisease: '—', uniqueUsers: 0 })
+  const [classDist, setClassDist] = useState([])
 
-  useEffect(() => {
-    loadPredictions()
-  }, [page, filters])
+  useEffect(() => { loadPredictions() }, [page, filters])
+
+  const applyFilters = (query) => {
+    if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
+    if (filters.startDate) query = query.gte('created_at', filters.startDate)
+    if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
+    if (filters.minConf) query = query.gte('confidence', parseFloat(filters.minConf) / 100)
+    return query
+  }
 
   const loadPredictions = async () => {
     setLoading(true)
+    setError(null)
+    try {
+    const [{ data, count }, { data: statsRows }] = await Promise.all([
+      applyFilters(
+        supabase.from('predictions').select('*', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+      ),
+      applyFilters(
+        supabase.from('predictions').select('confidence, predicted_class_name, user_id')
+      ),
+    ])
 
-    let query = supabase
-      .from('predictions')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-
-    if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
-    if (filters.startDate) query = query.gte('created_at', filters.startDate)
-    if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
-
-    const { data, count } = await query
     setPredictions(data || [])
     setTotal(count || 0)
+
+    if (statsRows?.length) {
+      const avg = statsRows.reduce((s, r) => s + (r.confidence || 0), 0) / statsRows.length * 100
+      const high = statsRows.filter(r => r.confidence >= 0.8).length
+      const low = statsRows.filter(r => r.confidence < 0.5).length
+      const users = new Set(statsRows.map(r => r.user_id).filter(Boolean)).size
+      const diseaseMap = {}
+      statsRows.forEach(r => {
+        const d = cleanLabel(r.predicted_class_name)
+        diseaseMap[d] = (diseaseMap[d] || 0) + 1
+      })
+      const topDisease = Object.entries(diseaseMap).sort((a, b) => b[1] - a[1])[0]
+      setClassDist(Object.entries(diseaseMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })))
+      setSummary({
+        avgConf: avg.toFixed(1),
+        highConf: high,
+        lowConf: low,
+        topDisease: topDisease ? `${topDisease[0]} (${topDisease[1]})` : '—',
+        uniqueUsers: users,
+      })
+    } else {
+      setSummary({ avgConf: 0, highConf: 0, lowConf: 0, topDisease: '—', uniqueUsers: 0 })
+      setClassDist([])
+    }
+    } catch (err) { setError(err.message) }
     setLoading(false)
   }
 
-  const exportCSV = async () => {
-    let query = supabase
-      .from('predictions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10000)
+  const setFilter = (key, val) => { setPage(0); setFilters(f => ({ ...f, [key]: val })) }
 
+  const exportData = async (fmt) => {
+    try {
+    let query = supabase.from('predictions').select('*').order('created_at', { ascending: false }).limit(10000)
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
     if (filters.startDate) query = query.gte('created_at', filters.startDate)
     if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
-
+    if (filters.minConf) query = query.gte('confidence', parseFloat(filters.minConf) / 100)
     const { data } = await query
-    if (!data || data.length === 0) return
-
-    const headers = ['id', 'user_id', 'leaf_type', 'predicted_class_name', 'confidence', 'latitude', 'longitude', 'notes', 'created_at']
-    const csv = [
-      headers.join(','),
-      ...data.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(','))
-    ].join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `agrikd-predictions-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const exportJSON = async () => {
-    let query = supabase
-      .from('predictions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10000)
-
-    if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
-    if (filters.startDate) query = query.gte('created_at', filters.startDate)
-    if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
-
-    const { data } = await query
-    if (!data) return
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `agrikd-predictions-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    if (!data?.length) return
+    const filename = `agrikd-predictions-${new Date().toISOString().slice(0, 10)}`
+    if (fmt === 'csv') {
+      const headers = ['id', 'user_id', 'leaf_type', 'predicted_class_name', 'confidence', 'notes', 'model_version', 'created_at']
+      const csv = [headers.join(','), ...data.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(','))].join('\n')
+      downloadFile(csv, `${filename}.csv`, 'text/csv')
+    } else {
+      downloadFile(JSON.stringify(data, null, 2), `${filename}.json`, 'application/json')
+    }
+    } catch (err) { setError('Export failed: ' + err.message) }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   return (
     <>
-      <h1 className="page-title">Predictions</h1>
-
-      <div className="filters">
-        <select
-          value={filters.leafType}
-          onChange={(e) => { setPage(0); setFilters({ ...filters, leafType: e.target.value }) }}
-        >
-          <option value="">All Leaf Types</option>
-          <option value="tomato">Tomato</option>
-          <option value="burmese_grape_leaf">Burmese Grape Leaf</option>
-        </select>
-        <input
-          type="date"
-          value={filters.startDate}
-          onChange={(e) => { setPage(0); setFilters({ ...filters, startDate: e.target.value }) }}
-          placeholder="Start Date"
-        />
-        <input
-          type="date"
-          value={filters.endDate}
-          onChange={(e) => { setPage(0); setFilters({ ...filters, endDate: e.target.value }) }}
-          placeholder="End Date"
-        />
-        <button className="btn" onClick={exportCSV}>Export CSV</button>
-        <button className="btn" onClick={exportJSON}>Export JSON</button>
+      {error && <div className="alert alert-error" style={{ marginBottom: 16 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg><div>{error}</div></div>}
+      <div className="page-header">
+        <h1 className="page-title">Predictions</h1>
+        <p className="page-subtitle">Browse and export all leaf disease prediction records</p>
       </div>
+
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 16 }}>
+        {[
+          { label: 'Total Records', value: total.toLocaleString(), accent: '#16a34a' },
+          { label: 'Avg Confidence', value: `${summary.avgConf}%`, accent: '#0284c7' },
+          { label: 'High Conf (≥80%)', value: summary.highConf.toLocaleString(), accent: '#065f46' },
+          { label: 'Low Conf (<50%)', value: summary.lowConf.toLocaleString(), accent: '#dc2626' },
+          { label: 'Unique Users', value: summary.uniqueUsers, accent: '#7c3aed' },
+        ].map(s => (
+          <div key={s.label} className="stat-card" style={{ padding: '14px 16px' }}>
+            <div className="stat-card-accent" style={{ background: s.accent }} />
+            <div className="stat-label">{s.label}</div>
+            <div className="stat-value" style={{ fontSize: 22 }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {total > 0 && (
+        <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
+          <div style={{ fontSize: 13, color: '#3d4f62' }}>
+            <strong style={{ color: '#121c28' }}>Most Detected:</strong> {summary.topDisease}
+            <span style={{ color: '#94a3b8', margin: '0 12px' }}>|</span>
+            <strong style={{ color: '#121c28' }}>High/Low Ratio:</strong> {summary.lowConf > 0 ? (summary.highConf / summary.lowConf).toFixed(1) + ':1' : summary.highConf > 0 ? 'All high' : '—'}
+          </div>
+        </div>
+      )}
+
+      {classDist.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <div>
+              <div className="card-label">Class Distribution</div>
+              <div className="card-title">Predictions by Disease Class{filters.leafType ? ` — ${filters.leafType}` : ''}</div>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={Math.max(180, classDist.length * 32)}>
+            <BarChart data={classDist} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(0,0,0,0.05)" />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 11, fill: '#3d4f62' }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} />
+              <Bar dataKey="count" name="Predictions" fill="#16a34a" radius={[0, 4, 4, 0]}>
+                {classDist.map((_, i) => <Cell key={i} fill={`rgba(22,163,74,${Math.max(0.3, 1 - i * 0.08)})`} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div className="card">
-        <p className="text-muted mb-2">
-          Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
-        </p>
+        <div className="filters">
+          <select value={filters.leafType} onChange={e => setFilter('leafType', e.target.value)}>
+            <option value="">All Leaf Types</option>
+            <option value="tomato">Tomato</option>
+            <option value="burmese_grape_leaf">Burmese Grape Leaf</option>
+          </select>
+          <input type="date" value={filters.startDate} onChange={e => setFilter('startDate', e.target.value)} />
+          <input type="date" value={filters.endDate} onChange={e => setFilter('endDate', e.target.value)} />
+          <select value={filters.minConf} onChange={e => setFilter('minConf', e.target.value)}>
+            <option value="">All Confidence</option>
+            <option value="80">High ≥ 80%</option>
+            <option value="50">Medium ≥ 50%</option>
+            <option value="0">All (incl. low)</option>
+          </select>
+          <button className="btn" onClick={() => exportData('csv')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+            Export CSV
+          </button>
+          <button className="btn" onClick={() => exportData('json')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+            Export JSON
+          </button>
+        </div>
 
-        {loading ? <p>Loading...</p> : (
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Leaf Type</th>
-                <th>Disease</th>
-                <th>Confidence</th>
-                <th>Location</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {predictions.map(p => (
-                <tr key={p.id}>
-                  <td>{p.id}</td>
-                  <td>{p.leaf_type}</td>
-                  <td>{cleanLabel(p.predicted_class_name)}</td>
-                  <td>
-                    <span className={`badge ${p.confidence >= 0.8 ? 'badge-green' : p.confidence >= 0.5 ? 'badge-yellow' : 'badge-red'}`}>
-                      {(p.confidence * 100).toFixed(1)}%
-                    </span>
-                  </td>
-                  <td>
-                    {p.latitude && p.longitude
-                      ? `${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)}`
-                      : '—'}
-                  </td>
-                  <td>{new Date(p.created_at).toLocaleDateString()}</td>
+        {loading ? (
+          <div className="loading-spinner"><div className="spinner" /></div>
+        ) : (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Leaf Type</th>
+                  <th>Disease</th>
+                  <th>Confidence</th>
+                  <th>Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {predictions.map(p => (
+                  <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(selected?.id === p.id ? null : p)}>
+                    <td className="font-mono" style={{ color: '#94a3b8' }}>{String(p.id).slice(0, 8)}…</td>
+                    <td><span className="badge badge-primary">{p.leaf_type}</span></td>
+                    <td>{cleanLabel(p.predicted_class_name)}</td>
+                    <td>
+                      <span className={`badge ${p.confidence >= 0.8 ? 'badge-green' : p.confidence >= 0.5 ? 'badge-yellow' : 'badge-red'}`}>
+                        {(p.confidence * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td style={{ color: '#64748b', fontSize: 12 }}>{new Date(p.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+                {predictions.length === 0 && (
+                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: '#94a3b8' }}>No predictions found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
-          <button className="btn" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</button>
-          <span className="text-muted" style={{ padding: '8px 0' }}>Page {page + 1} of {totalPages || 1}</span>
-          <button className="btn" disabled={page + 1 >= totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+        <div className="pagination">
+          <span className="pagination-info">Showing {total === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()} records</span>
+          <div className="pagination-controls">
+            <button className="btn btn-sm" disabled={page === 0} onClick={() => setPage(0)}>«</button>
+            <button className="btn btn-sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹ Prev</button>
+            <span style={{ padding: '4px 10px', fontSize: 13, color: '#64748b' }}>Page {page + 1} of {totalPages || 1}</span>
+            <button className="btn btn-sm" disabled={page + 1 >= totalPages} onClick={() => setPage(p => p + 1)}>Next ›</button>
+            <button className="btn btn-sm" disabled={page + 1 >= totalPages} onClick={() => setPage(totalPages - 1)}>»</button>
+          </div>
         </div>
       </div>
+
+      {selected && (
+        <div className="modal-overlay" onClick={() => setSelected(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Prediction Detail</span>
+              <button className="modal-close" onClick={() => setSelected(null)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13 }}>
+              {[
+                ['ID', selected.id],
+                ['User ID', selected.user_id],
+                ['Leaf Type', selected.leaf_type],
+                ['Disease', cleanLabel(selected.predicted_class_name)],
+                ['Confidence', `${(selected.confidence * 100).toFixed(2)}%`],
+                ['Model Version', selected.model_version || '—'],
+                ['Date', new Date(selected.created_at).toLocaleString()],
+                ['Notes', selected.notes || '—'],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <div style={{ fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8', marginBottom: 2 }}>{k}</div>
+                  <div style={{ color: '#121c28', wordBreak: 'break-all' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
-}
-
-function cleanLabel(name) {
-  if (!name) return 'Unknown'
-  return name.replace(/^[A-Za-z]+___/, '').replace(/_/g, ' ')
 }

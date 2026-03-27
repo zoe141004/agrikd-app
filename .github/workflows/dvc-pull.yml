@@ -1,0 +1,21 @@
+name: DVC Pull
+on:
+  workflow_dispatch:
+
+jobs:
+  dvc-pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install DVC
+        run: pip install dvc dvc-gdrive
+
+      - name: DVC Pull
+        run: dvc pull -v
+        env:
+          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}

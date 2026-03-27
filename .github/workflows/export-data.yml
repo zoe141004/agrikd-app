@@ -1,0 +1,55 @@
+name: Export Data to DVC
+on:
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install dvc dvc-gdrive requests
+
+      - name: Export predictions from Supabase
+        run: |
+          python -c "
+          import requests, json, os
+          url = os.environ['SUPABASE_URL']
+          key = os.environ['SUPABASE_SERVICE_KEY']
+          headers = {'apikey': key, 'Authorization': f'Bearer {key}'}
+          offset, all_rows = 0, []
+          while True:
+              resp = requests.get(f'{url}/rest/v1/predictions?select=*&order=created_at.desc&offset={offset}&limit=1000', headers=headers)
+              rows = resp.json()
+              if not rows: break
+              all_rows.extend(rows)
+              offset += 1000
+              if len(rows) < 1000: break
+          os.makedirs('data/exports', exist_ok=True)
+          with open('data/exports/predictions_snapshot.json', 'w') as f:
+              json.dump(all_rows, f, indent=2)
+          print(f'Exported {len(all_rows)} predictions')
+          "
+
+      - name: DVC add and push
+        run: |
+          dvc add data/exports/predictions_snapshot.json
+          dvc push
+        env:
+          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Commit DVC tracking file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/exports/*.dvc data/exports/.gitignore
+          git diff --cached --quiet || git commit -m "chore: update exported predictions snapshot"
+          git push
