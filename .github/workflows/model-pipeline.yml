@@ -44,7 +44,19 @@ jobs:
       - name: Pull DVC test data
         run: |
           pip install dvc dvc-gdrive
-          dvc pull data/${{ inputs.leaf_type }}.dvc || echo "DVC pull skipped (no tracked data or credentials)"
+          # DVC files are at repo root: data_<leaf_type>.dvc (not data/<leaf_type>.dvc)
+          DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+          if [ -f "$DVC_FILE" ]; then
+            echo "Found DVC file: $DVC_FILE"
+            dvc pull "$DVC_FILE"
+            echo "Test data contents:"
+            ls -la "data/${{ inputs.leaf_type }}/" || echo "Data directory not found after pull"
+          else
+            echo "[ERROR] DVC file not found: $DVC_FILE"
+            echo "Available .dvc files:"
+            ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
+            exit 1
+          fi
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
@@ -65,7 +77,14 @@ jobs:
         continue-on-error: true
 
       - name: 'Step 4: Full evaluation'
-        run: python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: |
+          DATA_DIR="data/${{ inputs.leaf_type }}"
+          if [ ! -d "$DATA_DIR" ]; then
+            echo "[ERROR] Test data not found at $DATA_DIR — cannot evaluate without real data"
+            exit 1
+          fi
+          echo "Test data found: $(ls "$DATA_DIR" | wc -l) class folders"
+          python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
       - name: Compute SHA-256 of TFLite model
         id: sha256
