@@ -1,11 +1,15 @@
 # AgriKD — Model format conversion (PTH → ONNX → TFLite)
 # Used by: model-pipeline.yml, ci.yml (model-conversion, model-validation)
+# Versions pinned to match local dev env (venv_mlops)
 numpy>=1.21
 onnx==1.17.0
 onnxruntime>=1.16
 onnx2tf==1.28.8
 tf-keras
+ai-edge-litert
+psutil
 onnx-graphsurgeon==0.5.8
 sng4onnx==2.0.1
+sne4onnx==2.0.1
 onnxsim==0.6.2
 tensorflow-cpu>=2.15
