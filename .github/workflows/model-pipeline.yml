@@ -44,6 +44,8 @@ jobs:
       - name: Pull DVC test data
         run: |
           pip install dvc dvc-gdrive
+          # Tell DVC to use service account (not OAuth) on CI
+          dvc remote modify gdrive gdrive_use_service_account true
           # DVC files are at repo root: data_<leaf_type>.dvc (not data/<leaf_type>.dvc)
           DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
           if [ -f "$DVC_FILE" ]; then
