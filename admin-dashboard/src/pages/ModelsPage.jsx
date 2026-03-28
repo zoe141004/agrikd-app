@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, useRef } from 'react'
+import { useState, useEffect, Fragment, useRef, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
@@ -42,7 +42,54 @@ export default function ModelsPage() {
   const [versions, setVersions] = useState([])
   const [expandedVersions, setExpandedVersions] = useState(null)
 
-  useEffect(() => { loadModels() }, [])
+  // Pipeline tracking
+  const [pipelineStatus, setPipelineStatus] = useState(null) // null | 'triggered' | 'queued' | 'in_progress' | 'completed' | 'failure'
+  const [pipelineRun, setPipelineRun] = useState(null) // { url, conclusion, runNumber }
+  const [pipelineDismissed, setPipelineDismissed] = useState(false)
+  const pollingRef = useRef(null)
+  const pipelineTriggeredAtRef = useRef(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
+  }, [])
+
+  const pollPipelineStatus = useCallback(async () => {
+    const data = await getGitHubWorkflowRuns('model-pipeline.yml')
+    if (!data?.workflow_runs?.length) return
+    setGhRuns(data)
+    // Find the run triggered after our dispatch
+    const triggeredAt = pipelineTriggeredAtRef.current
+    const latestRun = triggeredAt
+      ? data.workflow_runs.find(r => new Date(r.created_at) >= new Date(triggeredAt - 30000))
+      : data.workflow_runs[0]
+    if (!latestRun) return
+    const status = latestRun.status === 'completed' ? (latestRun.conclusion || 'completed') : latestRun.status
+    setPipelineRun({ url: latestRun.html_url, conclusion: latestRun.conclusion, runNumber: latestRun.run_number })
+    setPipelineStatus(status)
+    setPipelineDismissed(false)
+    if (latestRun.status === 'completed') {
+      stopPolling()
+      loadModels() // refresh benchmarks
+    }
+  }, [stopPolling])
+
+  const startPolling = useCallback(() => {
+    stopPolling()
+    pipelineTriggeredAtRef.current = Date.now()
+    setPipelineStatus('triggered')
+    setPipelineDismissed(false)
+    setPipelineRun(null)
+    // First poll after 5s (GitHub needs time to register the run), then every 15s
+    setTimeout(() => {
+      pollPipelineStatus()
+      pollingRef.current = setInterval(pollPipelineStatus, 15000)
+    }, 5000)
+  }, [stopPolling, pollPipelineStatus])
+
+  // Cleanup polling on unmount
+  useEffect(() => () => stopPolling(), [stopPolling])
+
+  useEffect(() => { loadModels(); loadGhRuns() }, [])
 
   const loadModels = async () => {
     setLoading(true)
@@ -87,26 +134,34 @@ export default function ModelsPage() {
     setValidating(v => ({ ...v, [m.id]: true }))
     setValidateResult(r => ({ ...r, [m.id]: null }))
     try {
-      const issues = []
-      if (!m.model_url) issues.push('No model URL configured')
-      else {
+      const errors = []
+      const warnings = []
+      // Required fields
+      if (!m.class_labels?.length) errors.push('No class labels configured')
+      if (!m.num_classes) errors.push('Number of classes not set')
+      // Model URL — warn if missing, error if broken
+      if (!m.model_url) {
+        warnings.push('No model URL configured (bundled models don\'t need one)')
+      } else {
         try {
           const res = await fetch(m.model_url, { method: 'HEAD', signal: AbortSignal.timeout(6000) })
-          if (!res.ok) issues.push(`Model URL returned HTTP ${res.status}`)
+          if (!res.ok) errors.push(`Model URL returned HTTP ${res.status}`)
           else {
             const size = res.headers.get('content-length')
-            if (size && parseInt(size) < 1024) issues.push('Model file seems too small (< 1 KB)')
+            if (size && parseInt(size) < 1024) errors.push('Model file seems too small (< 1 KB)')
           }
-        } catch { issues.push('Model URL unreachable or CORS blocked') }
+        } catch { warnings.push('Model URL unreachable or CORS blocked') }
       }
-      if (!m.sha256_checksum) issues.push('No SHA-256 checksum recorded')
-      if (!m.class_labels?.length) issues.push('No class labels configured')
-      if (!m.accuracy_top1) issues.push('No accuracy metric recorded')
-      if (!m.num_classes) issues.push('Number of classes not set')
-      // Check if benchmarks exist
+      // SHA-256
+      if (!m.sha256_checksum || m.sha256_checksum === 'pending') {
+        warnings.push('No SHA-256 checksum recorded (pipeline will compute after conversion)')
+      }
+      if (!m.accuracy_top1) warnings.push('No accuracy metric recorded')
+      // Benchmarks
       const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
-      if (!hasBench) issues.push('No benchmark evaluation results')
-      setValidateResult(r => ({ ...r, [m.id]: { ok: issues.length === 0, issues } }))
+      if (!hasBench) warnings.push('No benchmark evaluation results')
+      const issues = [...errors, ...warnings]
+      setValidateResult(r => ({ ...r, [m.id]: { ok: errors.length === 0, issues, errors, warnings } }))
     } finally {
       setValidating(v => ({ ...v, [m.id]: false }))
     }
@@ -186,22 +241,23 @@ export default function ModelsPage() {
       const publicUrl = await uploadToStorage(supabase, 'models', storagePath, uploadFile)
       setUploadProgress(70)
 
-      // 3. Parse class labels
+      // 3. Parse class labels, fallback to existing model data
       const classLabels = class_labels_raw
         ? class_labels_raw.split('\n').map(l => l.trim()).filter(Boolean)
-        : []
+        : (existing?.class_labels || [])
+      const finalNumClasses = num_classes ? parseInt(num_classes) : (classLabels.length || existing?.num_classes || null)
 
       // 4. Register as INACTIVE candidate (not auto-activated)
       const payload = {
         leaf_type,
-        display_name: display_name || leaf_type,
+        display_name: display_name || existing?.display_name || leaf_type,
         version,
         model_url: publicUrl, // temporary: points to .pth; pipeline will update to .tflite URL
         sha256_checksum: 'pending', // will be set by pipeline after conversion
-        description: description || null,
+        description: description || existing?.description || null,
         accuracy_top1: null, // will be computed by pipeline
-        num_classes: num_classes ? parseInt(num_classes) : (classLabels.length || null),
-        class_labels: classLabels.length ? classLabels : null,
+        num_classes: finalNumClasses,
+        class_labels: classLabels.length ? classLabels : (existing?.class_labels || null),
         is_active: false, // inactive until admin reviews benchmarks
         updated_at: new Date().toISOString(),
       }
@@ -218,7 +274,8 @@ export default function ModelsPage() {
         const { ghToken } = getGitHubConfig()
         if (ghToken) {
           await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type, version, model_url: publicUrl })
-          pipelineMsg = ' Full pipeline triggered (PTH → ONNX → TFLite → validate → evaluate). Results will appear in Benchmarks tab.'
+          pipelineMsg = ' Full pipeline triggered — track progress in the status banner above.'
+          startPolling()
           logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version, workflow: 'model-pipeline.yml' })
         } else {
           pipelineMsg = ' Configure GitHub in Settings to auto-trigger the pipeline.'
@@ -254,9 +311,9 @@ export default function ModelsPage() {
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations.')
       const targetModel = models.find(m => m.leaf_type === valTarget)
       await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type: valTarget, version: targetModel?.version || '1.0.0', model_url: targetModel?.model_url || '' })
-      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}". Includes convert + validation + full evaluation. Check Benchmarks tab for results.` })
+      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}". Track progress in the status banner above.` })
+      startPolling()
       logAudit(supabase, 'pipeline_triggered', 'model', valTarget, { workflow: 'model-pipeline.yml' })
-      setTimeout(loadGhRuns, 3000)
     } catch (err) {
       setValMsg({ type: 'error', text: err.message })
     } finally {
@@ -272,6 +329,8 @@ export default function ModelsPage() {
     versions.filter(v => v.leaf_type === leafType)
 
   const accuracyChartData = models.filter(m => m.accuracy_top1).map(m => ({ name: m.display_name || m.leaf_type, accuracy: parseFloat(m.accuracy_top1) }))
+
+  const pipelineRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /><span>Loading models…</span></div>
 
@@ -297,6 +356,40 @@ export default function ModelsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── Pipeline Status Banner ── */}
+      {pipelineStatus && !pipelineDismissed && (() => {
+        const isRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
+        const isSuccess = pipelineStatus === 'success' || (pipelineStatus === 'completed')
+        const isFailed = ['failure', 'cancelled', 'timed_out'].includes(pipelineStatus)
+        const bg = isRunning ? '#fef9c3' : isSuccess ? '#dcfce7' : '#fee2e2'
+        const border = isRunning ? '#facc15' : isSuccess ? '#22c55e' : '#ef4444'
+        const color = isRunning ? '#854d0e' : isSuccess ? '#166534' : '#991b1b'
+        const statusLabels = { triggered: 'Pipeline dispatched, waiting for GitHub...', queued: 'Pipeline queued...', in_progress: 'Pipeline running...' }
+        return (
+          <div style={{ padding: '12px 16px', marginBottom: 16, borderRadius: 8, border: `1px solid ${border}`, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color }}>
+              {isRunning && <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2, borderColor: `${border} transparent ${border} transparent` }} />}
+              {isSuccess && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
+              {isFailed && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>}
+              <div>
+                <strong style={{ fontWeight: 600 }}>
+                  {isRunning ? statusLabels[pipelineStatus] || 'Pipeline running...'
+                    : isSuccess ? 'Pipeline completed successfully!'
+                    : `Pipeline failed (${pipelineStatus})`}
+                </strong>
+                {isRunning && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Convert PTH → ONNX → TFLite → Validate → Evaluate → Upload results</div>}
+                {isSuccess && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Benchmark results are now available in the Benchmarks tab.</div>}
+                {pipelineRun?.runNumber && <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(Run #{pipelineRun.runNumber})</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {pipelineRun?.url && <a href={pipelineRun.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color, textDecoration: 'underline' }}>View on GitHub</a>}
+              {!isRunning && <button onClick={() => setPipelineDismissed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color, fontSize: 16, padding: '0 4px', lineHeight: 1 }}>&times;</button>}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Registry Tab ── */}
       {tab === 'Registry' && (
@@ -354,14 +447,19 @@ export default function ModelsPage() {
                       {validateResult[m.id] && (
                         <tr key={`vr-${m.id}`}>
                           <td colSpan={8} style={{ padding: '8px 12px 12px' }}>
-                            <div className={`alert ${validateResult[m.id].ok ? 'alert-success' : 'alert-warn'}`}>
+                            <div className={`alert ${validateResult[m.id].ok ? (validateResult[m.id].warnings?.length ? 'alert-warn' : 'alert-success') : 'alert-warn'}`}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                 {validateResult[m.id].ok ? <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/> : <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>}
                               </svg>
                               <div>
-                                {validateResult[m.id].ok
-                                  ? 'All quick checks passed — model URL reachable, metadata complete, benchmarks available.'
-                                  : validateResult[m.id].issues.map((iss, i) => <div key={i}>⚠ {iss}</div>)}
+                                {validateResult[m.id].ok && !validateResult[m.id].warnings?.length
+                                  ? 'All checks passed — model URL reachable, metadata complete, benchmarks available.'
+                                  : <>
+                                      {(validateResult[m.id].errors || []).map((e, i) => <div key={`e${i}`} style={{ color: '#dc2626' }}>&#x2716; {e}</div>)}
+                                      {(validateResult[m.id].warnings || []).map((w, i) => <div key={`w${i}`} style={{ color: '#d97706' }}>&#x26A0; {w}</div>)}
+                                      {validateResult[m.id].ok && <div style={{ marginTop: 4, color: '#16a34a' }}>No critical issues — model is operational.</div>}
+                                    </>
+                                }
                               </div>
                             </div>
                           </td>
@@ -596,7 +694,21 @@ export default function ModelsPage() {
                 {uploadForm.is_new_leaf
                   ? <input className="form-input" placeholder="e.g. corn, pepper, mango" value={uploadForm.leaf_type} onChange={e => setUploadForm(f => ({ ...f, leaf_type: e.target.value }))} required />
                   : (
-                    <select className="form-input" value={uploadForm.leaf_type} onChange={e => setUploadForm(f => ({ ...f, leaf_type: e.target.value }))}>
+                    <select className="form-input" value={uploadForm.leaf_type} onChange={e => {
+                      const lt = e.target.value
+                      const existing = models.find(m => m.leaf_type === lt)
+                      if (existing) {
+                        const labels = Array.isArray(existing.class_labels) ? existing.class_labels.join('\n') : ''
+                        // Auto-bump version: 1.0.0 → 1.1.0
+                        const curVer = existing.version || '1.0.0'
+                        const parts = curVer.split('.')
+                        parts[1] = String(parseInt(parts[1] || '0') + 1)
+                        const nextVer = parts.join('.')
+                        setUploadForm(f => ({ ...f, leaf_type: lt, display_name: existing.display_name || '', num_classes: String(existing.num_classes || ''), class_labels_raw: labels, version: nextVer }))
+                      } else {
+                        setUploadForm(f => ({ ...f, leaf_type: lt }))
+                      }
+                    }}>
                       <option value="">Select existing leaf type…</option>
                       {models.map(m => <option key={m.leaf_type} value={m.leaf_type}>{m.display_name} ({m.leaf_type})</option>)}
                     </select>
@@ -681,8 +793,8 @@ export default function ModelsPage() {
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className="btn" onClick={() => { setUploadFile(null); setUploadMsg(null); if (fileInputRef.current) fileInputRef.current.value = '' }}>Clear</button>
-              <button type="submit" className="btn btn-primary" disabled={uploading}>
-                {uploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : 'Upload & Register'}
+              <button type="submit" className="btn btn-primary" disabled={uploading || pipelineRunning}>
+                {uploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : pipelineRunning ? 'Pipeline Running…' : 'Upload & Register'}
               </button>
             </div>
           </form>
@@ -726,8 +838,8 @@ export default function ModelsPage() {
               </div>
             )}
 
-            <button className="btn btn-primary" onClick={runValidation} disabled={valRunning || !valTarget}>
-              {valRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Running…</> : 'Run Pipeline'}
+            <button className="btn btn-primary" onClick={runValidation} disabled={valRunning || !valTarget || pipelineRunning}>
+              {valRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Running…</> : pipelineRunning ? 'Pipeline Running…' : 'Run Pipeline'}
             </button>
           </div>
 

@@ -14,7 +14,7 @@ onnxsim>=0.4
 # TFLite conversion
 ai-edge-torch>=0.2
 onnx2tf>=1.20
-tensorflow>=2.15
+tensorflow-cpu>=2.15
 
 # Evaluation & Benchmarking
 psutil>=5.9
