@@ -29,17 +29,15 @@ def supabase_request(url, headers, body=None, method="POST"):
         return False, e.read().decode("utf-8")
 
 
-def upload_tflite_to_storage(supabase_url, service_key, leaf_type, version):
-    """Upload the converted .tflite file to Supabase Storage bucket 'models'."""
-    tflite_path = f"models/{leaf_type}/{leaf_type}_student.tflite"
-    if not os.path.exists(tflite_path):
-        print(f"[WARN] TFLite file not found: {tflite_path}")
+def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
+    """Upload a file to Supabase Storage bucket 'models'. Returns public URL or None."""
+    if not os.path.exists(local_path):
+        print(f"  [SKIP] File not found: {local_path}")
         return None
 
-    storage_path = f"{leaf_type}/v{version}/{leaf_type}_v{version}.tflite"
     upload_url = f"{supabase_url}/storage/v1/object/models/{storage_path}"
 
-    with open(tflite_path, "rb") as f:
+    with open(local_path, "rb") as f:
         file_data = f.read()
 
     headers = {
@@ -54,12 +52,34 @@ def upload_tflite_to_storage(supabase_url, service_key, leaf_type, version):
         with urllib.request.urlopen(req) as resp:
             public_url = f"{supabase_url}/storage/v1/object/public/models/{storage_path}"
             size_mb = len(file_data) / (1024 * 1024)
-            print(f"[OK] Uploaded .tflite to Storage: {public_url} ({size_mb:.2f} MB)")
+            ext = os.path.splitext(local_path)[1]
+            print(f"  [OK] Uploaded {ext}: {public_url} ({size_mb:.2f} MB)")
             return public_url
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
-        print(f"[FAIL] Storage upload failed: {e.code} — {error_body}")
+        print(f"  [FAIL] Upload {local_path} failed: {e.code} — {error_body}")
         return None
+
+
+def upload_all_models(supabase_url, service_key, leaf_type, version):
+    """Upload PTH, ONNX, and TFLite models to Supabase Storage. Returns dict of URLs."""
+    prefix = f"{leaf_type}/v{version}"
+    models_dir = f"models/{leaf_type}"
+    checkpoint_dir = "model_checkpoints_student"
+
+    files = [
+        (f"{checkpoint_dir}/{leaf_type}_student.pth", f"{prefix}/{leaf_type}_v{version}_checkpoint.pth"),
+        (f"{models_dir}/{leaf_type}_student.onnx",    f"{prefix}/{leaf_type}_v{version}.onnx"),
+        (f"{models_dir}/{leaf_type}_student.tflite",   f"{prefix}/{leaf_type}_v{version}.tflite"),
+    ]
+
+    urls = {}
+    for local_path, storage_path in files:
+        url = upload_file_to_storage(supabase_url, service_key, local_path, storage_path)
+        ext = os.path.splitext(local_path)[1].lstrip(".")
+        urls[ext] = url
+
+    return urls
 
 
 def parse_benchmark_report(report_path):
@@ -191,9 +211,10 @@ def main():
         "Content-Type": "application/json",
     }
 
-    # ── 1. Upload converted .tflite to Supabase Storage ──────────────────────
-    print("\n=== Step 1: Upload .tflite to Supabase Storage ===")
-    tflite_url = upload_tflite_to_storage(supabase_url, service_key, leaf_type, version)
+    # ── 1. Upload all model formats to Supabase Storage ─────────────────────
+    print("\n=== Step 1: Upload model files to Supabase Storage ===")
+    model_urls = upload_all_models(supabase_url, service_key, leaf_type, version)
+    tflite_url = model_urls.get("tflite")
 
     # ── 2. Update model_registry with model_url + sha256 + accuracy ──────────
     if tflite_url:
@@ -240,6 +261,13 @@ def main():
     else:
         print(f"  [WARN] Could not clear old benchmarks: {resp_del}")
 
+    # Map format name to uploaded URL
+    format_url_map = {
+        "pytorch": model_urls.get("pth"),
+        "onnx": model_urls.get("onnx"),
+        "tflite": model_urls.get("tflite"),
+    }
+
     for r in results:
         payload = {
             "leaf_type": leaf_type,
@@ -258,6 +286,7 @@ def main():
             "params_m": r.get("params_m"),
             "memory_mb": r.get("memory_mb"),
             "kl_divergence": r.get("kl_divergence"),
+            "model_url": format_url_map.get(r["format"]),
             "is_candidate": True,
         }
 

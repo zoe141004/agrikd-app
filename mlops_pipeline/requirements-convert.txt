@@ -3,5 +3,5 @@
 numpy>=1.21
 onnx>=1.14
 onnxruntime>=1.16
-onnx2tf>=1.20
+onnx2tf==1.28.8
 tensorflow-cpu>=2.15
