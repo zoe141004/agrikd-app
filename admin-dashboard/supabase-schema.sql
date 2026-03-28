@@ -294,7 +294,6 @@ CREATE TABLE IF NOT EXISTS model_benchmarks (
   params_m float,
   memory_mb float,
   kl_divergence float,
-  model_url text,
   is_candidate boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   UNIQUE(leaf_type, version, format)

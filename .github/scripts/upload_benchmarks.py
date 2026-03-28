@@ -261,13 +261,6 @@ def main():
     else:
         print(f"  [WARN] Could not clear old benchmarks: {resp_del}")
 
-    # Map format name to uploaded URL
-    format_url_map = {
-        "pytorch": model_urls.get("pth"),
-        "onnx": model_urls.get("onnx"),
-        "tflite": model_urls.get("tflite"),
-    }
-
     for r in results:
         payload = {
             "leaf_type": leaf_type,
@@ -286,7 +279,6 @@ def main():
             "params_m": r.get("params_m"),
             "memory_mb": r.get("memory_mb"),
             "kl_divergence": r.get("kl_divergence"),
-            "model_url": format_url_map.get(r["format"]),
             "is_candidate": True,
         }
 

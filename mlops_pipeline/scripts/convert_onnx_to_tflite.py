@@ -60,7 +60,7 @@ def convert_onnx_to_tflite(input_path, output_path, quantize="none"):
         if result.returncode != 0:
             print(f"[!] onnx2tf subprocess also failed:\n{result.stderr[-500:]}")
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return
+            sys.exit(1)
 
     # onnx2tf creates the tflite file inside the output directory
     generated_tflite = os.path.join(temp_dir, "model_float32.tflite")
