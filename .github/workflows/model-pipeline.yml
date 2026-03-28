@@ -71,22 +71,38 @@ jobs:
         run: |
           mkdir -p model_checkpoints_student
           PTH_FILE="model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
-          # Try public URL first, then authenticated download
-          curl -fSL -o "$PTH_FILE" "${{ inputs.model_url }}" 2>/dev/null || {
-            echo "Public download failed, trying authenticated..."
-            # Convert public URL to authenticated API URL
-            STORAGE_PATH=$(echo "${{ inputs.model_url }}" | sed 's|.*/storage/v1/object/public/||')
-            curl -fSL -o "$PTH_FILE" \
-              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-              "$SUPABASE_URL/storage/v1/object/$STORAGE_PATH"
-          }
-          # Verify it's a valid file (not HTML error page)
+          echo "Model URL: ${{ inputs.model_url }}"
+
+          # Extract storage path from URL and use authenticated download
+          STORAGE_PATH=$(echo "${{ inputs.model_url }}" | grep -oP 'storage/v1/object/public/\K.*' || echo "")
+          if [ -z "$STORAGE_PATH" ]; then
+            echo "[ERROR] Could not parse storage path from URL"
+            exit 1
+          fi
+          echo "Storage path: $STORAGE_PATH"
+
+          # Always use authenticated download (bucket may be private)
+          AUTH_URL="$SUPABASE_URL/storage/v1/object/authenticated/$STORAGE_PATH"
+          echo "Auth URL: $AUTH_URL"
+          HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$AUTH_URL")
+          echo "HTTP status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "[ERROR] Download failed with HTTP $HTTP_CODE"
+            cat "$PTH_FILE" 2>/dev/null | head -5
+            exit 1
+          fi
+
+          FILE_SIZE=$(stat --format=%s "$PTH_FILE")
           FILE_TYPE=$(file -b "$PTH_FILE" | head -1)
-          echo "Downloaded: $(ls -lh "$PTH_FILE" | awk '{print $5}') — Type: $FILE_TYPE"
-          if echo "$FILE_TYPE" | grep -qi "html\|text\|xml"; then
-            echo "[ERROR] Downloaded file is not a valid checkpoint (got $FILE_TYPE)"
-            head -5 "$PTH_FILE"
+          echo "Downloaded: $FILE_SIZE bytes — Type: $FILE_TYPE"
+
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "[ERROR] File too small ($FILE_SIZE bytes), likely an error response:"
+            cat "$PTH_FILE"
             exit 1
           fi
         env:
