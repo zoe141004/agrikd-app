@@ -70,8 +70,28 @@ jobs:
       - name: Download .pth checkpoint
         run: |
           mkdir -p model_checkpoints_student
-          curl -fSL -o "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth" "${{ inputs.model_url }}"
-          ls -lh "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
+          PTH_FILE="model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
+          # Try public URL first, then authenticated download
+          curl -fSL -o "$PTH_FILE" "${{ inputs.model_url }}" 2>/dev/null || {
+            echo "Public download failed, trying authenticated..."
+            # Convert public URL to authenticated API URL
+            STORAGE_PATH=$(echo "${{ inputs.model_url }}" | sed 's|.*/storage/v1/object/public/||')
+            curl -fSL -o "$PTH_FILE" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              "$SUPABASE_URL/storage/v1/object/$STORAGE_PATH"
+          }
+          # Verify it's a valid file (not HTML error page)
+          FILE_TYPE=$(file -b "$PTH_FILE" | head -1)
+          echo "Downloaded: $(ls -lh "$PTH_FILE" | awk '{print $5}') — Type: $FILE_TYPE"
+          if echo "$FILE_TYPE" | grep -qi "html\|text\|xml"; then
+            echo "[ERROR] Downloaded file is not a valid checkpoint (got $FILE_TYPE)"
+            head -5 "$PTH_FILE"
+            exit 1
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: 'Convert PTH → ONNX'
         run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
