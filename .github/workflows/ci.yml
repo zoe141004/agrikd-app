@@ -76,13 +76,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: mlops_pipeline/requirements.txt
+          cache-dependency-path: mlops_pipeline/requirements-convert.txt
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r mlops_pipeline/requirements.txt
+          pip install -r mlops_pipeline/requirements-convert.txt
+          pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
       - name: Run Tomato pipeline
         run: |
@@ -118,13 +118,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: mlops_pipeline/requirements.txt
+          cache-dependency-path: mlops_pipeline/requirements-convert.txt
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r mlops_pipeline/requirements.txt
+          pip install -r mlops_pipeline/requirements-convert.txt
+          pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
       - name: Download model artifacts
         uses: actions/download-artifact@v4

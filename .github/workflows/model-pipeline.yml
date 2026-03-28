@@ -31,61 +31,66 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
-          cache-dependency-path: mlops_pipeline/requirements.txt
+          cache-dependency-path: mlops_pipeline/requirements-evaluate.txt
 
-      - name: Install dependencies
+      - name: Install all dependencies
         run: |
           pip install --upgrade pip
-          pip install tensorflow-cpu>=2.15
-          pip install -r mlops_pipeline/requirements.txt
-          # Pin torch CPU to match local dev environment (2.4.1)
+          pip install dvc dvc-gdrive
+          pip install -r mlops_pipeline/requirements-evaluate.txt
           pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
       - name: Pull DVC test data
         run: |
-          pip install dvc dvc-gdrive
-          # Tell DVC to use service account (not OAuth) on CI
           dvc remote modify gdrive gdrive_use_service_account true
-          # DVC files are at repo root: data_<leaf_type>.dvc (not data/<leaf_type>.dvc)
           DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
-          if [ -f "$DVC_FILE" ]; then
-            echo "Found DVC file: $DVC_FILE"
-            dvc pull "$DVC_FILE"
-            echo "Test data contents:"
-            ls -la "data/${{ inputs.leaf_type }}/" || echo "Data directory not found after pull"
-          else
+          if [ ! -f "$DVC_FILE" ]; then
             echo "[ERROR] DVC file not found: $DVC_FILE"
-            echo "Available .dvc files:"
             ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
             exit 1
           fi
+          echo "Found DVC file: $DVC_FILE"
+          for attempt in 1 2 3; do
+            echo "DVC pull attempt $attempt/3..."
+            if dvc pull "$DVC_FILE"; then
+              echo "DVC pull succeeded on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "[ERROR] DVC pull failed after 3 attempts"
+              exit 1
+            fi
+            echo "Retrying in 10s..."
+            sleep 10
+          done
+          echo "Test data: $(find data/${{ inputs.leaf_type }} -type f | wc -l) files"
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
-      - name: Download .pth checkpoint from Supabase
+      - name: Download .pth checkpoint
         run: |
           mkdir -p model_checkpoints_student
-          curl -L -o "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth" "${{ inputs.model_url }}"
+          curl -fSL -o "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth" "${{ inputs.model_url }}"
           ls -lh "model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
 
-      - name: 'Step 1: Convert PTH → ONNX'
+      - name: 'Convert PTH → ONNX'
         run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
-      - name: 'Step 2: Convert ONNX → TFLite'
+      - name: 'Convert ONNX → TFLite'
         run: python mlops_pipeline/scripts/convert_onnx_to_tflite.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
-      - name: 'Step 3: Cross-format validation'
+      - name: 'Cross-format validation'
         run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
         continue-on-error: true
 
-      - name: 'Step 4: Full evaluation'
+      - name: 'Full evaluation on real test data'
         run: |
           DATA_DIR="data/${{ inputs.leaf_type }}"
           if [ ! -d "$DATA_DIR" ]; then
-            echo "[ERROR] Test data not found at $DATA_DIR — cannot evaluate without real data"
+            echo "[ERROR] Test data not found at $DATA_DIR"
             exit 1
           fi
-          echo "Test data found: $(ls "$DATA_DIR" | wc -l) class folders"
+          echo "Test data: $(ls "$DATA_DIR" | wc -l) class folders"
           python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
       - name: Compute SHA-256 of TFLite model
@@ -104,7 +109,7 @@ jobs:
             echo "size_mb=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload .tflite to Supabase Storage + write results
+      - name: Upload results to Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

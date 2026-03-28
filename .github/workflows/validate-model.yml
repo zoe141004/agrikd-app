@@ -17,18 +17,24 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
-          cache-dependency-path: mlops_pipeline/requirements.txt
+          cache-dependency-path: mlops_pipeline/requirements-evaluate.txt
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r mlops_pipeline/requirements.txt
+          pip install dvc dvc-gdrive
+          pip install -r mlops_pipeline/requirements-evaluate.txt
+          pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
       - name: Pull DVC data
         run: |
-          pip install dvc dvc-gdrive
-          dvc pull data/${{ inputs.leaf_type }}.dvc || echo "DVC pull skipped (no tracked data or credentials)"
+          dvc remote modify gdrive gdrive_use_service_account true
+          DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+          for attempt in 1 2 3; do
+            if dvc pull "$DVC_FILE"; then break; fi
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep 10
+          done
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 

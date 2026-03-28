@@ -1,0 +1,7 @@
+# AgriKD — Model format conversion (PTH → ONNX → TFLite)
+# Used by: model-pipeline.yml, ci.yml (model-conversion, model-validation)
+numpy>=1.21
+onnx>=1.14
+onnxruntime>=1.16
+onnx2tf>=1.20
+tensorflow-cpu>=2.15
