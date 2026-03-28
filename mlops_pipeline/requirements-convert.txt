@@ -5,4 +5,7 @@ onnx>=1.14
 onnxruntime>=1.16
 onnx2tf==1.28.8
 tf-keras
+onnx-graphsurgeon
+sng4onnx
+onnxsim
 tensorflow-cpu>=2.15
