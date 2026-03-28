@@ -11,8 +11,8 @@ onnx>=1.14
 onnxruntime>=1.16
 onnxsim>=0.4
 
-# TFLite conversion
-ai-edge-torch>=0.2
+# TFLite conversion (onnx2tf path: ONNX → TFLite)
+# ai-edge-torch only needed for direct PTH → TFLite (Linux only, not used in CI pipeline)
 onnx2tf>=1.20
 tensorflow-cpu>=2.15
 
