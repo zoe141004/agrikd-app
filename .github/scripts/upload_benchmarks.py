@@ -121,8 +121,8 @@ def parse_benchmark_report(report_path):
 
     # Parse per-class classification metrics per format
     class_sections = re.findall(
-        r"### (\w+) — Per-Class Metrics\s+\|(.+?)\n\|[-\s|]+\n((?:\|.+\n)+)",
-        content, re.DOTALL
+        r"### (\w+) \u2014 Per-Class Metrics\s+\|([^\n]+)\n\|[-\s|]+\n((?:\|[^\n]+\n)+)",
+        content
     )
     for fmt_name, headers_str, rows_str in class_sections:
         fmt_lower = fmt_name.lower()

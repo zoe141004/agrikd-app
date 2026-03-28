@@ -98,47 +98,53 @@ def validate_models(
     num_classes: int = 10,
     num_samples: int = 5,
     atol: float = 1e-4,
+    tflite_atol: float = 5e-3,
 ):
     """
     Validate all model formats produce consistent outputs.
-    
+
     Args:
         checkpoint_path: Path to original .pth checkpoint.
         onnx_path: Path to .onnx model (optional).
         tflite_path: Path to .tflite model (optional).
         num_classes: Number of output classes.
         num_samples: Number of random inputs to test.
-        atol: Absolute tolerance for output comparison.
+        atol: Absolute tolerance for ONNX comparison.
+        tflite_atol: Absolute tolerance for TFLite comparison (higher due to conversion precision loss).
     """
     print("\n" + "=" * 60)
     print("  AgriKD: Cross-Format Model Validation")
     print("=" * 60)
-    
+
+    # Load PyTorch model once — reuse for all samples to keep BatchNorm stats consistent
+    model = load_student_from_checkpoint(checkpoint_path, num_classes)
+
     all_passed = True
-    
+
     for i in range(num_samples):
         print(f"\n--- Sample {i + 1}/{num_samples} ---")
-        
+
         # Generate random input (NCHW format)
         np.random.seed(42 + i)
         input_data = np.random.randn(1, 3, 224, 224).astype(np.float32)
-        
+
         # PyTorch reference
-        pytorch_output = run_pytorch_inference(checkpoint_path, num_classes, input_data)
+        with torch.no_grad():
+            pytorch_output = model(torch.from_numpy(input_data)).numpy()
         print(f"  PyTorch output: {pytorch_output[0][:5]}... (showing first 5)")
-        
+
         # ONNX comparison
         if onnx_path and os.path.exists(onnx_path):
             onnx_output = run_onnx_inference(onnx_path, input_data)
             if not compare_outputs("PyTorch", pytorch_output, "ONNX", onnx_output, atol):
                 all_passed = False
-        
-        # TFLite comparison
+
+        # TFLite comparison (uses higher tolerance due to NCHW→NHWC + FlatBuffer precision)
         if tflite_path and os.path.exists(tflite_path):
             tflite_output = run_tflite_inference(tflite_path, input_data)
-            if not compare_outputs("PyTorch", pytorch_output, "TFLite", tflite_output, atol):
+            if not compare_outputs("PyTorch", pytorch_output, "TFLite", tflite_output, tflite_atol):
                 all_passed = False
-    
+
     # Summary
     print(f"\n{'=' * 60}")
     if all_passed:
@@ -146,7 +152,7 @@ def validate_models(
     else:
         print(f"  [FAIL] SOME VALIDATIONS FAILED - check outputs above")
     print(f"{'=' * 60}")
-    
+
     return all_passed
 
 
