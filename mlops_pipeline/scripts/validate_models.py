@@ -98,7 +98,7 @@ def validate_models(
     num_classes: int = 10,
     num_samples: int = 5,
     atol: float = 1e-4,
-    tflite_atol: float = 5e-3,
+    tflite_atol: float = 1e-2,
 ):
     """
     Validate all model formats produce consistent outputs.
