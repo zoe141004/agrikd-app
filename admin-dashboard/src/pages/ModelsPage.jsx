@@ -75,7 +75,7 @@ export default function ModelsPage() {
       description: form.description,
       is_active: form.is_active,
       accuracy_top1: form.accuracy_top1 || null,
-      sha256_checksum: form.sha256_checksum || null,
+      sha256_checksum: form.sha256_checksum || 'pending',
       updated_at: new Date().toISOString(),
     }).eq('id', editModal.id)
     setSaving(false)
@@ -196,8 +196,8 @@ export default function ModelsPage() {
         leaf_type,
         display_name: display_name || leaf_type,
         version,
-        model_url: null, // will be set by pipeline after conversion
-        sha256_checksum: null, // will be set by pipeline after conversion
+        model_url: publicUrl, // temporary: points to .pth; pipeline will update to .tflite URL
+        sha256_checksum: 'pending', // will be set by pipeline after conversion
         description: description || null,
         accuracy_top1: null, // will be computed by pipeline
         num_classes: num_classes ? parseInt(num_classes) : (classLabels.length || null),
