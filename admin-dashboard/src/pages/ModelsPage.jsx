@@ -591,7 +591,7 @@ export default function ModelsPage() {
                 {/* Summary metrics cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                   {[
-                    { label: 'Accuracy', value: tflite?.accuracy != null ? `${tflite.accuracy.toFixed(1)}%` : '—', color: '#16a34a' },
+                    { label: 'Accuracy', value: tflite?.accuracy != null ? `${tflite.accuracy.toFixed(4)}%` : '—', color: '#16a34a' },
                     { label: 'F1 Score', value: tflite?.f1_macro != null ? tflite.f1_macro.toFixed(4) : '—', color: '#0284c7' },
                     { label: 'Latency', value: tflite?.latency_mean_ms != null ? `${tflite.latency_mean_ms.toFixed(1)} ms` : '—', color: '#7c3aed' },
                     { label: 'Model Size', value: tflite?.size_mb != null ? `${tflite.size_mb.toFixed(2)} MB` : '—', color: '#ca8a04' },
@@ -619,7 +619,7 @@ export default function ModelsPage() {
                         {formats.map(b => (
                           <tr key={b.format}>
                             <td><strong style={{ textTransform: 'capitalize' }}>{b.format}</strong></td>
-                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(1)}%</span> : '—'}</td>
+                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(4)}%</span> : '—'}</td>
                             <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
                             <td>{b.f1_macro != null ? b.f1_macro.toFixed(4) : '—'}</td>

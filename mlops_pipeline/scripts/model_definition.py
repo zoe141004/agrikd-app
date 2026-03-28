@@ -221,7 +221,7 @@ def load_student_from_checkpoint(
     Returns:
         LeafDiseaseStudentModel with loaded weights, set to eval mode.
     """
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     if "student_state_dict" not in checkpoint:
         raise KeyError(
@@ -256,6 +256,7 @@ def load_student_from_checkpoint(
     if "val_loss" in checkpoint:
         print(f"     Val loss: {checkpoint['val_loss']:.4f}")
     
+    model.eval()
     return model
 
 
