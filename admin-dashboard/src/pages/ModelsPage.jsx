@@ -1,9 +1,7 @@
 import { useState, useEffect, Fragment, useRef, useCallback } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
-import CustomTooltip from '../components/CustomTooltip'
 
 const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
 
@@ -37,6 +35,8 @@ export default function ModelsPage() {
   // Benchmarks
   const [benchmarks, setBenchmarks] = useState([])
   const [benchLoading, setBenchLoading] = useState(false)
+  const [benchLeaf, setBenchLeaf] = useState('')
+  const [benchVersion, setBenchVersion] = useState('')
 
   // Version history
   const [versions, setVersions] = useState([])
@@ -328,7 +328,18 @@ export default function ModelsPage() {
   const getVersionsForLeaf = (leafType) =>
     versions.filter(v => v.leaf_type === leafType)
 
-  const accuracyChartData = models.filter(m => m.accuracy_top1).map(m => ({ name: m.display_name || m.leaf_type, accuracy: parseFloat(m.accuracy_top1) }))
+  // Available leaf types and versions from benchmark data
+  const benchLeafTypes = [...new Set(benchmarks.map(b => b.leaf_type))].sort()
+  const benchVersionsForLeaf = benchLeaf
+    ? [...new Set(benchmarks.filter(b => b.leaf_type === benchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    : []
+  const activeBenchLeaf = benchLeaf || benchLeafTypes[0] || ''
+  const activeBenchVersion = benchVersion || benchVersionsForLeaf[0] || ''
+  // Recompute versions using activeBenchLeaf (in case benchLeaf was empty and we fell back)
+  const activeBenchVersions = activeBenchLeaf
+    ? [...new Set(benchmarks.filter(b => b.leaf_type === activeBenchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    : []
+  const resolvedBenchVersion = benchVersion || activeBenchVersions[0] || ''
 
   const pipelineRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
 
@@ -520,39 +531,41 @@ export default function ModelsPage() {
       {/* ── Benchmarks Tab ── */}
       {tab === 'Benchmarks' && (
         <>
-          {/* Accuracy comparison chart */}
-          {accuracyChartData.length > 0 && (
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header"><div><div className="card-label">Accuracy Comparison</div><div className="card-title">Model Accuracy</div></div></div>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={accuracyChartData} margin={{ top: 0, right: 16, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                  <YAxis domain={[80, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} unit="%" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="accuracy" name="Accuracy" radius={[4, 4, 0, 0]} unit="%">
-                    {accuracyChartData.map((_, i) => <Cell key={i} fill={i % 2 === 0 ? '#16a34a' : '#0284c7'} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+          {/* Filters */}
+          <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Dataset</label>
+                <select className="form-input" style={{ width: 200, padding: '6px 10px', fontSize: 13 }} value={activeBenchLeaf} onChange={e => { setBenchLeaf(e.target.value); setBenchVersion('') }}>
+                  {benchLeafTypes.map(lt => (
+                    <option key={lt} value={lt}>{models.find(m => m.leaf_type === lt)?.display_name || lt.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Version</label>
+                <select className="form-input" style={{ width: 120, padding: '6px 10px', fontSize: 13 }} value={resolvedBenchVersion} onChange={e => setBenchVersion(e.target.value)}>
+                  {activeBenchVersions.map(v => (
+                    <option key={v} value={v}>v{v}</option>
+                  ))}
+                </select>
+              </div>
+              {activeBenchVersions.length > 1 && (
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>{activeBenchVersions.length} versions available</span>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Per-model benchmark details */}
-          {models.map(m => {
-            const modelBench = getBenchmarksForModel(m.leaf_type, m.version)
-            if (!modelBench.length) return (
-              <div key={m.id} className="card" style={{ marginBottom: 16 }}>
-                <div className="card-header">
-                  <div>
-                    <div className="card-label">{m.display_name || m.leaf_type}</div>
-                    <div className="card-title">v{m.version} — No Benchmark Data</div>
-                  </div>
-                  <button className="btn btn-sm" onClick={() => { setValTarget(m.leaf_type); setTab('Validate') }}>Run Pipeline</button>
-                </div>
-                <p style={{ fontSize: 13, color: '#94a3b8', padding: '0 0 8px' }}>
-                  No evaluation results yet. Run the pipeline from the Validate tab to generate benchmarks.
-                </p>
+          {/* Benchmark results for selected leaf + version */}
+          {(() => {
+            const modelBench = getBenchmarksForModel(activeBenchLeaf, resolvedBenchVersion)
+            const model = models.find(m => m.leaf_type === activeBenchLeaf)
+
+            if (!activeBenchLeaf || !modelBench.length) return (
+              <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                {benchmarks.length === 0
+                  ? 'No benchmark data available. Run the pipeline from the Validate tab to generate benchmarks.'
+                  : 'No benchmarks for this selection.'}
               </div>
             )
 
@@ -562,15 +575,17 @@ export default function ModelsPage() {
             const formats = [pytorch, onnx, tflite].filter(Boolean)
 
             return (
-              <div key={m.id} className="card" style={{ marginBottom: 20 }}>
+              <div className="card" style={{ marginBottom: 20 }}>
                 <div className="card-header">
                   <div>
-                    <div className="card-label">{m.display_name || m.leaf_type}</div>
-                    <div className="card-title">v{m.version} — Full Benchmark Results</div>
+                    <div className="card-label">{model?.display_name || activeBenchLeaf.replace(/_/g, ' ')}</div>
+                    <div className="card-title">v{resolvedBenchVersion} — Full Benchmark Results</div>
                   </div>
-                  <span className={`badge ${m.is_active !== false ? 'badge-green' : 'badge-gray'}`}>
-                    {m.is_active !== false ? 'Active' : 'Candidate'}
-                  </span>
+                  {model && (
+                    <span className={`badge ${model.version === resolvedBenchVersion ? 'badge-green' : 'badge-gray'}`}>
+                      {model.version === resolvedBenchVersion ? 'Current' : 'Older'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Summary metrics cards */}
@@ -659,13 +674,7 @@ export default function ModelsPage() {
                 )}
               </div>
             )
-          })}
-
-          {models.length === 0 && (
-            <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
-              No models registered. Upload a model to see benchmarks.
-            </div>
-          )}
+          })()}
         </>
       )}
 
