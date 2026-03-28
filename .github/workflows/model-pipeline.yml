@@ -38,8 +38,8 @@ jobs:
           pip install --upgrade pip
           pip install tensorflow-cpu>=2.15
           pip install -r mlops_pipeline/requirements.txt
-          # Install torch CPU LAST to override any GPU version pulled by ai-edge-torch
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --force-reinstall
+          # Pin torch CPU to match local dev environment (2.4.1)
+          pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
       - name: Pull DVC test data
         run: |
