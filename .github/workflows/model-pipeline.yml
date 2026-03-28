@@ -71,23 +71,36 @@ jobs:
         run: |
           mkdir -p model_checkpoints_student
           PTH_FILE="model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
-          echo "Model URL: ${{ inputs.model_url }}"
+          MODEL_URL="${{ inputs.model_url }}"
+          echo "Model URL: $MODEL_URL"
 
-          # Extract storage path from URL and use authenticated download
-          STORAGE_PATH=$(echo "${{ inputs.model_url }}" | grep -oP 'storage/v1/object/public/\K.*' || echo "")
+          # If URL points to .tflite (from previous pipeline run), find the .pth checkpoint instead
+          if echo "$MODEL_URL" | grep -q '\.tflite'; then
+            echo "URL points to .tflite — looking for checkpoint .pth in same folder..."
+            # Derive .pth URL from convention: <leaf>_v<ver>_checkpoint.pth
+            PTH_URL=$(echo "$MODEL_URL" | sed 's|/[^/]*\.tflite$|/|')
+            PTH_URL="${PTH_URL}${{ inputs.leaf_type }}_v${{ inputs.version }}_checkpoint.pth"
+            echo "Derived .pth URL: $PTH_URL"
+            MODEL_URL="$PTH_URL"
+          fi
+
+          # Extract storage path and download with auth
+          STORAGE_PATH=$(echo "$MODEL_URL" | grep -oP 'storage/v1/object/public/\K.*' || echo "")
           if [ -z "$STORAGE_PATH" ]; then
-            echo "[ERROR] Could not parse storage path from URL"
+            echo "[ERROR] Could not parse storage path from URL: $MODEL_URL"
             exit 1
           fi
-          echo "Storage path: $STORAGE_PATH"
 
-          # Always use authenticated download (bucket may be private)
-          AUTH_URL="$SUPABASE_URL/storage/v1/object/authenticated/$STORAGE_PATH"
-          echo "Auth URL: $AUTH_URL"
-          HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-            "$AUTH_URL")
+          # Try public URL first (faster), fall back to authenticated
+          HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" "$MODEL_URL")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Public download failed ($HTTP_CODE), trying authenticated..."
+            AUTH_URL="$SUPABASE_URL/storage/v1/object/authenticated/$STORAGE_PATH"
+            HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              "$AUTH_URL")
+          fi
           echo "HTTP status: $HTTP_CODE"
 
           if [ "$HTTP_CODE" != "200" ]; then
@@ -97,12 +110,10 @@ jobs:
           fi
 
           FILE_SIZE=$(stat --format=%s "$PTH_FILE")
-          FILE_TYPE=$(file -b "$PTH_FILE" | head -1)
-          echo "Downloaded: $FILE_SIZE bytes — Type: $FILE_TYPE"
+          echo "Downloaded: $FILE_SIZE bytes"
 
-          if [ "$FILE_SIZE" -lt 1000 ]; then
-            echo "[ERROR] File too small ($FILE_SIZE bytes), likely an error response:"
-            cat "$PTH_FILE"
+          if [ "$FILE_SIZE" -lt 10000 ]; then
+            echo "[ERROR] File too small ($FILE_SIZE bytes), likely not a valid checkpoint"
             exit 1
           fi
         env:
