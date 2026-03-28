@@ -230,6 +230,16 @@ def main():
     results = parse_benchmark_report(report_path)
     print(f"[*] Found {len(results)} format results")
 
+    # Delete old benchmark records for this leaf_type + version first
+    encoded_leaf = urllib.parse.quote(leaf_type, safe="")
+    encoded_ver = urllib.parse.quote(version, safe="")
+    del_url = f"{supabase_url}/rest/v1/model_benchmarks?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
+    ok_del, resp_del = supabase_request(del_url, {**api_headers, "Prefer": "return=minimal"}, method="DELETE")
+    if ok_del:
+        print(f"  [OK] Cleared old benchmarks for {leaf_type} v{version}")
+    else:
+        print(f"  [WARN] Could not clear old benchmarks: {resp_del}")
+
     for r in results:
         payload = {
             "leaf_type": leaf_type,
@@ -252,7 +262,7 @@ def main():
         }
 
         url = f"{supabase_url}/rest/v1/model_benchmarks"
-        ok, resp = supabase_request(url, {**api_headers, "Prefer": "resolution=merge-duplicates"}, payload)
+        ok, resp = supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, payload)
         if ok:
             print(f"  [OK] {r['format']}: accuracy={r.get('accuracy')}, latency={r.get('latency_mean_ms')}ms")
         else:
