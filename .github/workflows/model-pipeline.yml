@@ -156,21 +156,24 @@ jobs:
           echo "Test data: $(ls "$DATA_DIR" | wc -l) class folders"
           python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
-      - name: Compute SHA-256 of TFLite model
+      - name: Compute SHA-256 of TFLite models
         id: sha256
         run: |
-          TFLITE_PATH="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student.tflite"
-          if [ -f "$TFLITE_PATH" ]; then
-            HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
-            SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
-            echo "hash=$HASH" >> "$GITHUB_OUTPUT"
-            echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
-            echo "[OK] SHA-256: $HASH  Size: ${SIZE_MB} MB"
-          else
-            echo "[WARN] TFLite file not found: $TFLITE_PATH"
-            echo "hash=" >> "$GITHUB_OUTPUT"
-            echo "size_mb=" >> "$GITHUB_OUTPUT"
-          fi
+          BASE="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student"
+          for VARIANT in float16 float32; do
+            TFLITE_PATH="${BASE}_${VARIANT}.tflite"
+            if [ -f "$TFLITE_PATH" ]; then
+              HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
+              SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
+              echo "hash_${VARIANT}=$HASH" >> "$GITHUB_OUTPUT"
+              echo "size_mb_${VARIANT}=$SIZE_MB" >> "$GITHUB_OUTPUT"
+              echo "[OK] ${VARIANT} SHA-256: $HASH  Size: ${SIZE_MB} MB"
+            else
+              echo "[WARN] TFLite ${VARIANT} not found: $TFLITE_PATH"
+              echo "hash_${VARIANT}=" >> "$GITHUB_OUTPUT"
+              echo "size_mb_${VARIANT}=" >> "$GITHUB_OUTPUT"
+            fi
+          done
 
       - name: Upload results to Supabase
         env:
@@ -178,8 +181,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
           VERSION: ${{ inputs.version }}
-          TFLITE_SHA256: ${{ steps.sha256.outputs.hash }}
-          TFLITE_SIZE_MB: ${{ steps.sha256.outputs.size_mb }}
+          TFLITE_FLOAT16_SHA256: ${{ steps.sha256.outputs.hash_float16 }}
+          TFLITE_FLOAT32_SHA256: ${{ steps.sha256.outputs.hash_float32 }}
         run: python .github/scripts/upload_benchmarks.py
 
       - name: Upload artifacts

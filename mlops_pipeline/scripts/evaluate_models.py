@@ -88,11 +88,13 @@ def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
 
 class ModelEvaluator:
     def __init__(self, pth_path, onnx_path, tflite_path, num_classes,
+                 tflite_float32_path=None,
                  data_dir=None, output_dir=None, input_size=224,
                  norm_mean=None, norm_std=None):
         self.pth_path = pth_path
         self.onnx_path = onnx_path
-        self.tflite_path = tflite_path
+        self.tflite_path = tflite_path  # float16 (backward compat)
+        self.tflite_float32_path = tflite_float32_path
         self.num_classes = num_classes
         self.input_size = input_size
         self.output_dir = output_dir or os.path.dirname(pth_path)
@@ -305,13 +307,14 @@ class ModelEvaluator:
         size = os.path.getsize(self.onnx_path) / (1024 * 1024)
         self._benchmark_runner("ONNX", size, load, infer)
 
-    def eval_tflite(self):
-        if not os.path.exists(self.tflite_path):
+    def eval_tflite(self, tflite_path=None, name="TFLite"):
+        path = tflite_path or self.tflite_path
+        if not path or not os.path.exists(path):
             return
         import tensorflow as tf
 
         def load():
-            interpreter = tf.lite.Interpreter(model_path=self.tflite_path)
+            interpreter = tf.lite.Interpreter(model_path=path)
             interpreter.allocate_tensors()
             return interpreter
 
@@ -327,8 +330,8 @@ class ModelEvaluator:
             exp_L = np.exp(logits - np.max(logits, axis=1, keepdims=True))
             return exp_L / np.sum(exp_L, axis=1, keepdims=True)
 
-        size = os.path.getsize(self.tflite_path) / (1024 * 1024)
-        self._benchmark_runner("TFLite", size, load, infer)
+        size = os.path.getsize(path) / (1024 * 1024)
+        self._benchmark_runner(name, size, load, infer)
 
     def run_all(self):
         self.eval_pytorch()
@@ -336,10 +339,14 @@ class ModelEvaluator:
         if hasattr(self, '_last_model'):
             del self._last_model
         self.eval_onnx()
-        # Delete ONNX session before TFLite benchmark
+        # Delete ONNX session before TFLite benchmarks
         if hasattr(self, '_last_model'):
             del self._last_model
-        self.eval_tflite()
+        self.eval_tflite(self.tflite_path, "TFLite (float16)")
+        if hasattr(self, '_last_model'):
+            del self._last_model
+        if self.tflite_float32_path and os.path.exists(self.tflite_float32_path):
+            self.eval_tflite(self.tflite_float32_path, "TFLite (float32)")
         self.generate_report()
 
     def _generate_classification_report(self):
@@ -393,10 +400,11 @@ class ModelEvaluator:
             plt.xticks(rotation=45, ha='right')
             plt.yticks(rotation=0)
             plt.tight_layout()
-            cm_path = os.path.join(self.output_dir, f"confusion_matrix_{fmt_name.lower()}.png")
+            cm_safe = fmt_name.lower().replace(' ', '_').replace('(', '').replace(')', '')
+            cm_path = os.path.join(self.output_dir, f"confusion_matrix_{cm_safe}.png")
             plt.savefig(cm_path, dpi=150)
             plt.close()
-            sections.append(f"![Confusion Matrix {fmt_name}](confusion_matrix_{fmt_name.lower()}.png)\n")
+            sections.append(f"![Confusion Matrix {fmt_name}](confusion_matrix_{cm_safe}.png)\n")
 
         return "\n".join(sections)
 
@@ -446,14 +454,15 @@ class ModelEvaluator:
         report_parts.append("""
 ### Notes
 - **Params/FLOPs** are identical across formats (same model architecture, same weights).
-- **File size** differs due to serialization: TFLite uses FlatBuffer (most compact), ONNX uses Protobuf, PyTorch includes optimizer state.
+- **File size** differs due to serialization: TFLite float16 uses half-precision weight storage (most compact), TFLite float32 uses full precision FlatBuffer, ONNX uses Protobuf, PyTorch includes optimizer state.
 - **Runtime Mem (MB)** = RSS delta measured independently per format (gc.collect between formats). Reflects runtime engine overhead, not model size.
 - **Latency** measured on PC CPU. On mobile, TFLite + GPU Delegate or NNAPI can significantly outperform CPU-only inference.
 - **KL Divergence** measures the full probability distribution shift vs PyTorch (baseline). A KL Div near 0 with slight Top-1% difference means a few borderline samples flipped (e.g., PyTorch: [0.350001, 0.349999] vs TFLite: [0.349999, 0.350001]) — the distributions are nearly identical but argmax flips at the decision boundary.
 
 ### Sweet Spot Conclusion
 - **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges, zero KL divergence vs PyTorch.
-- **Mobile App:** `TFLite` — smallest footprint, supports GPU Delegate & NNAPI for hardware acceleration on mobile.
+- **Mobile App (size priority):** `TFLite (float16)` — smallest footprint (~50% compression), supports GPU Delegate & NNAPI.
+- **Mobile App (precision priority):** `TFLite (float32)` — full precision weights, identical to ONNX accuracy.
 """)
 
         report_str = "\n".join(report_parts)
@@ -498,7 +507,8 @@ def main():
                         help="Path to leaf config JSON (auto-fills all other args)")
     parser.add_argument("--checkpoint", default=None, help="Path to .pth checkpoint")
     parser.add_argument("--onnx", default=None, help="Path to .onnx model")
-    parser.add_argument("--tflite", default=None, help="Path to .tflite model")
+    parser.add_argument("--tflite", default=None, help="Path to .tflite model (float16)")
+    parser.add_argument("--tflite-float32", default=None, help="Path to .tflite float32 model")
     parser.add_argument("--num-classes", type=int, default=None)
     parser.add_argument("--data-dir", default=None,
                         help="Path to dataset root (ImageFolder format). "
@@ -511,6 +521,7 @@ def main():
     input_size = 224
     norm_mean = None
     norm_std = None
+    tflite_float32 = args.tflite_float32
 
     if args.config:
         cfg = load_leaf_config(args.config)
@@ -520,6 +531,8 @@ def main():
             args.onnx = cfg["_paths"]["onnx"]
         if args.tflite is None:
             args.tflite = cfg["_paths"]["tflite"]
+        if tflite_float32 is None:
+            tflite_float32 = cfg["_paths"].get("tflite_float32")
         if args.num_classes is None:
             args.num_classes = cfg["num_classes"]
         if args.output_dir is None:
@@ -536,6 +549,7 @@ def main():
 
     evaluator = ModelEvaluator(
         args.checkpoint, args.onnx, args.tflite, args.num_classes,
+        tflite_float32_path=tflite_float32,
         data_dir=args.data_dir, output_dir=args.output_dir,
         input_size=input_size, norm_mean=norm_mean, norm_std=norm_std
     )

@@ -22,6 +22,12 @@ ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAU
 -- Ensure both exist; use model_url as canonical, keep file_url as alias for Flutter
 ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS file_url text;
 
+-- OTA variant selection: admin chooses float16 or float32 TFLite for mobile deployment
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS model_url_float32 text;
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS sha256_float32 text;
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS active_tflite_variant text DEFAULT 'float16';
+-- Note: Cannot add CHECK constraint via ALTER in all PG versions; enforced in trigger below
+
 -- Copy file_url values into model_url if model_url is empty (one-time data sync)
 UPDATE model_registry SET model_url = file_url WHERE model_url IS NULL AND file_url IS NOT NULL;
 
@@ -244,20 +250,29 @@ CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON predictions(created_at)
 CREATE INDEX IF NOT EXISTS idx_predictions_confidence ON predictions(confidence);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 
--- ── 8. Create trigger to keep model_url and file_url in sync ────────────────
--- Dashboard writes model_url, Flutter reads file_url
+-- ── 8. Create trigger to keep model_url/file_url in sync + OTA variant routing ──
+-- Dashboard writes model_url (float16) + model_url_float32
+-- Admin sets active_tflite_variant to choose which goes to file_url (read by Flutter)
 
 CREATE OR REPLACE FUNCTION sync_model_urls()
 RETURNS trigger AS $$
 BEGIN
-  -- If model_url was set but file_url wasn't, sync file_url
-  IF NEW.model_url IS DISTINCT FROM OLD.model_url AND (NEW.file_url IS NULL OR NEW.file_url = OLD.file_url) THEN
+  -- Enforce variant values
+  IF NEW.active_tflite_variant IS NOT NULL AND NEW.active_tflite_variant NOT IN ('float16', 'float32') THEN
+    NEW.active_tflite_variant := 'float16';
+  END IF;
+
+  -- Route file_url based on admin's variant choice
+  IF COALESCE(NEW.active_tflite_variant, 'float16') = 'float32' AND NEW.model_url_float32 IS NOT NULL THEN
+    NEW.file_url := NEW.model_url_float32;
+    -- Route sha256_checksum from float32 if sha256_float32 is set
+    IF NEW.sha256_float32 IS NOT NULL THEN
+      NEW.sha256_checksum := NEW.sha256_float32;
+    END IF;
+  ELSIF NEW.model_url IS NOT NULL THEN
     NEW.file_url := NEW.model_url;
   END IF;
-  -- If file_url was set but model_url wasn't, sync model_url
-  IF NEW.file_url IS DISTINCT FROM OLD.file_url AND (NEW.model_url IS NULL OR NEW.model_url = OLD.model_url) THEN
-    NEW.model_url := NEW.file_url;
-  END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -279,7 +294,7 @@ CREATE TABLE IF NOT EXISTS model_benchmarks (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   leaf_type text NOT NULL,
   version text NOT NULL,
-  format text NOT NULL CHECK (format IN ('pytorch', 'onnx', 'tflite')),
+  format text NOT NULL CHECK (format IN ('pytorch', 'onnx', 'tflite_float16', 'tflite_float32')),
   accuracy float,
   precision_macro float,
   recall_macro float,

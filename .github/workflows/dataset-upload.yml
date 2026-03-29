@@ -1,0 +1,173 @@
+name: Dataset Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Upload source: gdrive or predictions'
+        required: true
+        type: string
+      leaf_type:
+        description: 'Leaf type identifier (e.g. mango, cassava_leaf)'
+        required: true
+        type: string
+      gdrive_url:
+        description: 'Google Drive share URL (for gdrive source)'
+        required: false
+        type: string
+      display_name:
+        description: 'Human-readable dataset name'
+        required: false
+        type: string
+      confidence_threshold:
+        description: 'Min confidence for predictions export (default 0.8)'
+        required: false
+        type: string
+        default: '0.8'
+
+jobs:
+  upload-dataset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install dvc dvc-gdrive gdown
+
+      - name: Download from Google Drive
+        if: inputs.source == 'gdrive'
+        run: |
+          echo "=== Downloading ZIP from Google Drive ==="
+          mkdir -p /tmp/dataset_download
+          python -c "
+          import gdown, sys, re
+          url = '${{ inputs.gdrive_url }}'
+          # Extract file ID from various Google Drive URL formats
+          m = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
+          if not m:
+              print(f'[ERROR] Cannot extract file ID from URL: {url}')
+              sys.exit(1)
+          file_id = m.group(1)
+          print(f'File ID: {file_id}')
+          gdown.download(id=file_id, output='/tmp/dataset_download/dataset.zip', quiet=False)
+          "
+
+      - name: Export predictions dataset
+        if: inputs.source == 'predictions'
+        run: |
+          python .github/scripts/export_predictions_to_dataset.py \
+            --leaf-type "${{ inputs.leaf_type }}" \
+            --confidence "${{ inputs.confidence_threshold }}" \
+            --output-dir "data/${{ inputs.leaf_type }}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Prepare dataset
+        if: inputs.source == 'gdrive'
+        run: |
+          python .github/scripts/prepare_dataset.py \
+            --zip /tmp/dataset_download/dataset.zip \
+            --leaf-type "${{ inputs.leaf_type }}" \
+            --display-name "${{ inputs.display_name || inputs.leaf_type }}"
+
+      - name: Verify dataset structure
+        run: |
+          DATA_DIR="data/${{ inputs.leaf_type }}"
+          if [ ! -d "$DATA_DIR" ]; then
+            echo "[ERROR] Dataset directory not found: $DATA_DIR"
+            exit 1
+          fi
+          echo "=== Dataset Structure ==="
+          echo "Directory: $DATA_DIR"
+          echo "Classes:"
+          for cls in "$DATA_DIR"/*/; do
+            if [ -d "$cls" ]; then
+              name=$(basename "$cls")
+              count=$(find "$cls" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
+              echo "  $name: $count images"
+            fi
+          done
+          total=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
+          echo "Total: $total images"
+          if [ "$total" -eq 0 ]; then
+            echo "[ERROR] No image files found in dataset"
+            exit 1
+          fi
+
+      - name: Verify config exists
+        run: |
+          CONFIG="mlops_pipeline/configs/${{ inputs.leaf_type }}.json"
+          if [ ! -f "$CONFIG" ]; then
+            echo "[ERROR] Config not generated: $CONFIG"
+            exit 1
+          fi
+          echo "=== Config ==="
+          cat "$CONFIG"
+
+      - name: DVC add and push
+        run: |
+          dvc remote modify gdrive gdrive_use_service_account true
+          DATA_DIR="data/${{ inputs.leaf_type }}"
+          DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+
+          # Add to DVC tracking
+          dvc add "$DATA_DIR"
+          echo "=== DVC file ==="
+          cat "$DVC_FILE"
+
+          # Push data to Google Drive remote
+          for attempt in 1 2 3; do
+            echo "DVC push attempt $attempt/3..."
+            if dvc push "$DVC_FILE" -v; then
+              echo "DVC push succeeded on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "[ERROR] DVC push failed after 3 attempts"
+              exit 1
+            fi
+            sleep 10
+          done
+        env:
+          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Commit DVC tracking files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+          CONFIG="mlops_pipeline/configs/${{ inputs.leaf_type }}.json"
+          GITIGNORE="data/${{ inputs.leaf_type }}/.gitignore"
+
+          git add "$DVC_FILE" "$CONFIG"
+          [ -f "$GITIGNORE" ] && git add "$GITIGNORE"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add dataset: ${{ inputs.leaf_type }} via ${{ inputs.source }}"
+            git push
+          fi
+
+      - name: Summary
+        run: |
+          DATA_DIR="data/${{ inputs.leaf_type }}"
+          total=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
+          classes=$(ls -d "$DATA_DIR"/*/ 2>/dev/null | wc -l)
+          size=$(du -sh "$DATA_DIR" | cut -f1)
+
+          echo "## Dataset Upload Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Leaf Type | \`${{ inputs.leaf_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | ${{ inputs.source }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Classes | $classes |" >> $GITHUB_STEP_SUMMARY
+          echo "| Images | $total |" >> $GITHUB_STEP_SUMMARY
+          echo "| Size | $size |" >> $GITHUB_STEP_SUMMARY

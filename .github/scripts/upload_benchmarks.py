@@ -1,12 +1,12 @@
 """
 Upload pipeline results to Supabase after model-pipeline.yml completes.
 
-1. Upload converted .tflite to Supabase Storage
+1. Upload converted models (.pth, .onnx, .tflite float16/float32) to Supabase Storage
 2. Parse benchmark_report.md and write metrics to model_benchmarks table
-3. Update model_registry with accuracy, model_url, sha256_checksum
+3. Update model_registry with accuracy, model_url (float16/float32), sha256
 
 Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION,
-          TFLITE_SHA256, TFLITE_SIZE_MB
+          TFLITE_FLOAT16_SHA256, TFLITE_FLOAT32_SHA256
 """
 
 import json
@@ -62,22 +62,22 @@ def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
 
 
 def upload_all_models(supabase_url, service_key, leaf_type, version):
-    """Upload PTH, ONNX, and TFLite models to Supabase Storage. Returns dict of URLs."""
+    """Upload PTH, ONNX, TFLite float16, and TFLite float32 to Supabase Storage. Returns dict of URLs."""
     prefix = f"{leaf_type}/v{version}"
     models_dir = f"models/{leaf_type}"
     checkpoint_dir = "model_checkpoints_student"
 
     files = [
-        (f"{checkpoint_dir}/{leaf_type}_student.pth", f"{prefix}/{leaf_type}_v{version}_checkpoint.pth"),
-        (f"{models_dir}/{leaf_type}_student.onnx",    f"{prefix}/{leaf_type}_v{version}.onnx"),
-        (f"{models_dir}/{leaf_type}_student.tflite",   f"{prefix}/{leaf_type}_v{version}.tflite"),
+        (f"{checkpoint_dir}/{leaf_type}_student.pth",           f"{prefix}/{leaf_type}_v{version}_checkpoint.pth", "pth"),
+        (f"{models_dir}/{leaf_type}_student.onnx",              f"{prefix}/{leaf_type}_v{version}.onnx",           "onnx"),
+        (f"{models_dir}/{leaf_type}_student_float16.tflite",    f"{prefix}/{leaf_type}_v{version}_float16.tflite", "tflite_float16"),
+        (f"{models_dir}/{leaf_type}_student_float32.tflite",    f"{prefix}/{leaf_type}_v{version}_float32.tflite", "tflite_float32"),
     ]
 
     urls = {}
-    for local_path, storage_path in files:
+    for local_path, storage_path, key in files:
         url = upload_file_to_storage(supabase_url, service_key, local_path, storage_path)
-        ext = os.path.splitext(local_path)[1].lstrip(".")
-        urls[ext] = url
+        urls[key] = url
 
     return urls
 
@@ -106,11 +106,20 @@ def parse_benchmark_report(report_path):
         if len(cells) < len(headers_raw):
             continue
         row_dict = dict(zip(headers_raw, cells))
-        fmt_name = row_dict.get("Format", "").lower()
-        if fmt_name not in ("pytorch", "onnx", "tflite"):
+        fmt_name = row_dict.get("Format", "").strip()
+        # Map report format names to DB format names
+        fmt_map = {
+            "pytorch": "pytorch",
+            "onnx": "onnx",
+            "tflite": "tflite_float16",  # backward compat
+            "tflite (float16)": "tflite_float16",
+            "tflite (float32)": "tflite_float32",
+        }
+        fmt_key = fmt_map.get(fmt_name.lower())
+        if not fmt_key:
             continue
         results.append({
-            "format": fmt_name,
+            "format": fmt_key,
             "size_mb": safe_float(row_dict.get("Size (MB)")),
             "params_m": safe_float(row_dict.get("Params (M)")),
             "flops_m": safe_float(row_dict.get("FLOPs (M)")),
@@ -134,18 +143,31 @@ def parse_benchmark_report(report_path):
             if len(cells) < len(lat_headers):
                 continue
             row_dict = dict(zip(lat_headers, cells))
-            fmt_name = row_dict.get("Format", "").lower()
+            fmt_name = row_dict.get("Format", "").strip()
+            fmt_map = {
+                "pytorch": "pytorch", "onnx": "onnx",
+                "tflite": "tflite_float16",
+                "tflite (float16)": "tflite_float16",
+                "tflite (float32)": "tflite_float32",
+            }
+            fmt_key = fmt_map.get(fmt_name.lower())
             for r in results:
-                if r["format"] == fmt_name:
+                if r["format"] == fmt_key:
                     r["latency_p99_ms"] = safe_float(row_dict.get("Lat P99 (ms)"))
 
     # Parse per-class classification metrics per format
     class_sections = re.findall(
-        r"### (\w+) \u2014 Per-Class Metrics\s+\|([^\n]+)\n\|[-\s|]+\n((?:\|[^\n]+\n)+)",
+        r"### ([^\n—]+?) \u2014 Per-Class Metrics\s+\|([^\n]+)\n\|[-\s|]+\n((?:\|[^\n]+\n)+)",
         content
     )
+    fmt_map = {
+        "pytorch": "pytorch", "onnx": "onnx",
+        "tflite": "tflite_float16",
+        "tflite (float16)": "tflite_float16",
+        "tflite (float32)": "tflite_float32",
+    }
     for fmt_name, headers_str, rows_str in class_sections:
-        fmt_lower = fmt_name.lower()
+        fmt_lower = fmt_map.get(fmt_name.strip().lower(), fmt_name.strip().lower())
         headers = [h.strip() for h in headers_str.split("|") if h.strip()]
         rows = rows_str.strip().split("\n")
         per_class = []
@@ -198,8 +220,8 @@ def main():
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     leaf_type = os.environ.get("LEAF_TYPE")
     version = os.environ.get("VERSION")
-    tflite_sha256 = os.environ.get("TFLITE_SHA256", "")
-    tflite_size_mb = os.environ.get("TFLITE_SIZE_MB", "")
+    tflite_f16_sha256 = os.environ.get("TFLITE_FLOAT16_SHA256", "")
+    tflite_f32_sha256 = os.environ.get("TFLITE_FLOAT32_SHA256", "")
 
     if not all([supabase_url, service_key, leaf_type, version]):
         print("[ERROR] Missing env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION")
@@ -214,29 +236,36 @@ def main():
     # ── 1. Upload all model formats to Supabase Storage ─────────────────────
     print("\n=== Step 1: Upload model files to Supabase Storage ===")
     model_urls = upload_all_models(supabase_url, service_key, leaf_type, version)
-    tflite_url = model_urls.get("tflite")
+    tflite_f16_url = model_urls.get("tflite_float16")
+    tflite_f32_url = model_urls.get("tflite_float32")
 
-    # ── 2. Update model_registry with model_url + sha256 + accuracy ──────────
-    if tflite_url:
+    # ── 2. Update model_registry with model_url + sha256 ──────────────────
+    if tflite_f16_url or tflite_f32_url:
         print("\n=== Step 2: Update model_registry ===")
         registry_update = {
-            "model_url": tflite_url,
-            "sha256_checksum": tflite_sha256 or None,
             "updated_at": "now()",
         }
+        if tflite_f16_url:
+            registry_update["model_url"] = tflite_f16_url
+        if tflite_f32_url:
+            registry_update["model_url_float32"] = tflite_f32_url
+        if tflite_f16_sha256:
+            registry_update["sha256_checksum"] = tflite_f16_sha256
+        if tflite_f32_sha256:
+            registry_update["sha256_float32"] = tflite_f32_sha256
 
         encoded_leaf = urllib.parse.quote(leaf_type, safe="")
         encoded_ver = urllib.parse.quote(version, safe="")
         url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
         ok, resp = supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
         if ok:
-            print(f"  [OK] model_registry updated: model_url={tflite_url[:60]}...")
+            print(f"  [OK] model_registry updated (float16 + float32 URLs)")
         else:
             # Version might not match — try matching just leaf_type
             url2 = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"
             ok2, resp2 = supabase_request(url2, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
             if ok2:
-                print(f"  [OK] model_registry updated (by leaf_type): model_url={tflite_url[:60]}...")
+                print(f"  [OK] model_registry updated (by leaf_type)")
             else:
                 print(f"  [WARN] Could not update model_registry: {resp2}")
 
@@ -289,8 +318,8 @@ def main():
         else:
             print(f"  [FAIL] {r['format']}: {resp}")
 
-    # Update accuracy_top1 in model_registry from TFLite result
-    tflite_result = next((r for r in results if r["format"] == "tflite"), None)
+    # Update accuracy_top1 in model_registry from TFLite float16 result
+    tflite_result = next((r for r in results if r["format"] == "tflite_float16"), None)
     if tflite_result and tflite_result.get("accuracy") is not None:
         encoded_leaf = urllib.parse.quote(leaf_type, safe="")
         url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"

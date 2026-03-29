@@ -1,6 +1,11 @@
 name: DVC Pull
 on:
   workflow_dispatch:
+    inputs:
+      leaf_type:
+        description: 'Specific leaf type to pull (leave empty for all)'
+        required: false
+        type: string
 
 jobs:
   dvc-pull:
@@ -16,6 +21,56 @@ jobs:
         run: pip install dvc dvc-gdrive
 
       - name: DVC Pull
-        run: dvc pull -v
+        run: |
+          dvc remote modify gdrive gdrive_use_service_account true
+          if [ -n "${{ inputs.leaf_type }}" ]; then
+            DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+            if [ ! -f "$DVC_FILE" ]; then
+              echo "[ERROR] DVC file not found: $DVC_FILE"
+              ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
+              exit 1
+            fi
+            for attempt in 1 2 3; do
+              echo "DVC pull attempt $attempt/3..."
+              if dvc pull "$DVC_FILE" -v; then
+                echo "DVC pull succeeded on attempt $attempt"
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "[ERROR] DVC pull failed after 3 attempts"
+                exit 1
+              fi
+              sleep 10
+            done
+          else
+            for attempt in 1 2 3; do
+              echo "DVC pull attempt $attempt/3..."
+              if dvc pull -v; then
+                echo "DVC pull succeeded on attempt $attempt"
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "[ERROR] DVC pull failed after 3 attempts"
+                exit 1
+              fi
+              sleep 10
+            done
+          fi
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Report dataset info
+        run: |
+          echo "## Dataset Info" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Dataset | Classes | Files | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|-------|------|" >> $GITHUB_STEP_SUMMARY
+          for dir in data/*/; do
+            if [ -d "$dir" ]; then
+              name=$(basename "$dir")
+              classes=$(ls -d "$dir"*/ 2>/dev/null | wc -l)
+              files=$(find "$dir" -type f | wc -l)
+              size=$(du -sh "$dir" | cut -f1)
+              echo "| $name | $classes | $files | $size |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done

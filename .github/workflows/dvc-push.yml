@@ -16,6 +16,8 @@ jobs:
         run: pip install dvc dvc-gdrive
 
       - name: DVC Push
-        run: dvc push -v
+        run: |
+          dvc remote modify gdrive gdrive_use_service_account true
+          dvc push -v
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}

@@ -95,6 +95,7 @@ def validate_models(
     checkpoint_path: str,
     onnx_path: str = None,
     tflite_path: str = None,
+    tflite_float32_path: str = None,
     num_classes: int = 10,
     num_samples: int = 5,
     atol: float = 1e-4,
@@ -106,7 +107,8 @@ def validate_models(
     Args:
         checkpoint_path: Path to original .pth checkpoint.
         onnx_path: Path to .onnx model (optional).
-        tflite_path: Path to .tflite model (optional).
+        tflite_path: Path to .tflite float16 model (optional).
+        tflite_float32_path: Path to .tflite float32 model (optional).
         num_classes: Number of output classes.
         num_samples: Number of random inputs to test.
         atol: Absolute tolerance for ONNX comparison.
@@ -139,10 +141,16 @@ def validate_models(
             if not compare_outputs("PyTorch", pytorch_output, "ONNX", onnx_output, atol):
                 all_passed = False
 
-        # TFLite comparison (uses higher tolerance due to NCHW→NHWC + FlatBuffer precision)
+        # TFLite float16 comparison
         if tflite_path and os.path.exists(tflite_path):
             tflite_output = run_tflite_inference(tflite_path, input_data)
-            if not compare_outputs("PyTorch", pytorch_output, "TFLite", tflite_output, tflite_atol):
+            if not compare_outputs("PyTorch", pytorch_output, "TFLite (float16)", tflite_output, tflite_atol):
+                all_passed = False
+
+        # TFLite float32 comparison
+        if tflite_float32_path and os.path.exists(tflite_float32_path):
+            tflite32_output = run_tflite_inference(tflite_float32_path, input_data)
+            if not compare_outputs("PyTorch", pytorch_output, "TFLite (float32)", tflite32_output, tflite_atol):
                 all_passed = False
 
     # Summary
@@ -191,6 +199,8 @@ def main():
 
     args = parser.parse_args()
 
+    tflite_float32 = None
+
     if args.config:
         cfg = load_leaf_config(args.config)
         if args.checkpoint is None:
@@ -202,9 +212,10 @@ def main():
             if os.path.exists(onnx_path):
                 args.onnx = onnx_path
         if args.tflite is None:
-            tflite_path = cfg["_paths"]["tflite"]
+            tflite_path = cfg["_paths"].get("tflite_float16") or cfg["_paths"]["tflite"]
             if os.path.exists(tflite_path):
                 args.tflite = tflite_path
+        tflite_float32 = cfg["_paths"].get("tflite_float32")
 
     if not args.checkpoint or args.num_classes is None:
         parser.error("Either --config or --checkpoint and --num-classes are required")
@@ -215,7 +226,8 @@ def main():
 
     passed = validate_models(
         args.checkpoint, args.onnx, args.tflite,
-        args.num_classes, args.num_samples, args.atol
+        tflite_float32_path=tflite_float32,
+        num_classes=args.num_classes, num_samples=args.num_samples, atol=args.atol
     )
     sys.exit(0 if passed else 1)
 

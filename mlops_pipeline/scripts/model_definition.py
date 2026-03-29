@@ -283,6 +283,8 @@ def load_leaf_config(config_path):
         "checkpoint": os.path.join(project_root, "model_checkpoints_student", ckpt_name),
         "onnx": os.path.join(project_root, "models", leaf, f"{leaf}_student.onnx"),
         "tflite": os.path.join(project_root, "models", leaf, f"{leaf}_student.tflite"),
+        "tflite_float16": os.path.join(project_root, "models", leaf, f"{leaf}_student_float16.tflite"),
+        "tflite_float32": os.path.join(project_root, "models", leaf, f"{leaf}_student_float32.tflite"),
         "output_dir": os.path.join(project_root, "models", leaf),
     }
 

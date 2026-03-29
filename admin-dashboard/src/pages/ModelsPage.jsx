@@ -569,10 +569,12 @@ export default function ModelsPage() {
               </div>
             )
 
-            const tflite = modelBench.find(b => b.format === 'tflite')
+            const tflite16 = modelBench.find(b => b.format === 'tflite_float16')
+            const tflite32 = modelBench.find(b => b.format === 'tflite_float32')
             const pytorch = modelBench.find(b => b.format === 'pytorch')
             const onnx = modelBench.find(b => b.format === 'onnx')
-            const formats = [pytorch, onnx, tflite].filter(Boolean)
+            const formats = [pytorch, onnx, tflite16, tflite32].filter(Boolean)
+            const activeTflite = tflite16 || tflite32
 
             return (
               <div className="card" style={{ marginBottom: 20 }}>
@@ -591,10 +593,10 @@ export default function ModelsPage() {
                 {/* Summary metrics cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                   {[
-                    { label: 'Accuracy', value: tflite?.accuracy != null ? `${tflite.accuracy.toFixed(4)}%` : '—', color: '#16a34a' },
-                    { label: 'F1 Score', value: tflite?.f1_macro != null ? tflite.f1_macro.toFixed(4) : '—', color: '#0284c7' },
-                    { label: 'Latency', value: tflite?.latency_mean_ms != null ? `${tflite.latency_mean_ms.toFixed(1)} ms` : '—', color: '#7c3aed' },
-                    { label: 'Model Size', value: tflite?.size_mb != null ? `${tflite.size_mb.toFixed(2)} MB` : '—', color: '#ca8a04' },
+                    { label: 'Accuracy', value: activeTflite?.accuracy != null ? `${activeTflite.accuracy.toFixed(4)}%` : '—', color: '#16a34a' },
+                    { label: 'F1 Score', value: activeTflite?.f1_macro != null ? activeTflite.f1_macro.toFixed(4) : '—', color: '#0284c7' },
+                    { label: 'Latency', value: activeTflite?.latency_mean_ms != null ? `${activeTflite.latency_mean_ms.toFixed(1)} ms` : '—', color: '#7c3aed' },
+                    { label: 'Model Size', value: activeTflite?.size_mb != null ? `${activeTflite.size_mb.toFixed(2)} MB` : '—', color: '#ca8a04' },
                   ].map(s => (
                     <div key={s.label} style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.06)', position: 'relative', overflow: 'hidden' }}>
                       <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: s.color }} />
@@ -618,7 +620,7 @@ export default function ModelsPage() {
                       <tbody>
                         {formats.map(b => (
                           <tr key={b.format}>
-                            <td><strong style={{ textTransform: 'capitalize' }}>{b.format}</strong></td>
+                            <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tflite_float32' ? 'TFLite (f32)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
                             <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(4)}%</span> : '—'}</td>
                             <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
@@ -636,17 +638,17 @@ export default function ModelsPage() {
                   </div>
                 </div>
 
-                {/* Per-class metrics (from TFLite — the deployment format) */}
-                {tflite?.per_class_metrics?.length > 0 && (
+                {/* Per-class metrics (from active TFLite variant — the deployment format) */}
+                {activeTflite?.per_class_metrics?.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 6 }}>Per-Class Metrics (TFLite)</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 6 }}>Per-Class Metrics ({activeTflite.format === 'tflite_float16' ? 'TFLite float16' : 'TFLite float32'})</div>
                     <div className="table-wrapper">
                       <table>
                         <thead>
                           <tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1-Score</th><th>Support</th></tr>
                         </thead>
                         <tbody>
-                          {tflite.per_class_metrics.map((c, i) => (
+                          {activeTflite.per_class_metrics.map((c, i) => (
                             <tr key={i}>
                               <td style={{ fontWeight: 500 }}>{c.class?.replace(/_/g, ' ')}</td>
                               <td>{c.precision?.toFixed(4)}</td>
@@ -911,7 +913,7 @@ export default function ModelsPage() {
           <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Deployment Status</div>
           <table>
             <thead>
-              <tr><th>Leaf Type</th><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>OTA</th></tr>
+              <tr><th>Leaf Type</th><th>Version</th><th>TFLite Variant</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>OTA</th></tr>
             </thead>
             <tbody>
               {models.map(m => {
@@ -920,10 +922,33 @@ export default function ModelsPage() {
                 const hasHash = !!m.sha256_checksum
                 const isActive = m.is_active !== false
                 const allGood = hasUrl && hasHash && hasBench && isActive
+                const variant = m.active_tflite_variant || 'float16'
+                const f16Bench = benchmarks.find(b => b.leaf_type === m.leaf_type && b.version === m.version && b.format === 'tflite_float16')
+                const f32Bench = benchmarks.find(b => b.leaf_type === m.leaf_type && b.version === m.version && b.format === 'tflite_float32')
                 return (
                   <tr key={m.id}>
                     <td><strong style={{ color: '#121c28' }}>{m.leaf_type}</strong></td>
                     <td><span className="badge badge-primary">v{m.version}</span></td>
+                    <td>
+                      <select
+                        value={variant}
+                        onChange={async (e) => {
+                          const v = e.target.value
+                          const { error } = await supabase.from('model_registry').update({
+                            active_tflite_variant: v,
+                            updated_at: new Date().toISOString(),
+                          }).eq('id', m.id)
+                          if (!error) {
+                            loadModels()
+                            logAudit(supabase, 'ota_variant_switched', 'model', m.id, { leaf_type: m.leaf_type, variant: v })
+                          } else alert('Error: ' + error.message)
+                        }}
+                        style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #d1d5db' }}
+                      >
+                        <option value="float16">float16{f16Bench?.size_mb ? ` (${f16Bench.size_mb.toFixed(2)} MB)` : ''}</option>
+                        <option value="float32">float32{f32Bench?.size_mb ? ` (${f32Bench.size_mb.toFixed(2)} MB)` : ''}</option>
+                      </select>
+                    </td>
                     <td>{hasUrl ? <span className="badge badge-green" style={{ fontSize: 10 }}>Uploaded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
                     <td>{hasHash ? <span className="badge badge-green" style={{ fontSize: 10 }}>Recorded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
                     <td>{hasBench ? <span className="badge badge-green" style={{ fontSize: 10 }}>Complete</span> : <span className="badge badge-yellow" style={{ fontSize: 10 }}>Pending</span>}</td>
