@@ -1,0 +1,57 @@
+{
+    "camera": {
+        "source": 0,
+        "width": 640,
+        "height": 480,
+        "mode": "manual"
+    },
+    "inference": {
+        "input_size": 224,
+        "imagenet_mean": [0.485, 0.456, 0.406],
+        "imagenet_std": [0.229, 0.224, 0.225]
+    },
+    "models": {
+        "tomato": {
+            "engine_path": "models/tomato_student.engine",
+            "sha256_checksum": "",
+            "num_classes": 10,
+            "class_labels": [
+                "Bacterial_spot", "Early_blight", "Late_blight",
+                "Leaf_Mold", "Septoria_leaf_spot", "Spider_mites",
+                "Target_Spot", "Yellow_Leaf_Curl_Virus", "Mosaic_virus",
+                "Healthy"
+            ]
+        },
+        "burmese_grape_leaf": {
+            "engine_path": "models/burmese_grape_leaf_student.engine",
+            "sha256_checksum": "",
+            "num_classes": 5,
+            "class_labels": [
+                "Anthracnose", "Healthy", "Insect Damage",
+                "Leaf Spot", "Powdery Mildew"
+            ]
+        }
+    },
+    "sync": {
+        "supabase_url": "",
+        "supabase_key": "",
+        "email": "",
+        "password": "",
+        "batch_size": 50,
+        "interval_seconds": 300
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "api_key": ""
+    },
+    "database": {
+        "path": "data/agrikd_jetson.db"
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "logs/agrikd.log",
+        "max_bytes": 104857600,
+        "backup_count": 5
+    }
+}

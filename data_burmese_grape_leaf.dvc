@@ -1,0 +1,6 @@
+outs:
+- md5: ad4bfc14aef51dc78381095aeede64ea.dir
+  path: data/burmese_grape_leaf
+  size: 49451098
+  nfiles: 3090
+  hash: md5

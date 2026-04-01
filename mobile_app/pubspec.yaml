@@ -47,6 +47,12 @@ dependencies:
   intl: ^0.19.0
   sqflite_common_ffi_web: ^1.1.1
 
+  # Environment
+  flutter_dotenv: ^5.2.1
+
+  # Error Tracking
+  sentry_flutter: ^8.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -57,5 +63,6 @@ flutter:
   uses-material-design: true
 
   assets:
+    - .env
     - assets/models/tomato/tomato_student.tflite
     - assets/models/burmese_grape_leaf/burmese_grape_leaf_student.tflite

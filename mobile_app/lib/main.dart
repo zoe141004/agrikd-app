@@ -2,9 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'package:app/core/l10n/app_strings.dart';
+import 'core/config/env_config.dart';
 import 'core/config/supabase_config.dart';
 import 'core/constants/model_constants.dart';
 import 'core/theme/app_theme.dart';
@@ -26,6 +29,30 @@ bool _showOfflineNotification = false;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Load .env for local dev; silently skip in production (no .env in release APK)
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // Production build: .env not bundled, --dart-define values used instead
+  }
+
+  // Initialize Sentry for error tracking (no-op if DSN is empty)
+  final sentryDsn = EnvConfig.sentryDsn;
+  if (sentryDsn.isNotEmpty) {
+    await SentryFlutter.init(
+      (options) {
+        options.dsn = sentryDsn;
+        options.tracesSampleRate = 0.2;
+        options.environment = kReleaseMode ? 'production' : 'development';
+      },
+      appRunner: () => _startApp(),
+    );
+  } else {
+    await _startApp();
+  }
+}
+
+Future<void> _startApp() async {
   // Global error boundary: catch Flutter framework errors
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
