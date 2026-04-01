@@ -18,5 +18,12 @@ Environment=PYTHONUNBUFFERED=1
 MemoryMax=512M
 CPUQuota=80%
 
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/agrikd
+
 [Install]
 WantedBy=multi-user.target

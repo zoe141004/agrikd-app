@@ -37,9 +37,12 @@ export function formatBytes(bytes) {
 
 // ── GitHub Actions integration ─────────────────────────────────────────────
 
+// gh_token is stored in sessionStorage (not localStorage) so the PAT is
+// cleared when the browser tab closes, reducing exposure if the machine is
+// shared or compromised.
 export function getGitHubConfig() {
   return {
-    ghToken: localStorage.getItem('gh_token') || '',
+    ghToken: sessionStorage.getItem('gh_token') || '',
     ghOwner: localStorage.getItem('gh_owner') || '',
     ghRepo:  localStorage.getItem('gh_repo')  || '',
     ghBranch: localStorage.getItem('gh_branch') || 'main',

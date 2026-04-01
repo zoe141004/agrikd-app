@@ -2,7 +2,7 @@
 AgriKD - Comprehensive Model Evaluator
 ======================================
 Evaluates PyTorch, ONNX, and TFLite model formats on:
-  - Classification metrics (Top-1 Accuracy, Precision, Recall, F1, Confusion Matrix)
+  - Classification metrics (Accuracy, Precision, Recall, F1, Confusion Matrix)
   - Efficiency metrics (Latency, FPS, Memory, Model Size)
   - Model complexity (FLOPs, Parameters)
   - Cross-format consistency (KL Divergence)
@@ -158,21 +158,21 @@ class ModelEvaluator:
             return None, None
 
     def _compute_accuracy(self, all_probs, format_name):
-        """Compute Top-1 accuracy against ground truth or PyTorch golden."""
+        """Compute accuracy against ground truth or PyTorch golden."""
         model_preds = np.argmax(all_probs, axis=1)
         self.all_predictions[format_name] = model_preds
 
         if self.test_labels is not None:
             labels = self.test_labels
-            top1_acc = np.mean(model_preds == labels) * 100
+            accuracy = np.mean(model_preds == labels) * 100
         else:
             golden = self.golden_probs
             if golden is None:
                 golden = all_probs
             golden_preds = np.argmax(golden, axis=1)
-            top1_acc = np.mean(model_preds == golden_preds) * 100
+            accuracy = np.mean(model_preds == golden_preds) * 100
 
-        return top1_acc
+        return accuracy
 
     def _benchmark_runner(self, name, size_mb, load_fn, infer_fn):
         print(f"\n{'='*50}")
@@ -217,7 +217,7 @@ class ModelEvaluator:
             kl_div = self._compute_kl_divergence(self.golden_probs, all_probs)
 
         # 5. Accuracy
-        top1_acc = self._compute_accuracy(all_probs, name)
+        accuracy = self._compute_accuracy(all_probs, name)
 
         # 6. Latency stats
         latencies = np.array(latencies)
@@ -250,7 +250,7 @@ class ModelEvaluator:
         print(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
         print(f"  FPS:     {fps:.1f}")
         print(f"  Runtime Mem: {total_mem:.1f} MB")
-        print(f"  Top-1:   {top1_acc:.1f}%")
+        print(f"  Accuracy: {accuracy:.1f}%")
         print(f"  KL Div:  {kl_div:.8f}")
 
         self.results.append({
@@ -265,7 +265,7 @@ class ModelEvaluator:
             "ms/img": mean_lat,
             "FPS": fps,
             "Runtime Mem (MB)": total_mem,
-            "Top-1 %": top1_acc,
+            "Accuracy (%)": accuracy,
             "KL Div": kl_div,
         })
 
@@ -413,7 +413,7 @@ class ModelEvaluator:
 
         # Main benchmark table
         display_cols = ["Format", "Size (MB)", "Params (M)", "FLOPs (M)",
-                        "ms/img", "FPS", "Runtime Mem (MB)", "Top-1 %", "KL Div"]
+                        "ms/img", "FPS", "Runtime Mem (MB)", "Accuracy (%)", "KL Div"]
         df_display = df[[c for c in display_cols if c in df.columns]].copy()
         # Per-column float format: .3f for most, .6f for KL Div
         col_fmts = []
@@ -457,7 +457,7 @@ class ModelEvaluator:
 - **File size** differs due to serialization: TFLite float16 uses half-precision weight storage (most compact), TFLite float32 uses full precision FlatBuffer, ONNX uses Protobuf, PyTorch includes optimizer state.
 - **Runtime Mem (MB)** = RSS delta measured independently per format (gc.collect between formats). Reflects runtime engine overhead, not model size.
 - **Latency** measured on PC CPU. On mobile, TFLite + GPU Delegate or NNAPI can significantly outperform CPU-only inference.
-- **KL Divergence** measures the full probability distribution shift vs PyTorch (baseline). A KL Div near 0 with slight Top-1% difference means a few borderline samples flipped (e.g., PyTorch: [0.350001, 0.349999] vs TFLite: [0.349999, 0.350001]) — the distributions are nearly identical but argmax flips at the decision boundary.
+- **KL Divergence** measures the full probability distribution shift vs PyTorch (baseline). A KL Div near 0 with slight Accuracy difference means a few borderline samples flipped (e.g., PyTorch: [0.350001, 0.349999] vs TFLite: [0.349999, 0.350001]) — the distributions are nearly identical but argmax flips at the decision boundary.
 
 ### Sweet Spot Conclusion
 - **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges, zero KL divergence vs PyTorch.
@@ -485,8 +485,8 @@ class ModelEvaluator:
         # Chart 2: Accuracy vs Size
         fig, ax1 = plt.subplots(figsize=(10, 6))
         ax1.set_xlabel('Format')
-        ax1.set_ylabel('Top-1 Accuracy (%)', color='tab:blue')
-        ax1.plot(df["Format"], df["Top-1 %"], color='tab:blue', marker='o', linewidth=2)
+        ax1.set_ylabel('Accuracy (%)', color='tab:blue')
+        ax1.plot(df["Format"], df["Accuracy (%)"], color='tab:blue', marker='o', linewidth=2)
         ax1.tick_params(axis='y', labelcolor='tab:blue')
         ax2 = ax1.twinx()
         ax2.set_ylabel('Model Size (MB)', color='tab:red')

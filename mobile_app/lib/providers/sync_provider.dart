@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:app/core/config/supabase_config.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/data/sync/supabase_sync_service.dart';
 import 'package:app/providers/auth_provider.dart';
@@ -138,7 +139,17 @@ final syncProvider = StateNotifierProvider<SyncNotifier, SyncState>((ref) {
   // Auto-trigger sync when connectivity changes to online
   ref.listen<bool>(isOnlineProvider, (previous, next) {
     if (next && previous == false) {
-      notifier.triggerSync();
+      // Retry Supabase init if app started offline (C1 fix)
+      if (!SupabaseConfig.isInitialized) {
+        SupabaseConfig.ensureInitialized().then((ok) {
+          if (ok) {
+            ref.read(authProvider.notifier).retryInit();
+            notifier.triggerSync();
+          }
+        });
+      } else {
+        notifier.triggerSync();
+      }
     }
   });
 

@@ -2,12 +2,15 @@ name: Export Data to DVC
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   export:
     runs-on: ubuntu-latest
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +26,11 @@ jobs:
           python -c "
           import requests, json, os
           url = os.environ['SUPABASE_URL']
-          key = os.environ['SUPABASE_SERVICE_KEY']
+          key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
           headers = {'apikey': key, 'Authorization': f'Bearer {key}'}
           offset, all_rows = 0, []
           while True:
-              resp = requests.get(f'{url}/rest/v1/predictions?select=*&order=created_at.desc&offset={offset}&limit=1000', headers=headers)
+              resp = requests.get(f'{url}/rest/v1/predictions?select=id,leaf_type,predicted_class,confidence,model_version,created_at&order=created_at.desc&offset={offset}&limit=1000', headers=headers)
               rows = resp.json()
               if not rows: break
               all_rows.extend(rows)

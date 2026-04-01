@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:app/core/config/env_config.dart';
 import 'package:app/core/config/supabase_config.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/data/database/app_database.dart';
@@ -109,6 +110,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } catch (_) {
       // Supabase not initialized (offline startup) — stay unauthenticated
       state = const AuthState(status: AuthStatus.unauthenticated);
+    }
+  }
+
+  /// Re-attempt auth initialization after Supabase becomes available.
+  /// Called when connectivity restores after an offline cold start.
+  void retryInit() {
+    if (SupabaseConfig.isInitialized &&
+        state.status == AuthStatus.unauthenticated &&
+        _authSub == null) {
+      _init();
     }
   }
 
@@ -219,7 +230,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> signInWithGoogle() async {
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
-      final webClientId = const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+      final webClientId = EnvConfig.googleWebClientId;
       if (webClientId.isEmpty) {
         state = state.copyWith(
           isLoading: false,

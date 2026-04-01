@@ -1,13 +1,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'env_config.dart';
+
 class SupabaseConfig {
-  // Provided at build time via --dart-define-from-file=.env
-  static const _url = String.fromEnvironment('SUPABASE_URL');
-  static const _anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
   static bool _initialized = false;
 
-  static String get url => _url;
-  static String get anonKey => _anonKey;
+  static String get url => EnvConfig.supabaseUrl;
+  static String get anonKey => EnvConfig.supabaseAnonKey;
   static bool get isInitialized => _initialized;
 
   static SupabaseClient get client {
@@ -20,19 +19,32 @@ class SupabaseConfig {
   }
 
   static Future<void> initialize() async {
-    if (_url.isEmpty || _anonKey.isEmpty) {
+    if (_initialized) return;
+    if (url.isEmpty || anonKey.isEmpty) {
       throw StateError(
         'Supabase credentials not provided. '
-        'Build with: flutter run --dart-define-from-file=.env',
+        'Add them to .env (local dev) or use --dart-define (CI/CD).',
       );
     }
     await Supabase.initialize(
-      url: _url,
-      anonKey: _anonKey,
+      url: url,
+      anonKey: anonKey,
       authOptions: const FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
       ),
     );
     _initialized = true;
+  }
+
+  /// Retry initialization after an offline cold start.
+  /// Returns true if initialization succeeded (or was already initialized).
+  static Future<bool> ensureInitialized() async {
+    if (_initialized) return true;
+    try {
+      await initialize();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 }

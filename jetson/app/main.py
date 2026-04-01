@@ -73,7 +73,10 @@ def main():
     for leaf_type, model_cfg in config["models"].items():
         engine_path = model_cfg["engine_path"]
         if os.path.exists(engine_path):
-            engines[leaf_type] = TensorRTInference(engine_path, model_cfg)
+            engines[leaf_type] = TensorRTInference(
+                engine_path, model_cfg,
+                expected_sha256=model_cfg.get("sha256_checksum"),
+            )
             logger.info("Loaded TensorRT engine: %s (%s)", leaf_type, engine_path)
         else:
             logger.warning("Engine not found: %s — skipping %s", engine_path, leaf_type)
@@ -97,6 +100,7 @@ def main():
     server_thread = threading.Thread(
         target=start_health_server,
         args=(server_cfg["host"], server_cfg["port"], db, engines),
+        kwargs={"api_key": server_cfg.get("api_key", "")},
         daemon=True,
     )
     server_thread.start()

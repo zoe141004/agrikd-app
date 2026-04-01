@@ -1,5 +1,6 @@
 """TensorRT inference engine for AgriKD on Jetson."""
 
+import hashlib
 import time
 
 import cv2
@@ -9,8 +10,9 @@ import numpy as np
 class TensorRTInference:
     """Runs TensorRT FP16 inference on a loaded engine."""
 
-    def __init__(self, engine_path, model_config):
+    def __init__(self, engine_path, model_config, expected_sha256=None):
         self.engine_path = engine_path
+        self.expected_sha256 = expected_sha256
         self.num_classes = model_config["num_classes"]
         self.class_labels = model_config["class_labels"]
         self.input_size = 224  # Fixed for MobileNetV2
@@ -34,6 +36,19 @@ class TensorRTInference:
             )
 
         self.logger = trt.Logger(trt.Logger.WARNING)
+
+        # Verify engine file integrity before loading
+        if self.expected_sha256:
+            sha256 = hashlib.sha256()
+            with open(self.engine_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+            actual = sha256.hexdigest()
+            if actual != self.expected_sha256:
+                raise ValueError(
+                    f"Engine checksum mismatch for {self.engine_path}: "
+                    f"expected {self.expected_sha256}, got {actual}"
+                )
 
         with open(self.engine_path, "rb") as f:
             runtime = trt.Runtime(self.logger)

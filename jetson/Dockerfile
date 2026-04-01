@@ -20,7 +20,8 @@ RUN pip3 install --no-cache-dir \
     numpy>=1.24 \
     opencv-python-headless>=4.8 \
     requests>=2.31 \
-    flask>=3.0
+    flask>=3.0 \
+    waitress>=3.0
 
 # Create non-root user
 RUN useradd -m -s /bin/bash agrikd && \

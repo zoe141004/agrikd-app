@@ -1,10 +1,11 @@
 #!/bin/bash
 # AgriKD Jetson Setup Script
-# Run this on your Jetson device to deploy the edge inference service.
+# Run this on your Jetson device to deploy the edge inference service + GUI.
 #
 # Prerequisites:
 #   - JetPack SDK installed (includes TensorRT, CUDA, cuDNN)
 #   - ONNX model files available
+#   - Display connected (for GUI mode)
 #
 # Usage:
 #   chmod +x setup_jetson.sh
@@ -12,6 +13,7 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="/opt/agrikd"
 SERVICE_USER="agrikd"
 
@@ -21,29 +23,39 @@ echo "========================================"
 
 # 1. Create user
 if ! id "$SERVICE_USER" &>/dev/null; then
-    echo "[1/7] Creating service user: $SERVICE_USER"
+    echo "[1/10] Creating service user: $SERVICE_USER"
     useradd -m -s /bin/bash "$SERVICE_USER"
 else
-    echo "[1/7] User $SERVICE_USER already exists"
+    echo "[1/10] User $SERVICE_USER already exists"
 fi
 
 # 2. Create directories
-echo "[2/7] Creating directories..."
-mkdir -p "$INSTALL_DIR"/{app,config,models,data,logs}
+echo "[2/10] Creating directories..."
+mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,logs}
 
 # 3. Copy files
-echo "[3/7] Copying application files..."
+echo "[3/10] Copying application files..."
 cp -r app/* "$INSTALL_DIR/app/"
 cp -r config/* "$INSTALL_DIR/config/"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
-# 4. Install Python dependencies
-echo "[4/7] Installing Python dependencies..."
-pip3 install --no-cache-dir numpy opencv-python-headless requests flask
+# 4. Install Python dependencies (full OpenCV with GUI support)
+echo "[4/10] Installing Python dependencies..."
+pip3 install --no-cache-dir numpy opencv-python requests flask waitress
 
-# 5. Convert ONNX models to TensorRT
-echo "[5/7] Converting models to TensorRT..."
-for model_dir in ../../models/*/; do
+# 5. Install GUI dependencies (PyQt5 + camera tools)
+echo "[5/10] Installing GUI dependencies..."
+apt-get update
+apt-get install -y --no-install-recommends \
+    python3-pyqt5 \
+    v4l-utils \
+    libgl1-mesa-glx \
+    libglib2.0-0
+echo "  [OK] PyQt5, v4l-utils, OpenGL libraries installed."
+
+# 6. Convert ONNX models to TensorRT
+echo "[6/10] Converting models to TensorRT..."
+for model_dir in "$SCRIPT_DIR/../models"/*/; do
     leaf_type=$(basename "$model_dir")
     onnx_file="$model_dir/${leaf_type}_student.onnx"
     engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
@@ -63,14 +75,39 @@ for model_dir in ../../models/*/; do
     fi
 done
 
-# 6. Install systemd service
-echo "[6/7] Installing systemd service..."
+# 7. Install systemd services (headless + GUI)
+echo "[7/10] Installing systemd services..."
 cp agrikd.service /etc/systemd/system/
+if [ -f agrikd-gui.service ]; then
+    cp agrikd-gui.service /etc/systemd/system/
+fi
 systemctl daemon-reload
 systemctl enable agrikd.service
+echo "  [OK] Headless service enabled. GUI service available (manual start)."
 
-# 7. Update config with Supabase credentials (optional)
-echo "[7/7] Configuration..."
+# 8. Camera permissions
+echo "[8/10] Setting up camera permissions..."
+usermod -aG video "$SERVICE_USER"
+echo "  [OK] User $SERVICE_USER added to 'video' group."
+echo "  Verify camera with: v4l2-ctl --list-devices"
+
+# 9. Create desktop shortcut for GUI
+echo "[9/10] Creating GUI desktop shortcut..."
+cat > /usr/share/applications/agrikd-gui.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=AgriKD Plant Disease Detection
+Comment=Detect plant leaf diseases with AI on NVIDIA Jetson
+Exec=/usr/bin/python3 /opt/agrikd/app/gui_app.py
+Icon=application-x-executable
+Terminal=false
+Type=Application
+Categories=Science;Education;
+DESKTOP
+chmod 644 /usr/share/applications/agrikd-gui.desktop
+echo "  [OK] Desktop shortcut created."
+
+# 10. Update config with Supabase credentials (optional)
+echo "[10/10] Configuration..."
 if [ -z "$(grep -o '"supabase_url": ""' $INSTALL_DIR/config/config.json)" ]; then
     echo "  Supabase already configured"
 else
@@ -84,14 +121,22 @@ echo "========================================"
 echo "  Setup Complete!"
 echo "========================================"
 echo ""
-echo "Commands:"
-echo "  sudo systemctl start agrikd      # Start service"
-echo "  sudo systemctl status agrikd     # Check status"
-echo "  sudo journalctl -u agrikd -f     # View logs"
-echo "  curl http://localhost:8080/health # Health check"
+echo "── Headless Mode (REST API) ──"
+echo "  sudo systemctl start agrikd       # Start headless service"
+echo "  sudo systemctl status agrikd      # Check status"
+echo "  sudo journalctl -u agrikd -f      # View logs"
+echo "  curl http://localhost:8080/health  # Health check"
 echo ""
-echo "To run inference via API:"
+echo "── GUI Mode (Desktop Application) ──"
+echo "  python3 /opt/agrikd/app/gui_app.py    # Launch GUI manually"
+echo "  # Or click 'AgriKD Plant Disease Detection' in desktop menu"
+echo ""
+echo "── API Inference ──"
 echo '  curl -X POST http://localhost:8080/predict \'
 echo '    -F "image=@leaf_photo.jpg" \'
 echo '    -F "leaf_type=tomato"'
+echo ""
+echo "── Camera Check ──"
+echo "  v4l2-ctl --list-devices            # List available cameras"
+echo "  ls /dev/video*                      # Check video device nodes"
 echo ""

@@ -27,10 +27,11 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+mobile_app/build/
 /coverage/
 
 # Symbolication related
@@ -40,9 +41,9 @@ app.*.symbols
 app.*.map.json
 
 # Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+mobile_app/android/app/debug
+mobile_app/android/app/profile
+mobile_app/android/app/release
 
 # Python / MLOps
 venv*/
@@ -58,7 +59,7 @@ model_checkpoints_student/
 *.tflite
 *.engine
 # But keep bundled app models
-!assets/models/**/*.tflite
+!mobile_app/assets/models/**/*.tflite
 
 # Datasets (large, tracked via DVC)
 /data/
@@ -67,13 +68,21 @@ model_checkpoints_student/
 .env
 .env.*
 !.env.example
+!admin-dashboard/.env.example
 supabase_info.md
 
 # Admin Dashboard
 admin-dashboard/node_modules/
 admin-dashboard/dist/
-admin-dashboard/.env
 
 # Android machine-specific
-android/local.properties
-android/.gradle/
+mobile_app/android/local.properties
+mobile_app/android/.gradle/
+
+# Secrets — NEVER commit (rotate if exposed in git history)
+.dvc/gdrive-sa.json
+.dvc/config.local
+jetson/config/config.json
+
+# Build reports
+**/build/reports/

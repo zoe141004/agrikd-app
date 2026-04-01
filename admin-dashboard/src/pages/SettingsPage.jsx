@@ -16,7 +16,7 @@ export default function SettingsPage() {
   const [apiSaved, setApiSaved] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null)
 
-  // GitHub config (stored in localStorage)
+  // GitHub config (token in sessionStorage for security; other fields in localStorage)
   const [ghForm, setGhForm] = useState({ ghOwner: '', ghRepo: '', ghToken: '', ghBranch: 'main' })
 
   // Validation API config
@@ -48,7 +48,8 @@ export default function SettingsPage() {
   const saveGitHub = () => {
     localStorage.setItem('gh_owner', ghForm.ghOwner)
     localStorage.setItem('gh_repo', ghForm.ghRepo)
-    localStorage.setItem('gh_token', ghForm.ghToken)
+    // sessionStorage so the PAT is cleared when the tab closes
+    sessionStorage.setItem('gh_token', ghForm.ghToken)
     localStorage.setItem('gh_branch', ghForm.ghBranch || 'main')
     setGhSaved(true)
     setTimeout(() => setGhSaved(false), 2000)
@@ -201,7 +202,7 @@ export default function SettingsPage() {
             </div>
             <div className="alert alert-info" style={{ marginBottom: 14 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Stored in <code>localStorage</code> (browser-only). Required for DVC sync, model validation, and CI/CD triggers.</div>
+              <div>Token stored in <code>sessionStorage</code> (cleared on tab close). Required for DVC sync, model validation, and CI/CD triggers.</div>
             </div>
             <div className="form-group">
               <label className="form-label">Repository Owner</label>

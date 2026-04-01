@@ -87,5 +87,17 @@ class JetsonDatabase:
             "last_prediction": last_pred[0] if last_pred else None,
         }
 
+    def cleanup_old_records(self, max_records=10000):
+        """Remove oldest predictions beyond max_records to prevent unbounded growth."""
+        self.conn.execute("""
+            DELETE FROM predictions
+            WHERE id NOT IN (
+                SELECT id FROM predictions
+                ORDER BY created_at DESC
+                LIMIT ?
+            )
+        """, (max_records,))
+        self.conn.commit()
+
     def close(self):
         self.conn.close()

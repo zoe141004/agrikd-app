@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -19,6 +22,9 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile_app
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +47,9 @@ jobs:
     name: Flutter Tests
     runs-on: ubuntu-latest
     needs: lint
+    defaults:
+      run:
+        working-directory: mobile_app
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +63,7 @@ jobs:
 
       - name: Install SQLite dev library
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+        working-directory: .
 
       - name: Run tests
         run: flutter test --exclude-tags=widget
@@ -149,6 +159,9 @@ jobs:
     name: Build APK
     runs-on: ubuntu-latest
     needs: test
+    defaults:
+      run:
+        working-directory: mobile_app
     steps:
       - uses: actions/checkout@v4
 
@@ -167,13 +180,26 @@ jobs:
 
       - name: Build release APK
         run: |
+          # Strip .env from assets to prevent key leakage in release APK
+          sed -i '/- \.env$/d' pubspec.yaml
           flutter build apk --release \
+            --obfuscate \
+            --split-debug-info=build/debug-info \
             --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
-            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }} \
+            --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }} \
+            --dart-define=GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: agrikd-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-symbols
+          path: mobile_app/build/debug-info/
+          retention-days: 90
