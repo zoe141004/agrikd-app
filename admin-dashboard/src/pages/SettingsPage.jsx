@@ -13,15 +13,10 @@ export default function SettingsPage() {
   const [addingAdmin, setAddingAdmin] = useState(false)
   const [adminMsg, setAdminMsg] = useState('')
   const [ghSaved, setGhSaved] = useState(false)
-  const [apiSaved, setApiSaved] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null)
 
   // GitHub config (token in sessionStorage for security; other fields in localStorage)
   const [ghForm, setGhForm] = useState({ ghOwner: '', ghRepo: '', ghToken: '', ghBranch: 'main' })
-
-  // Validation API config
-  const [apiUrl, setApiUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
 
   // CI/CD trigger
   const [ciMsg, setCiMsg] = useState(null)
@@ -37,8 +32,6 @@ export default function SettingsPage() {
     })
     const cfg = getGitHubConfig()
     setGhForm({ ghOwner: cfg.ghOwner, ghRepo: cfg.ghRepo, ghToken: cfg.ghToken, ghBranch: cfg.ghBranch })
-    setApiUrl(localStorage.getItem('validation_api_url') || '')
-    setApiKey(sessionStorage.getItem('validation_api_key') || '')
   }, [])
 
   useEffect(() => {
@@ -53,13 +46,6 @@ export default function SettingsPage() {
     localStorage.setItem('gh_branch', ghForm.ghBranch || 'main')
     setGhSaved(true)
     setTimeout(() => setGhSaved(false), 2000)
-  }
-
-  const saveApiConfig = () => {
-    localStorage.setItem('validation_api_url', apiUrl)
-    sessionStorage.setItem('validation_api_key', apiKey)
-    setApiSaved(true)
-    setTimeout(() => setApiSaved(false), 2000)
   }
 
   const testGitHub = async () => {
@@ -114,7 +100,8 @@ export default function SettingsPage() {
     }
   }
 
-  const ghConfigured = !!(getGitHubConfig().ghToken && getGitHubConfig().ghOwner)
+  const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
+  const ghConfigured = !!(ghToken && ghOwner && ghRepo)
 
   return (
     <>
@@ -226,30 +213,6 @@ export default function SettingsPage() {
               <button className="btn" onClick={testGitHub}>Test Connection</button>
             </div>
           </div>
-
-          <div className="card">
-            <div className="card-header"><div><div className="card-label">Validation API</div><div className="card-title">External Inference Endpoint</div></div></div>
-            <div className="alert alert-info" style={{ marginBottom: 14 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Optional: An external API (e.g. Modal.com, Hugging Face, Render) that accepts <code>POST /validate</code> with <code>{`{"leaf_type": "..."}`}</code> and returns accuracy metrics.</div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">API Base URL</label>
-              <input className="form-input" value={apiUrl} onChange={e => setApiUrl(e.target.value)} placeholder="https://your-api.modal.run" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">API Key (optional)</label>
-              <input className="form-input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Bearer token or API key" />
-            </div>
-            <button className="btn btn-primary" onClick={saveApiConfig}>{apiSaved ? '✓ Saved' : 'Save Config'}</button>
-
-            {ciMsg && (
-              <div className={`alert ${ciMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginTop: 12 }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <div>{ciMsg.text}</div>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -346,7 +309,7 @@ export default function SettingsPage() {
               <div>{'  '}validate:</div>
               <div>{'    '}runs-on: ubuntu-latest</div>
               <div>{'    '}steps:</div>
-              <div>{'      '}- uses: actions/checkout@v4</div>
+              <div>{'      '}- uses: actions/checkout@v5</div>
               <div>{'      '}- run: pip install -r requirements.txt</div>
               <div>{'      '}- run: python scripts/validate.py --leaf_type {'${{ inputs.leaf_type }}'}</div>
             </div>
