@@ -13,7 +13,7 @@ jobs:
             echo "Get your deploy hook URL from Vercel Dashboard → Project → Settings → Git → Deploy Hooks"
             exit 1
           fi
-          curl -X POST "$VERCEL_DEPLOY_HOOK"
+          curl -sf -X POST "$VERCEL_DEPLOY_HOOK"
           echo "Deploy hook triggered successfully"
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}

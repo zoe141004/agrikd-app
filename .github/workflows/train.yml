@@ -30,7 +30,18 @@ jobs:
       - name: Pull training data via DVC
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
-          dvc pull || echo "DVC pull skipped"
+          for attempt in 1 2 3; do
+            echo "DVC pull attempt $attempt/3..."
+            if dvc pull; then
+              echo "DVC pull succeeded on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "[ERROR] DVC pull failed after 3 attempts"
+              exit 1
+            fi
+            sleep 10
+          done
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
