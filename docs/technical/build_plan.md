@@ -106,7 +106,7 @@ App mở → Check auth state
 ```
 
 ### B3. Tạo Supabase tables + RLS
-**File:** `database/migrations/001_init.sql` (hoặc thực hiện qua Supabase Dashboard)
+**File:** `database/migrations/001_tables.sql` (hoặc thực hiện qua Supabase Dashboard)
 
 **Table: predictions**
 ```sql
@@ -455,7 +455,7 @@ sqflite_common_ffi_web: ^1.1.1  # Web SQLite support
    - Helper methods `_tryGpu()` và `_tryXnnpack()` tự động persist vào DB khi thành công
 
 2. **Fix Tomato class labels trong SQL migration**
-   - File: `database/migrations/001_init.sql:72`
+   - File: `database/migrations/001_tables.sql:72`
    - Sửa thứ tự labels match với `ModelConstants` (Healthy ở index 9, không phải index 2)
    - Trước: `["Bacterial_spot","Early_blight","Healthy","Late_blight",...]`
    - Sau: `["Bacterial_spot","Early_blight","Late_blight","Leaf_Mold","Septoria_leaf_spot","Spider_mites","Target_Spot","Yellow_Leaf_Curl_Virus","Mosaic_virus","Healthy"]`
@@ -596,7 +596,7 @@ sqflite_common_ffi_web: ^1.1.1  # Web SQLite support
 | `src/pages/ModelsPage.jsx` | Model registry table + class label display |
 
 **Supabase admin access:**
-- File: `database/migrations/002_admin_policies.sql`
+- File: `database/migrations/003_rls_policies.sql`
 - `is_admin()` function checks email against admin list
 - RLS policies cho admin đọc tất cả predictions và storage objects
 
@@ -844,7 +844,7 @@ LoginScreen → "Quên mật khẩu?" → ForgotPasswordScreen → nhập email 
 | Sync | ✅ | Auto-sync + manual + exponential backoff + OTA model update |
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
 | CI/CD | ✅ | GitHub Actions: lint, test, model conversion, build, release |
-| Admin Dashboard | ✅ | React + Vite + Supabase JS (9 pages: Dashboard, Predictions, Models, Users, Data Management, Releases, System Health, Model Reports, Settings) |
+| Admin Dashboard | ✅ | React + Vite + Supabase JS (10 pages: Login, Dashboard, Predictions, Models, Users, Data Management, Releases, System Health, Settings, Model Reports) |
 | Jetson Edge | ✅ | Docker + TensorRT FP16 + REST API + systemd service |
 | i18n | ✅ | EN + VI (~300 keys each) |
 | Tests | ✅ | 89 tests (unit, DAO, provider, widget, integration) |

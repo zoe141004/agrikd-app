@@ -44,6 +44,7 @@ jobs:
 
       - name: DVC add and push
         run: |
+          dvc remote modify gdrive gdrive_use_service_account true
           dvc add data/exports/predictions_snapshot.json
           dvc push
         env:

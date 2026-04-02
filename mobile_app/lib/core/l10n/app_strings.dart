@@ -215,6 +215,8 @@ class S {
     'password_updated_title': 'Password Updated',
     'password_updated_msg':
         'Your password has been updated successfully. You can now log in with your new password.',
+    'skip_reset_password_msg':
+        'Are you sure you want to skip? You will be signed out and can reset your password later.',
 
     // Friendly auth errors (mapped from Supabase AuthException)
     'err_invalid_credentials': 'Incorrect email or password. Please try again.',
@@ -466,6 +468,8 @@ class S {
     'password_updated_title': 'Đã cập nhật',
     'password_updated_msg':
         'Mật khẩu đã được cập nhật thành công. Bạn có thể đăng nhập bằng mật khẩu mới.',
+    'skip_reset_password_msg':
+        'Bạn có chắc muốn bỏ qua? Bạn sẽ được đăng xuất và có thể đặt lại mật khẩu sau.',
 
     // Friendly auth errors
     'err_invalid_credentials':

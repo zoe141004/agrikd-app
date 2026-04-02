@@ -58,8 +58,11 @@ class ModelDao {
     required String classLabels,
   }) async {
     final db = await _db;
+    // Collect file paths to delete AFTER transaction commits
+    final filesToDelete = <String>[];
+
     await db.transaction((txn) async {
-      // 1. Delete archived models + their files
+      // 1. Collect archived model files for deletion
       final archived = await txn.query(
         'models',
         where: "leaf_type = ? AND role = 'archived'",
@@ -68,9 +71,7 @@ class ModelDao {
       for (final row in archived) {
         final path = row['file_path'] as String?;
         if (path != null && (row['is_bundled'] as int) == 0) {
-          try {
-            await File(path).delete();
-          } catch (_) {}
+          filesToDelete.add(path);
         }
       }
       await txn.delete(
@@ -79,7 +80,7 @@ class ModelDao {
         whereArgs: [leafType],
       );
 
-      // 2. Demote current fallback → archived (delete file + row)
+      // 2. Collect fallback model files for deletion
       final fallback = await txn.query(
         'models',
         where: "leaf_type = ? AND role = 'fallback'",
@@ -88,9 +89,7 @@ class ModelDao {
       for (final row in fallback) {
         final path = row['file_path'] as String?;
         if (path != null && (row['is_bundled'] as int) == 0) {
-          try {
-            await File(path).delete();
-          } catch (_) {}
+          filesToDelete.add(path);
         }
       }
       await txn.delete(
@@ -121,14 +120,32 @@ class ModelDao {
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
     });
+
+    // Delete files AFTER transaction commits successfully
+    for (final path in filesToDelete) {
+      try {
+        await File(path).delete();
+      } catch (_) {}
+    }
   }
 
   /// Rollback: delete current active OTA model, promote fallback → active.
   /// Returns true if rollback succeeded (had a fallback to promote).
   Future<bool> rollbackToFallback(String leafType) async {
     final db = await _db;
-    return await db.transaction((txn) async {
-      // Delete current active (if OTA, delete file too)
+    final filesToDelete = <String>[];
+
+    final success = await db.transaction((txn) async {
+      // Check if a fallback exists before deleting active
+      final fallbackCount = Sqflite.firstIntValue(
+        await txn.rawQuery(
+          "SELECT COUNT(*) FROM models WHERE leaf_type = ? AND role = 'fallback'",
+          [leafType],
+        ),
+      );
+      if (fallbackCount == null || fallbackCount == 0) return false;
+
+      // Collect active OTA model files for deletion
       final active = await txn.query(
         'models',
         where: "leaf_type = ? AND role = 'active'",
@@ -136,9 +153,8 @@ class ModelDao {
       );
       for (final row in active) {
         if ((row['is_bundled'] as int) == 0) {
-          try {
-            await File(row['file_path'] as String).delete();
-          } catch (_) {}
+          final path = row['file_path'] as String?;
+          if (path != null) filesToDelete.add(path);
         }
       }
       await txn.delete(
@@ -148,14 +164,24 @@ class ModelDao {
       );
 
       // Promote fallback → active
-      final updated = await txn.update(
+      await txn.update(
         'models',
         {'role': 'active', 'is_active': 1},
         where: "leaf_type = ? AND role = 'fallback'",
         whereArgs: [leafType],
       );
-      return updated > 0;
+      return true;
     });
+
+    // Delete files AFTER transaction commits successfully
+    if (success) {
+      for (final path in filesToDelete) {
+        try {
+          await File(path).delete();
+        } catch (_) {}
+      }
+    }
+    return success;
   }
 
   /// Swap active ↔ fallback for a leaf type (user manual switch).

@@ -43,6 +43,9 @@ class SyncNotifier extends StateNotifier<SyncState>
   final SupabaseSyncService _syncService;
   final Ref _ref;
   Timer? _debounce;
+  bool _disposed = false;
+
+  bool get disposed => _disposed;
 
   SyncNotifier(this._syncService, this._ref) : super(const SyncState()) {
     WidgetsBinding.instance.addObserver(this);
@@ -67,7 +70,10 @@ class SyncNotifier extends StateNotifier<SyncState>
     if (state.status == SyncStatus.syncing) return;
     if (!_syncService.isAuthenticated) return;
 
-    state = const SyncState(status: SyncStatus.syncing);
+    state = SyncState(
+      status: SyncStatus.syncing,
+      lastSyncedAt: state.lastSyncedAt,
+    );
     try {
       final result = await _syncService.pushPendingPredictions();
 
@@ -126,6 +132,7 @@ class SyncNotifier extends StateNotifier<SyncState>
 
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     _debounce?.cancel();
     super.dispose();
@@ -142,6 +149,7 @@ final syncProvider = StateNotifierProvider<SyncNotifier, SyncState>((ref) {
       // Retry Supabase init if app started offline (C1 fix)
       if (!SupabaseConfig.isInitialized) {
         SupabaseConfig.ensureInitialized().then((ok) {
+          if (notifier.disposed) return;
           if (ok) {
             ref.read(authProvider.notifier).retryInit();
             notifier.triggerSync();

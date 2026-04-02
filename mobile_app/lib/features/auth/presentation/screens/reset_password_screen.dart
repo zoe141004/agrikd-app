@@ -65,6 +65,30 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     }
   }
 
+  Future<void> _handleSkip() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.get('cancel')),
+        content: Text(S.get('skip_reset_password_msg')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(S.get('no')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(S.get('yes')),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await ref.read(authProvider.notifier).signOut();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
@@ -75,6 +99,12 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         appBar: AppBar(
           title: Text(S.get('set_new_password')),
           automaticallyImplyLeading: false,
+          actions: [
+            TextButton(
+              onPressed: _handleSkip,
+              child: Text(S.get('cancel')),
+            ),
+          ],
         ),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(24),

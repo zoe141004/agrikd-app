@@ -386,7 +386,8 @@ flutter build apk --release \
   --split-debug-info=build/debug-info \
   --dart-define=SUPABASE_URL=$SUPABASE_URL \
   --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
-  --dart-define=SENTRY_DSN=$SENTRY_DSN
+  --dart-define=SENTRY_DSN=$SENTRY_DSN \
+  --dart-define=GOOGLE_WEB_CLIENT_ID=$GOOGLE_WEB_CLIENT_ID
 ```
 
 The `.env` line is stripped from `pubspec.yaml` assets before the release build to

@@ -1,5 +1,5 @@
 -- =============================================================================
--- AgriKD — 003: Functions & Triggers
+-- AgriKD — 002: Functions & Triggers
 -- =============================================================================
 -- Source of truth: admin-dashboard/supabase-schema.sql
 -- Safe to re-run: CREATE OR REPLACE, DROP TRIGGER IF EXISTS.

@@ -41,13 +41,11 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | Order | File | What it creates |
 |-------|------|-----------------|
 | 1 | `database/migrations/001_tables.sql` | 6 tables: profiles, predictions, model_registry, audit_log, model_benchmarks, model_versions |
-| 2 | `database/migrations/002_rls_policies.sql` | RLS policies for all 6 tables |
-| 3 | `database/migrations/003_functions_triggers.sql` | is_admin_role(), handle_new_user(), sync_model_urls() + triggers + backfill |
+| 2 | `database/migrations/002_functions_triggers.sql` | is_admin_role(), handle_new_user(), sync_model_urls() + triggers + backfill |
+| 3 | `database/migrations/003_rls_policies.sql` | RLS policies for all 6 tables |
 | 4 | `database/migrations/004_indexes.sql` | 7 performance indexes |
 | 5 | `database/migrations/005_storage.sql` | 3 storage buckets + policies |
 | 6 | `database/migrations/006_model_reports_and_rpcs.sql` | Model report tables + RPC functions |
-
-**Important:** Run `003_functions_triggers.sql` before `002_rls_policies.sql` because RLS policies reference the `is_admin_role()` function created in 003.
 
 All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
 
@@ -140,8 +138,8 @@ This generates:
 
 | Problem | Solution |
 |---------|----------|
-| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 |
-| "function is_admin_role() does not exist" | Run 003_functions_triggers.sql before 002_rls_policies.sql |
+| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 → 006 |
+| "function is_admin_role() does not exist" | Run 002_functions_triggers.sql (creates the function referenced by 003_rls_policies.sql) |
 | RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
 | Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |
 | Google Sign-In callback fails | Add `com.agrikd.app://callback` to Redirect URLs in Auth settings |

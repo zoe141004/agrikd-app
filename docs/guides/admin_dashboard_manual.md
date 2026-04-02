@@ -14,7 +14,7 @@ Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
 are configured in `vercel.json` for production. The Vite dev server mirrors
 a subset of these headers for local development.
 
-The application consists of eight pages, each described in detail below.
+The application consists of ten pages, each described in detail below.
 
 ---
 

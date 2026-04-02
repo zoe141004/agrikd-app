@@ -39,14 +39,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
+    _controller = null;
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    final controller = _controller;
     if (state == AppLifecycleState.inactive) {
-      _controller?.dispose();
+      controller?.dispose();
+      _controller = null;
     } else if (state == AppLifecycleState.resumed) {
       _initCamera();
     }
@@ -78,7 +80,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   Future<void> _startCamera(int cameraIndex) async {
     if (_cameras == null || _cameras!.isEmpty) return;
 
-    _controller?.dispose();
+    final oldController = _controller;
+    _controller = null;
+    oldController?.dispose();
+
     final camera = _cameras![cameraIndex];
     final controller = CameraController(
       camera,

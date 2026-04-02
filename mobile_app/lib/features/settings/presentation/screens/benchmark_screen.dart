@@ -75,6 +75,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         );
         for (int i = 0; i < _warmUpRuns; i++) {
           service.runInference(dummyInput, modelInfo.numClasses);
+          if (i % 5 == 0) await Future.delayed(Duration.zero); // yield to UI
         }
 
         // Timed runs
@@ -86,6 +87,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         for (int i = 0; i < _benchmarkRuns; i++) {
           final result = service.runInference(dummyInput, modelInfo.numClasses);
           latencies.add(result.inferenceTimeMs);
+          if (i % 10 == 0) await Future.delayed(Duration.zero); // yield to UI
         }
 
         latencies.sort();

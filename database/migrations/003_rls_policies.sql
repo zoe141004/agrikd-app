@@ -1,5 +1,5 @@
 -- =============================================================================
--- AgriKD — 002: Row Level Security Policies
+-- AgriKD — 003: Row Level Security Policies
 -- =============================================================================
 -- Source of truth: admin-dashboard/supabase-schema.sql
 -- Safe to re-run: DROP IF EXISTS before each CREATE POLICY.

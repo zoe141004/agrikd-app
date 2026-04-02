@@ -194,6 +194,11 @@ def start_health_server(host, port, db, engines, api_key=""):
     _start_time = time.time()
     _api_key = api_key
 
+    if not _api_key:
+        logger.warning(
+            "No API key configured — all endpoints are unauthenticated"
+        )
+
     from waitress import serve
 
     serve(app, host=host, port=port, threads=4)

@@ -25,6 +25,9 @@ on:
         type: string
         default: '0.8'
 
+permissions:
+  contents: write
+
 jobs:
   upload-dataset:
     runs-on: ubuntu-latest

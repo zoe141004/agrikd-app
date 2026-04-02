@@ -61,6 +61,9 @@ class SyncEngine:
 
     def run(self):
         """Main sync loop — runs as a daemon thread."""
+        base_interval = self.interval
+        current_interval = base_interval
+        max_interval = 3600
         while True:
             try:
                 if self._is_configured:
@@ -69,11 +72,18 @@ class SyncEngine:
                     self._sync_batch()
                 else:
                     logger.debug("Supabase not configured, skipping sync")
+                # Success — reset to base interval
+                current_interval = base_interval
             except Exception as e:
                 logger.error("Sync error: %s", e)
                 # Reset token so next cycle re-authenticates
                 self._access_token = ""
-            time.sleep(self.interval)
+                # Exponential backoff on failure (cap at max_interval)
+                current_interval = min(current_interval * 2, max_interval)
+                logger.info(
+                    "Backing off: next sync in %ds", current_interval
+                )
+            time.sleep(current_interval)
 
     def _sync_batch(self):
         """Sync a batch of unsynced predictions via single POST."""

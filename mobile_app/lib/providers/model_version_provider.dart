@@ -38,27 +38,36 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
   Future<void> load() async {
     state = ModelVersionState(versions: state.versions, isLoading: true);
 
-    final result = <String, List<ModelVersionInfo>>{};
-    for (final leafType in ModelConstants.availableLeafTypes) {
-      final rows = await _modelDao.getByLeafType(leafType);
-      result[leafType] = rows
-          .map(
-            (r) => ModelVersionInfo(
-              leafType: r['leaf_type'] as String,
-              version: r['version'] as String,
-              role: r['role'] as String,
-              isBundled: (r['is_bundled'] as int) == 1,
-            ),
-          )
-          .toList();
-    }
+    try {
+      final result = <String, List<ModelVersionInfo>>{};
+      for (final leafType in ModelConstants.availableLeafTypes) {
+        final rows = await _modelDao.getByLeafType(leafType);
+        result[leafType] = rows
+            .map(
+              (r) => ModelVersionInfo(
+                leafType: r['leaf_type'] as String,
+                version: r['version'] as String,
+                role: r['role'] as String,
+                isBundled: (r['is_bundled'] as int) == 1,
+              ),
+            )
+            .toList();
+      }
 
-    state = ModelVersionState(versions: result);
+      state = ModelVersionState(versions: result);
+    } catch (_) {
+      state = ModelVersionState(versions: state.versions, isLoading: false);
+    }
   }
 
   Future<void> switchVersion(String leafType) async {
-    await _modelDao.switchRole(leafType);
-    await load();
+    try {
+      await _modelDao.switchRole(leafType);
+      await load();
+    } catch (_) {
+      // Reload current state to reflect actual DB state
+      await load();
+    }
   }
 }
 

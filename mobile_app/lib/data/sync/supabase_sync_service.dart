@@ -18,6 +18,9 @@ class SupabaseSyncService {
   final SyncQueue _syncQueue;
   final ModelDao _modelDao;
 
+  /// Matches only lowercase letters, digits, and underscores.
+  static final _safeNamePattern = RegExp(r'^[a-z0-9_]+$');
+
   SupabaseSyncService({
     required PredictionDao predictionDao,
     required SyncQueue syncQueue,
@@ -32,6 +35,14 @@ class SupabaseSyncService {
       SupabaseConfig.isInitialized && _client.auth.currentUser != null;
 
   String? get _userId => _client.auth.currentUser?.id;
+
+  /// Sanitize a name for use in file paths — reject path traversal attempts.
+  static String _sanitizeName(String name) {
+    if (name.isEmpty || !_safeNamePattern.hasMatch(name)) {
+      throw ArgumentError('Invalid name for file path: "$name"');
+    }
+    return name;
+  }
 
   /// Push all pending predictions to Supabase.
   Future<SyncResult> pushPendingPredictions() async {
@@ -118,9 +129,12 @@ class SupabaseSyncService {
   /// Upload and compress image to Supabase Storage.
   Future<String?> _uploadImage(String imagePath, int localId) async {
     try {
+      final userId = _userId;
+      if (userId == null) return null;
+
       final compressed = await compute(compressImageSync, imagePath);
       final path =
-          '$_userId/${DateTime.now().millisecondsSinceEpoch}_$localId.jpg';
+          '$userId/${DateTime.now().millisecondsSinceEpoch}_$localId.jpg';
 
       await _client.storage
           .from('prediction-images')
@@ -181,6 +195,10 @@ class SupabaseSyncService {
     if (update.fileUrl == null || update.fileUrl!.isEmpty) return false;
 
     try {
+      // Sanitize leaf type and version to prevent path traversal
+      final safeLeafType = _sanitizeName(update.leafType);
+      final safeVersion = _sanitizeName(update.version.replaceAll('.', '_'));
+
       // 1. Download the file from Supabase Storage
       final Uint8List bytes = await _client.storage
           .from('models')
@@ -194,10 +212,10 @@ class SupabaseSyncService {
 
       // 3. Save to temp file first, then rename (atomic)
       final dir = await getApplicationDocumentsDirectory();
-      final modelDir = Directory('${dir.path}/models/${update.leafType}');
+      final modelDir = Directory('${dir.path}/models/$safeLeafType');
       await modelDir.create(recursive: true);
       final finalPath =
-          '${modelDir.path}/${update.leafType}_${update.version}.tflite';
+          '${modelDir.path}/${safeLeafType}_$safeVersion.tflite';
       final tempPath = '$finalPath.tmp';
 
       final tempFile = File(tempPath);
