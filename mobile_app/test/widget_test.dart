@@ -26,12 +26,17 @@ class _TestableHomeBody extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(S.get('app_name'), style: Theme.of(context).textTheme.headlineMedium),
+            Text(
+              S.get('app_name'),
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
             const SizedBox(height: 16),
-            ...allModels.map((m) => ListTile(
-              title: Text(m.localizedName(S.locale)),
-              subtitle: Text(S.fmt('n_diseases', [m.diseaseCount])),
-            )),
+            ...allModels.map(
+              (m) => ListTile(
+                title: Text(m.localizedName(S.locale)),
+                subtitle: Text(S.fmt('n_diseases', [m.diseaseCount])),
+              ),
+            ),
           ],
         ),
       ),

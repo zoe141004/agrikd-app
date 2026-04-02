@@ -6,8 +6,9 @@ final connectivityProvider = StreamProvider<List<ConnectivityResult>>((ref) {
 });
 
 /// One-shot check at app startup so we don't default to offline.
-final _initialConnectivityProvider =
-    FutureProvider<List<ConnectivityResult>>((ref) {
+final _initialConnectivityProvider = FutureProvider<List<ConnectivityResult>>((
+  ref,
+) {
   return Connectivity().checkConnectivity();
 });
 

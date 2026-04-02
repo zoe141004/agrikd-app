@@ -214,8 +214,7 @@ class SupabaseSyncService {
       final dir = await getApplicationDocumentsDirectory();
       final modelDir = Directory('${dir.path}/models/$safeLeafType');
       await modelDir.create(recursive: true);
-      final finalPath =
-          '${modelDir.path}/${safeLeafType}_$safeVersion.tflite';
+      final finalPath = '${modelDir.path}/${safeLeafType}_$safeVersion.tflite';
       final tempPath = '$finalPath.tmp';
 
       final tempFile = File(tempPath);

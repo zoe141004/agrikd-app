@@ -219,7 +219,8 @@ class ModelDao {
       'models',
       where: 'leaf_type = ?',
       whereArgs: [leafType],
-      orderBy: "CASE role WHEN 'active' THEN 0 WHEN 'fallback' THEN 1 ELSE 2 END",
+      orderBy:
+          "CASE role WHEN 'active' THEN 0 WHEN 'fallback' THEN 1 ELSE 2 END",
     );
   }
 
@@ -229,11 +230,10 @@ class ModelDao {
     final db = await _db;
     final batch = db.batch();
     for (final model in bundledModels) {
-      batch.insert(
-        'models',
-        {...model, 'role': 'active'},
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert('models', {
+        ...model,
+        'role': 'active',
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
     await batch.commit(noResult: true);
   }

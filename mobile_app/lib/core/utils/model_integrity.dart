@@ -9,7 +9,10 @@ class ModelIntegrity {
   /// Compute SHA-256 checksum of an asset file
   static Future<String> sha256Asset(String assetPath) async {
     final data = await rootBundle.load(assetPath);
-    final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
     final digest = sha256.convert(bytes);
     return digest.toString();
   }

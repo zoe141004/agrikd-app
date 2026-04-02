@@ -306,9 +306,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final activeLabel = active != null
           ? 'v${active.version}${active.isBundled ? '' : ' (OTA)'}'
           : '-';
-      final fbLabel = fallback != null
-          ? ' | FB: v${fallback.version}'
-          : '';
+      final fbLabel = fallback != null ? ' | FB: v${fallback.version}' : '';
 
       lines.add('${m.localizedName(S.locale)}: $activeLabel$fbLabel');
     }

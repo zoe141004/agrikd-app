@@ -36,8 +36,8 @@ void main() {
           'num_classes': 10,
           'class_labels':
               '["Bacterial_spot","Early_blight","Late_blight","Leaf_Mold",'
-                  '"Septoria_leaf_spot","Spider_mites","Target_Spot",'
-                  '"Mosaic_virus","Yellow_Leaf_Curl_Virus","healthy"]',
+              '"Septoria_leaf_spot","Spider_mites","Target_Spot",'
+              '"Mosaic_virus","Yellow_Leaf_Curl_Virus","healthy"]',
           'is_bundled': 1,
           'is_active': 1,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -59,8 +59,8 @@ void main() {
           numClasses: 10,
           classLabels:
               '["Bacterial_spot","Early_blight","Late_blight","Leaf_Mold",'
-                  '"Septoria_leaf_spot","Spider_mites","Target_Spot",'
-                  '"Mosaic_virus","Yellow_Leaf_Curl_Virus","healthy"]',
+              '"Septoria_leaf_spot","Spider_mites","Target_Spot",'
+              '"Mosaic_virus","Yellow_Leaf_Curl_Virus","healthy"]',
         );
 
         // Active should be v1.1.0 (OTA)
@@ -490,7 +490,18 @@ void main() {
         predictedClassIndex: 3,
         predictedClassName: 'Tomato___Early_blight',
         confidence: 0.88,
-        allConfidences: [0.02, 0.03, 0.05, 0.88, 0.01, 0.0, 0.0, 0.0, 0.01, 0.0],
+        allConfidences: [
+          0.02,
+          0.03,
+          0.05,
+          0.88,
+          0.01,
+          0.0,
+          0.0,
+          0.0,
+          0.01,
+          0.0,
+        ],
         inferenceTimeMs: 42.5,
         createdAt: DateTime.now().toUtc(),
       );

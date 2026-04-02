@@ -100,10 +100,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           title: Text(S.get('set_new_password')),
           automaticallyImplyLeading: false,
           actions: [
-            TextButton(
-              onPressed: _handleSkip,
-              child: Text(S.get('cancel')),
-            ),
+            TextButton(onPressed: _handleSkip, child: Text(S.get('cancel'))),
           ],
         ),
         body: SingleChildScrollView(

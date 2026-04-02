@@ -174,8 +174,9 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                               icon: const Icon(Icons.flag_outlined, size: 18),
                               label: Text(S.get('report_result')),
                               style: TextButton.styleFrom(
-                                foregroundColor:
-                                    Theme.of(context).colorScheme.error,
+                                foregroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.error,
                               ),
                             ),
                           ],
@@ -330,9 +331,7 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      ok
-                          ? S.get('report_sent')
-                          : S.get('report_failed'),
+                      ok ? S.get('report_sent') : S.get('report_failed'),
                     ),
                   ),
                 );

@@ -211,7 +211,10 @@ class TfliteInferenceService {
     try {
       gpuDelegate = GpuDelegateV2();
       final options = InterpreterOptions()..addDelegate(gpuDelegate);
-      final interpreter = Interpreter.fromFile(File(filePath), options: options);
+      final interpreter = Interpreter.fromFile(
+        File(filePath),
+        options: options,
+      );
       _delegateUsed = 'GPU';
       if (currentPreferred != 'GPU') {
         await _preferenceDao.setValue('preferred_delegate', 'GPU');
@@ -231,7 +234,10 @@ class TfliteInferenceService {
     try {
       xnnpackDelegate = XNNPackDelegate();
       final options = InterpreterOptions()..addDelegate(xnnpackDelegate);
-      final interpreter = Interpreter.fromFile(File(filePath), options: options);
+      final interpreter = Interpreter.fromFile(
+        File(filePath),
+        options: options,
+      );
       _delegateUsed = 'XNNPack';
       if (currentPreferred != 'XNNPack') {
         await _preferenceDao.setValue('preferred_delegate', 'XNNPack');

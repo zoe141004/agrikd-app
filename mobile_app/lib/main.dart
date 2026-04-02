@@ -39,14 +39,11 @@ Future<void> main() async {
   // Initialize Sentry for error tracking (no-op if DSN is empty)
   final sentryDsn = EnvConfig.sentryDsn;
   if (sentryDsn.isNotEmpty) {
-    await SentryFlutter.init(
-      (options) {
-        options.dsn = sentryDsn;
-        options.tracesSampleRate = 0.2;
-        options.environment = kReleaseMode ? 'production' : 'development';
-      },
-      appRunner: () => _startApp(),
-    );
+    await SentryFlutter.init((options) {
+      options.dsn = sentryDsn;
+      options.tracesSampleRate = 0.2;
+      options.environment = kReleaseMode ? 'production' : 'development';
+    }, appRunner: () => _startApp());
   } else {
     await _startApp();
   }

@@ -11,8 +11,9 @@ class EnvConfig {
   // Compile-time values from --dart-define (empty string if not provided)
   static const _kUrl = String.fromEnvironment('SUPABASE_URL');
   static const _kAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-  static const _kGoogleClientId =
-      String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+  static const _kGoogleClientId = String.fromEnvironment(
+    'GOOGLE_WEB_CLIENT_ID',
+  );
   static const _kSentryDsn = String.fromEnvironment('SENTRY_DSN');
 
   /// Supabase project URL.
@@ -20,14 +21,14 @@ class EnvConfig {
       _kUrl.isNotEmpty ? _kUrl : (dotenv.env['SUPABASE_URL'] ?? '');
 
   /// Supabase anonymous (publishable) key.
-  static String get supabaseAnonKey =>
-      _kAnonKey.isNotEmpty ? _kAnonKey : (dotenv.env['SUPABASE_ANON_KEY'] ?? '');
+  static String get supabaseAnonKey => _kAnonKey.isNotEmpty
+      ? _kAnonKey
+      : (dotenv.env['SUPABASE_ANON_KEY'] ?? '');
 
   /// Google OAuth Web Client ID for Google Sign-In.
-  static String get googleWebClientId =>
-      _kGoogleClientId.isNotEmpty
-          ? _kGoogleClientId
-          : (dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '');
+  static String get googleWebClientId => _kGoogleClientId.isNotEmpty
+      ? _kGoogleClientId
+      : (dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '');
 
   /// Sentry DSN for error tracking.
   static String get sentryDsn =>
