@@ -40,7 +40,9 @@ jobs:
         run: dart format --set-exit-if-changed .
 
       - name: Run flutter analyze
-        run: flutter analyze
+        run: |
+          touch .env
+          flutter analyze
 
   # ── Stage 2: Unit & Widget Tests ──
   test:
@@ -66,7 +68,9 @@ jobs:
         working-directory: .
 
       - name: Run tests
-        run: flutter test --exclude-tags=widget
+        run: |
+          touch .env
+          flutter test --exclude-tags=widget
 
   # ── Stage 3: Model Conversion ──
   model-conversion:
