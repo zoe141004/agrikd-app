@@ -24,7 +24,7 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Free disk space
         run: |
@@ -41,7 +41,7 @@ jobs:
             mlops_pipeline/requirements-convert.txt
 
       - name: Cache DVC data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: data
           key: dvc-${{ inputs.leaf_type }}-${{ hashFiles(format('data_{0}.dvc', inputs.leaf_type)) }}
@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pipeline-${{ inputs.leaf_type }}-v${{ inputs.version }}
           path: models/${{ inputs.leaf_type }}/
