@@ -47,8 +47,8 @@ jobs:
           echo "=== Downloading ZIP from Google Drive ==="
           mkdir -p /tmp/dataset_download
           python -c "
-          import gdown, sys, re
-          url = '${{ inputs.gdrive_url }}'
+          import gdown, sys, re, os
+          url = os.environ['GDRIVE_URL']
           # Extract file ID from various Google Drive URL formats
           m = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
           if not m:
@@ -58,6 +58,8 @@ jobs:
           print(f'File ID: {file_id}')
           gdown.download(id=file_id, output='/tmp/dataset_download/dataset.zip', quiet=False)
           "
+        env:
+          GDRIVE_URL: ${{ inputs.gdrive_url }}
 
       - name: Export predictions dataset
         if: inputs.source == 'predictions'

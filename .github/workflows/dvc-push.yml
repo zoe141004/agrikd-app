@@ -18,6 +18,9 @@ jobs:
       - name: DVC Push
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
+          echo "Pulling DVC cache to verify remote sync..."
+          dvc pull || echo "No DVC files to pull (new repo or empty tracking)"
+          echo "Pushing to DVC remote..."
           dvc push -v
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
