@@ -68,10 +68,10 @@ class SupabaseSyncService {
           imageUrl = await _uploadImage(prediction.imagePath, entityId);
         }
 
-        // Insert prediction into Supabase table
+        // Upsert prediction into Supabase table (dedup on user_id + local_id)
         final response = await _client
             .from('predictions')
-            .insert({
+            .upsert({
               'user_id': _userId,
               'image_url': imageUrl,
               'leaf_type': prediction.leafType,
@@ -81,12 +81,10 @@ class SupabaseSyncService {
               'confidence': prediction.confidence,
               'all_confidences': prediction.allConfidences,
               'inference_time_ms': prediction.inferenceTimeMs,
-              'latitude': prediction.latitude,
-              'longitude': prediction.longitude,
               'notes': prediction.notes,
               'created_at': prediction.createdAt.toUtc().toIso8601String(),
               'local_id': entityId,
-            })
+            }, onConflict: 'user_id,local_id')
             .select('id')
             .single();
 
@@ -156,14 +154,16 @@ class SupabaseSyncService {
         final localVersion = localVersions[leafType];
 
         if (localVersion == null || localVersion != remoteVersion) {
+          final labels = (jsonDecode(row['class_labels'] as String) as List)
+              .cast<String>();
           updates.add(
             ModelUpdate(
               leafType: leafType,
               version: remoteVersion,
               fileUrl: row['file_url'] as String?,
               sha256Checksum: row['sha256_checksum'] as String,
-              classLabels: (jsonDecode(row['class_labels'] as String) as List)
-                  .cast<String>(),
+              classLabels: labels,
+              numClasses: row['num_classes'] as int? ?? labels.length,
             ),
           );
         }
@@ -174,7 +174,8 @@ class SupabaseSyncService {
     }
   }
 
-  /// Download, verify, and apply a model update.
+  /// Download, verify, and apply a model update atomically.
+  /// Uses temp file + rename for atomic writes, then promotes via ModelDao.
   /// Returns true if the model was successfully updated.
   Future<bool> downloadModelUpdate(ModelUpdate update) async {
     if (update.fileUrl == null || update.fileUrl!.isEmpty) return false;
@@ -191,19 +192,26 @@ class SupabaseSyncService {
         return false; // Integrity check failed
       }
 
-      // 3. Save to local filesystem
+      // 3. Save to temp file first, then rename (atomic)
       final dir = await getApplicationDocumentsDirectory();
       final modelDir = Directory('${dir.path}/models/${update.leafType}');
       await modelDir.create(recursive: true);
-      final localPath = '${modelDir.path}/${update.leafType}_student.tflite';
-      await File(localPath).writeAsBytes(bytes);
+      final finalPath =
+          '${modelDir.path}/${update.leafType}_${update.version}.tflite';
+      final tempPath = '$finalPath.tmp';
 
-      // 4. Update model record in DB
-      await _modelDao.updateVersion(
-        update.leafType,
-        update.version,
-        localPath,
-        update.sha256Checksum,
+      final tempFile = File(tempPath);
+      await tempFile.writeAsBytes(bytes);
+      await tempFile.rename(finalPath);
+
+      // 4. Promote via ModelDao (handles 2-version rotation)
+      await _modelDao.promoteNewVersion(
+        leafType: update.leafType,
+        version: update.version,
+        filePath: finalPath,
+        checksum: update.sha256Checksum,
+        numClasses: update.numClasses,
+        classLabels: jsonEncode(update.classLabels),
       );
 
       return true;
@@ -231,6 +239,7 @@ class ModelUpdate {
   final String? fileUrl;
   final String sha256Checksum;
   final List<String> classLabels;
+  final int numClasses;
 
   const ModelUpdate({
     required this.leafType,
@@ -238,5 +247,6 @@ class ModelUpdate {
     this.fileUrl,
     required this.sha256Checksum,
     required this.classLabels,
+    required this.numClasses,
   });
 }

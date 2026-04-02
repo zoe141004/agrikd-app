@@ -29,8 +29,6 @@ void main() {
         0.0,
       ]),
       'inference_time_ms': 12.5,
-      'latitude': 10.762,
-      'longitude': 106.660,
       'notes': 'Test note',
       'created_at': now.toIso8601String(),
       'is_synced': 0,
@@ -49,8 +47,6 @@ void main() {
       expect(p.allConfidences, isNotNull);
       expect(p.allConfidences!.length, 10);
       expect(p.inferenceTimeMs, 12.5);
-      expect(p.latitude, 10.762);
-      expect(p.longitude, 106.660);
       expect(p.notes, 'Test note');
       expect(p.isSynced, isFalse);
     });
@@ -110,8 +106,6 @@ void main() {
         'confidence': 0.5,
         'all_confidences': null,
         'inference_time_ms': null,
-        'latitude': null,
-        'longitude': null,
         'notes': null,
         'created_at': now.toIso8601String(),
         'is_synced': 1,

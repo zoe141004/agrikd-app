@@ -17,7 +17,7 @@ class SyncEngine:
     predictions pass the RLS policy ``auth.uid() = user_id``.
     """
 
-    def __init__(self, config, db):
+    def __init__(self, config, db, models_config=None):
         self.supabase_url = config.get("supabase_url", "")
         self.supabase_key = config.get("supabase_key", "")
         self.email = config.get("email", "")
@@ -25,6 +25,7 @@ class SyncEngine:
         self.batch_size = config.get("batch_size", 50)
         self.interval = config.get("interval_seconds", 300)
         self.db = db
+        self._models_config = models_config or {}
 
         # Populated by _authenticate()
         self._access_token = ""
@@ -75,7 +76,7 @@ class SyncEngine:
             time.sleep(self.interval)
 
     def _sync_batch(self):
-        """Sync a batch of unsynced predictions."""
+        """Sync a batch of unsynced predictions via single POST."""
         unsynced = self.db.get_unsynced(self.batch_size)
         if not unsynced:
             return
@@ -91,10 +92,17 @@ class SyncEngine:
 
         url = f"{self.supabase_url}/rest/v1/predictions"
 
+        # M9: Build a single payload array for batch POST
+        payload_list = []
         for pred in unsynced:
-            payload = {
+            # H5: Read version from models config, fallback to "1.0.0"
+            leaf_type = pred["leaf_type"]
+            model_cfg = self._models_config.get(leaf_type, {})
+            model_version = model_cfg.get("version", "1.0.0")
+
+            payload_list.append({
                 "user_id": self._user_id or None,
-                "leaf_type": pred["leaf_type"],
+                "leaf_type": leaf_type,
                 "predicted_class_index": pred["class_index"],
                 "predicted_class_name": pred["class_name"],
                 "confidence": pred["confidence"],
@@ -102,30 +110,28 @@ class SyncEngine:
                 if pred.get("all_confidences")
                 else None,
                 "inference_time_ms": pred.get("inference_time_ms"),
-                "model_version": "1.0.0",
+                "model_version": model_version,
                 "source": "jetson",
                 "created_at": pred["created_at"],
                 "local_id": pred["id"],
-            }
+            })
 
-            try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=10)
-                if resp.status_code in (200, 201):
+        try:
+            resp = requests.post(url, headers=headers, json=payload_list, timeout=30)
+            if resp.status_code in (200, 201):
+                for pred in unsynced:
                     self.db.mark_synced(pred["id"])
-                elif resp.status_code == 401:
-                    logger.warning("Auth expired, re-authenticating...")
-                    self._authenticate()
-                    break  # Retry batch on next cycle
-                else:
-                    logger.warning(
-                        "Sync failed for id=%d: HTTP %d %s",
-                        pred["id"],
-                        resp.status_code,
-                        resp.text[:200],
-                    )
-            except requests.RequestException as e:
-                logger.warning("Network error syncing id=%d: %s", pred["id"], e)
-                break  # Stop batch on network error
+            elif resp.status_code == 401:
+                logger.warning("Auth expired, re-authenticating...")
+                self._authenticate()
+            else:
+                logger.warning(
+                    "Batch sync failed: HTTP %d %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+        except requests.RequestException as e:
+            logger.warning("Network error during batch sync: %s", e)
 
         stats = self.db.get_stats()
         logger.info(

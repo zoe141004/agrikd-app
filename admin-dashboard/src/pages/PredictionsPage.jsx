@@ -31,38 +31,31 @@ export default function PredictionsPage() {
     setLoading(true)
     setError(null)
     try {
-    const [{ data, count }, { data: statsRows }] = await Promise.all([
+    const rpcFilter = filters.leafType || null
+
+    const [{ data, count }, { data: rpcStats }, { data: diseaseDist }] = await Promise.all([
       applyFilters(
         supabase.from('predictions').select('*', { count: 'exact' })
           .order('created_at', { ascending: false })
           .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
       ),
-      applyFilters(
-        supabase.from('predictions').select('confidence, predicted_class_name, user_id')
-      ),
+      supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
+      supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
     ])
 
     setPredictions(data || [])
     setTotal(count || 0)
 
-    if (statsRows?.length) {
-      const avg = statsRows.reduce((s, r) => s + (r.confidence || 0), 0) / statsRows.length * 100
-      const high = statsRows.filter(r => r.confidence >= 0.8).length
-      const low = statsRows.filter(r => r.confidence < 0.5).length
-      const users = new Set(statsRows.map(r => r.user_id).filter(Boolean)).size
-      const diseaseMap = {}
-      statsRows.forEach(r => {
-        const d = cleanLabel(r.predicted_class_name)
-        diseaseMap[d] = (diseaseMap[d] || 0) + 1
-      })
-      const topDisease = Object.entries(diseaseMap).sort((a, b) => b[1] - a[1])[0]
-      setClassDist(Object.entries(diseaseMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })))
+    const s = rpcStats || {}
+    if (s.total) {
+      const topDisease = diseaseDist?.length ? `${cleanLabel(diseaseDist[0].name)} (${diseaseDist[0].count})` : '—'
+      setClassDist((diseaseDist || []).map(r => ({ name: cleanLabel(r.name), count: Number(r.count) })))
       setSummary({
-        avgConf: avg.toFixed(1),
-        highConf: high,
-        lowConf: low,
-        topDisease: topDisease ? `${topDisease[0]} (${topDisease[1]})` : '—',
-        uniqueUsers: users,
+        avgConf: s.avg_confidence ? (s.avg_confidence * 100).toFixed(1) : 0,
+        highConf: s.high_confidence_count || 0,
+        lowConf: s.low_confidence_count || 0,
+        topDisease,
+        uniqueUsers: s.unique_users || 0,
       })
     } else {
       setSummary({ avgConf: 0, highConf: 0, lowConf: 0, topDisease: '—', uniqueUsers: 0 })

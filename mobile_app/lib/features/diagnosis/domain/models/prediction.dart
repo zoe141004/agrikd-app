@@ -10,8 +10,6 @@ class Prediction {
   final double confidence;
   final List<double>? allConfidences;
   final double? inferenceTimeMs;
-  final double? latitude;
-  final double? longitude;
   final String? notes;
   final DateTime createdAt;
   final bool isSynced;
@@ -28,8 +26,6 @@ class Prediction {
     required this.confidence,
     this.allConfidences,
     this.inferenceTimeMs,
-    this.latitude,
-    this.longitude,
     this.notes,
     required this.createdAt,
     this.isSynced = false,
@@ -50,8 +46,6 @@ class Prediction {
           ? jsonEncode(allConfidences)
           : null,
       'inference_time_ms': inferenceTimeMs,
-      'latitude': latitude,
-      'longitude': longitude,
       'notes': notes,
       'created_at': createdAt.toUtc().toIso8601String(),
       'is_synced': isSynced ? 1 : 0,
@@ -75,8 +69,6 @@ class Prediction {
                 .toList()
           : null,
       inferenceTimeMs: (map['inference_time_ms'] as num?)?.toDouble(),
-      latitude: (map['latitude'] as num?)?.toDouble(),
-      longitude: (map['longitude'] as num?)?.toDouble(),
       notes: map['notes'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       isSynced: (map['is_synced'] as int? ?? 0) == 1,

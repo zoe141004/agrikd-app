@@ -1,71 +1,86 @@
 -- =============================================================================
 -- AgriKD — 003: Functions & Triggers
 -- =============================================================================
+-- Source of truth: admin-dashboard/supabase-schema.sql
+-- Safe to re-run: CREATE OR REPLACE, DROP TRIGGER IF EXISTS.
+-- =============================================================================
 
--- ── is_admin_role() ───────────────────────────────────────────────────────────
--- SECURITY DEFINER: runs with elevated privileges to check user role.
--- Used by RLS policies across all admin-protected tables.
+-- ── is_admin_role() ─────────────────────────────────────────────────────────
+-- SECURITY DEFINER: bypasses RLS to check profiles.role without recursion.
+-- Used by ALL RLS policies that gate admin access.
+-- NOTE: LANGUAGE sql (not plpgsql) — matches production.
+
 CREATE OR REPLACE FUNCTION public.is_admin_role()
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-    RETURN EXISTS (
+RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
         SELECT 1 FROM public.profiles
         WHERE id = auth.uid() AND role = 'admin'
     );
-END;
-$$;
+$$ LANGUAGE sql SECURITY DEFINER;
 
--- ── handle_new_user() ─────────────────────────────────────────────────────────
--- Automatically creates a profile row when a new user signs up.
+-- ── handle_new_user() ───────────────────────────────────────────────────────
+-- Automatically creates a profile row when a new user signs up via Supabase Auth.
+
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
+RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.profiles (id, email, role, is_active)
-    VALUES (NEW.id, NEW.email, 'user', true)
+    INSERT INTO public.profiles (id, email, role)
+    VALUES (NEW.id, NEW.email, 'user')
     ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger on auth.users
-DROP TRIGGER IF EXISTS handle_new_user ON auth.users;
-CREATE TRIGGER handle_new_user
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- ── sync_model_urls() ─────────────────────────────────────────────────────────
--- Automatically generates download URLs when model files are uploaded.
--- TODO: Export actual function body from Supabase Dashboard
---       (Database → Functions → sync_model_urls → Definition)
+-- ── Backfill profiles for existing auth users ───────────────────────────────
+-- Safe to re-run: ON CONFLICT DO NOTHING.
+
+INSERT INTO public.profiles (id, email, role)
+SELECT id, email, 'user' FROM auth.users
+ON CONFLICT (id) DO NOTHING;
+
+-- ── sync_model_urls() ───────────────────────────────────────────────────────
+-- OTA variant routing: Dashboard writes model_url (float16) + model_url_float32.
+-- Admin sets active_tflite_variant → trigger routes file_url + sha256_checksum.
+-- Flutter reads file_url for OTA download.
+-- MUST be BEFORE trigger so it can modify NEW before the row is written.
+
 CREATE OR REPLACE FUNCTION public.sync_model_urls()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
+RETURNS TRIGGER AS $$
 BEGIN
-    -- TODO: paste your actual sync_model_urls() logic here
-    -- This function typically constructs a public download URL from
-    -- the storage bucket path and updates model_registry.download_url
+    -- Enforce valid variant values
+    IF NEW.active_tflite_variant IS NOT NULL
+       AND NEW.active_tflite_variant NOT IN ('float16', 'float32') THEN
+        NEW.active_tflite_variant := 'float16';
+    END IF;
+
+    -- Route file_url based on admin's variant choice
+    IF COALESCE(NEW.active_tflite_variant, 'float16') = 'float32'
+       AND NEW.model_url_float32 IS NOT NULL THEN
+        NEW.file_url := NEW.model_url_float32;
+        -- Route sha256_checksum from float32 variant if available
+        IF NEW.sha256_float32 IS NOT NULL THEN
+            NEW.sha256_checksum := NEW.sha256_float32;
+        END IF;
+    ELSIF NEW.model_url IS NOT NULL THEN
+        NEW.file_url := NEW.model_url;
+    END IF;
+
     RETURN NEW;
 END;
-$$;
+$$ LANGUAGE plpgsql;
 
--- Triggers on model_registry (INSERT + UPDATE)
-DROP TRIGGER IF EXISTS sync_model_urls_insert ON public.model_registry;
-CREATE TRIGGER sync_model_urls_insert
-    AFTER INSERT ON public.model_registry
+-- BEFORE triggers on model_registry (INSERT + UPDATE)
+DROP TRIGGER IF EXISTS sync_model_urls_trigger ON public.model_registry;
+CREATE TRIGGER sync_model_urls_trigger
+    BEFORE UPDATE ON public.model_registry
     FOR EACH ROW EXECUTE FUNCTION public.sync_model_urls();
 
-DROP TRIGGER IF EXISTS sync_model_urls_update ON public.model_registry;
-CREATE TRIGGER sync_model_urls_update
-    AFTER UPDATE ON public.model_registry
+DROP TRIGGER IF EXISTS sync_model_urls_insert_trigger ON public.model_registry;
+CREATE TRIGGER sync_model_urls_insert_trigger
+    BEFORE INSERT ON public.model_registry
     FOR EACH ROW EXECUTE FUNCTION public.sync_model_urls();

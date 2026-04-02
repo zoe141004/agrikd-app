@@ -26,6 +26,10 @@ _engines = None
 _start_time = None
 _api_key = ""
 
+# Inference lock: serialize GPU access across waitress threads
+_inference_lock = Lock()
+_prediction_count = 0
+
 
 # ── API Key Authorization (Zero-Trust for LAN) ──
 @app.before_request
@@ -39,6 +43,19 @@ def _check_api_key():
 # ── Simple in-memory rate limiter (no external deps) ──
 _rate_lock = Lock()
 _rate_buckets = defaultdict(list)  # ip -> [timestamps]
+_last_rate_cleanup = 0.0
+
+
+def _do_rate_cleanup(cutoff):
+    """Remove stale IPs from rate buckets (every 60s, must hold _rate_lock)."""
+    global _last_rate_cleanup
+    now = time.time()
+    if now - _last_rate_cleanup < 60:
+        return
+    _last_rate_cleanup = now
+    stale = [k for k, v in _rate_buckets.items() if not v or v[-1] < cutoff]
+    for k in stale:
+        del _rate_buckets[k]
 
 
 def rate_limit(max_per_minute=30):
@@ -58,16 +75,12 @@ def rate_limit(max_per_minute=30):
                 ]
                 if len(_rate_buckets[ip]) >= max_per_minute:
                     return jsonify({
-                        "error": "Rate limit exceeded (30 req/min)",
+                        "error": f"Rate limit exceeded ({max_per_minute} req/min)",
                     }), 429
                 _rate_buckets[ip].append(now)
 
-                # Periodic cleanup: remove stale IPs every 100 requests
-                if sum(len(v) for v in _rate_buckets.values()) % 100 == 0:
-                    stale = [k for k, v in _rate_buckets.items()
-                             if not v or v[-1] < cutoff]
-                    for k in stale:
-                        del _rate_buckets[k]
+                # Periodic cleanup: remove stale IPs every 60 seconds
+                _do_rate_cleanup(cutoff)
 
             return f(*args, **kwargs)
 
@@ -112,6 +125,12 @@ def predict():
     - image: JPEG/PNG file (max 10 MB)
     - leaf_type: string (default: first available model)
     """
+    global _prediction_count
+
+    # H3: Guard — no engines loaded
+    if not _engines:
+        return jsonify({"error": "No models loaded"}), 503
+
     if "image" not in request.files:
         return jsonify({"error": "No image file provided"}), 400
 
@@ -138,11 +157,18 @@ def predict():
             return jsonify({"error": "Invalid image file"}), 400
 
         engine = _engines[leaf_type]
-        result = engine.predict(frame)
+
+        # C3: Serialize GPU access across waitress threads
+        with _inference_lock:
+            result = engine.predict(frame)
 
         # Save to DB
         _db.save_prediction(leaf_type, result)
-        _db.cleanup_old_records()
+
+        # M4: Throttle cleanup to every 100 predictions
+        _prediction_count += 1
+        if _prediction_count % 100 == 0:
+            _db.cleanup_old_records()
 
         return jsonify({
             "leaf_type": leaf_type,

@@ -12,6 +12,7 @@ import DataManagementPage from './pages/DataManagementPage'
 import ReleasesPage from './pages/ReleasesPage'
 import SystemHealthPage from './pages/SystemHealthPage'
 import SettingsPage from './pages/SettingsPage'
+import ModelReportsPage from './pages/ModelReportsPage'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -92,6 +93,7 @@ export default function App() {
           <Route path="/data" element={<DataManagementPage />} />
           <Route path="/releases" element={<ReleasesPage />} />
           <Route path="/health" element={<SystemHealthPage />} />
+          <Route path="/reports" element={<ModelReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -191,7 +191,7 @@ app/
 |
 |-- admin-dashboard/                  # React admin dashboard
 |   |-- src/
-|   |   |-- pages/                    # LoginPage, DashboardPage, PredictionsPage, ModelsPage
+|   |   |-- pages/                    # 10 pages (Login, Dashboard, Predictions, Models, Users, DataManagement, Releases, SystemHealth, ModelReports, Settings)
 |   |   |-- components/Layout.jsx     # Sidebar navigation
 |   |   |-- lib/supabase.js           # Supabase client
 |
@@ -202,25 +202,50 @@ app/
 |   |-- agrikd.service                # Systemd unit file
 |   |-- setup_jetson.sh               # One-click setup
 |
-|-- supabase/migrations/              # SQL migrations
-|   |-- 001_init.sql                  # Tables + RLS policies
-|   |-- 002_admin_policies.sql        # Admin access policies
+|-- database/migrations/              # SQL migrations
+|   |-- 001_tables.sql                # Core tables (predictions, models, profiles, devices)
+|   |-- 002_rls_policies.sql          # RLS policies + admin helpers
+|   |-- 003_functions_triggers.sql    # Server-side RPCs + triggers
+|   |-- 004_indexes.sql               # Performance indexes
+|   |-- 005_storage.sql               # Storage buckets + policies
+|   |-- 006_model_reports_and_rpcs.sql # Model reports table + dashboard RPCs
 |
-|-- .github/workflows/               # CI/CD
+|-- .github/workflows/               # CI/CD (11 workflows)
 |   |-- ci.yml                        # Lint, Test, Model Conversion, Build APK
 |   |-- release.yml                   # GitHub Release + APK
+|   |-- model-pipeline.yml            # Full conversion + benchmark + upload
+|   |-- model-rollback.yml            # Rollback model to previous version
+|   |-- validate-model.yml            # Validate + benchmark a specific model
+|   |-- train.yml                     # Run full training pipeline
+|   |-- dvc-pull.yml                  # Pull datasets from Google Drive
+|   |-- dvc-push.yml                  # Push datasets to Google Drive
+|   |-- dataset-upload.yml            # Add new dataset from GDrive or predictions
+|   |-- deploy.yml                    # Trigger Vercel deployment
+|   |-- export-data.yml               # Export predictions from Supabase
 |
-|-- test/                             # Flutter tests (73 tests)
+|-- mobile_app/test/                  # Flutter tests (89 tests)
 |   |-- unit/                         # 6 files, 36 tests
-|   |-- dao/                          # 1 file, 17 tests
+|   |-- dao/                          # 1 file, 21 tests
 |   |-- provider/                     # 2 files, 13 tests
-|   |-- widget_test.dart              # 3 widget tests
+|   |-- integration/                  # 1 file, 15 tests (OTA flow)
+|   |-- widget_test.dart              # 4 widget tests
 |   |-- test_helper.dart              # Test infrastructure
 |
 |-- android/, ios/, web/, windows/    # Flutter platform dirs
 |-- pubspec.yaml                      # Flutter dependencies
-|-- build_plan.md                     # Implementation log & progress
-|-- project_instruction.md            # This file
+|-- docs/
+|   |-- technical/
+|   |   |-- build_plan.md             # Implementation log & progress
+|   |   |-- project_instruction.md    # This file
+|   |   |-- project_context.md        # Project context & background
+|   |-- guides/
+|       |-- admin_dashboard_manual.md # Admin dashboard user guide
+|       |-- jetson_deployment_guide.md # Jetson edge deployment guide
+|       |-- product_release.md        # Product release checklist
+|       |-- cicd_setup.md             # CI/CD pipeline setup guide
+|       |-- flutter_app_build.md      # Flutter build instructions
+|       |-- mlops_pipeline_setup.md   # MLOps pipeline setup guide
+|       |-- supabase_setup.md         # Supabase setup guide
 |-- venv_mlops/                       # Python venv (git-ignored)
 ```
 
@@ -766,14 +791,20 @@ CREATE INDEX idx_sync_queue_status ON sync_queue(status);
   - Tech: React 18, react-router-dom, recharts, @supabase/supabase-js
   - Deploy: Vercel hoac GitHub Pages
 
-- **Screens:**
+- **Screens (10 trang, bao gom Login):**
   - Login: Email/password (admin account)
-  - Dashboard: Aggregated stats (total predictions, users, synced, models) + BarChart daily scans + PieChart disease distribution
+  - Dashboard: Aggregated stats (server-side RPCs) + BarChart daily scans + PieChart disease distribution
   - Predictions: Paginated table 25/page, filters (leaf type, date range), Export CSV/JSON (max 10000 rows)
   - Models: Model registry table voi class labels, version, accuracy, SHA-256
+  - Users: Danh sach nguoi dung, so predictions, ngay tham gia, trang thai admin
+  - Data Management: Quan ly datasets, export/import du lieu, DVC operations
+  - Releases: Quan ly cac phien ban phat hanh, APK, release notes
+  - System Health: Trang thai he thong, Supabase metrics, storage usage, sync stats
+  - Model Reports: Benchmark reports, accuracy trends, cross-format comparison
+  - Settings: Cau hinh admin dashboard, notifications, system preferences
 
 - **Admin RLS:**
-  - `supabase/migrations/002_admin_policies.sql`
+  - `database/migrations/002_rls_policies.sql`
   - `is_admin()` function kiem tra email admin
   - Admin co the doc tat ca predictions va storage objects
 
@@ -911,19 +942,44 @@ curl http://localhost:8080/health
 
 ## 12. CI/CD Pipeline (GitHub Actions) — ✅ DA TRIEN KHAI
 
-### 12.1 Trigger
+### 12.1 Workflows Overview (11 workflows)
+
+**Automatic workflows** (triggered boi push/PR):
+
+| Workflow | File | Trigger | Muc dich |
+|----------|------|---------|----------|
+| **CI** | `ci.yml` | Push to `main`/`release/*`, PRs to `main` | Lint, test, build APK |
+| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release |
+
+**Manual workflows** (workflow_dispatch):
+
+| Workflow | File | Muc dich |
+|----------|------|----------|
+| **Model Pipeline** | `model-pipeline.yml` | Full conversion + benchmark + upload to Supabase |
+| **Model Rollback** | `model-rollback.yml` | Rollback model to previous version |
+| **Validate Model** | `validate-model.yml` | Validate + benchmark a specific model |
+| **Train** | `train.yml` | Run full training pipeline |
+| **DVC Pull** | `dvc-pull.yml` | Pull datasets from Google Drive |
+| **DVC Push** | `dvc-push.yml` | Push datasets to Google Drive |
+| **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive or predictions |
+| **Deploy** | `deploy.yml` | Trigger Vercel deployment for admin dashboard |
+| **Export Data** | `export-data.yml` | Export predictions from Supabase |
+
+> Chi tiet cau hinh: xem `docs/guides/cicd_setup.md`
+
+### 12.2 Trigger
 - **CI** (`ci.yml`): Push/PR len branch `main` hoac `release/*`
 - **Release** (`release.yml`): Push tag `v*` (e.g., `v1.0.0`)
 - Model conversion chi chay khi commit message chua `[model]` hoac thay doi `mlops_pipeline/`
 
-### 12.2 Pipeline Stages (da implement)
+### 12.3 CI Pipeline Stages (da implement)
 
 **File: `.github/workflows/ci.yml`** — 5 stages:
 
 | Stage | Job | Mo ta |
 |-------|-----|-------|
 | 1. Lint | `lint` | `dart format --set-exit-if-changed` + `flutter analyze` |
-| 2. Test | `test` | `flutter test` (73 tests), can `libsqlite3-dev` |
+| 2. Test | `test` | `flutter test` (89 tests), can `libsqlite3-dev` |
 | 3. Model Conversion | `model-conversion` | `run_pipeline.py` cho Tomato + Burmese, upload artifacts |
 | 4. Model Validation | `model-validation` | `validate_models.py` + `evaluate_models.py` |
 | 5. Build APK | `build` | `flutter build apk --release` voi `--dart-define` Supabase secrets |
@@ -934,11 +990,11 @@ curl http://localhost:8080/health
 |-------|-------|
 | 6. Release | Test → Build APK → Create GitHub Release voi APK attached |
 
-### 12.3 Secrets can cau hinh
+### 12.4 Secrets can cau hinh
 - `SUPABASE_URL` — Supabase project URL
 - `SUPABASE_ANON_KEY` — Supabase anonymous key
 
-### 12.4 Self-Hosted Runner (Jetson)
+### 12.5 Self-Hosted Runner (Jetson)
 - Cai GitHub Actions runner tren Jetson (se them khi setup Jetson deployment)
 - Test TensorRT conversion truc tiep tren hardware
 - Verify .engine file hoat dong dung
@@ -994,7 +1050,99 @@ git commit -m "Update tomato dataset v2"
 
 ---
 
-## 14. Test Data Split
+## 14. MLOps Enhancements (Planned)
+
+> **Luu y**: Cac tinh nang duoi day la **du kien / chua implement**. Ghi lai day de dinh huong phat trien va lam tai lieu thiet ke.
+
+### 14.1 Data Drift Detection (Planned)
+
+**Muc dich**: Phat hien khi du lieu thuc te (production) lech khoi phan phoi training data, dan den giam chat luong du doan.
+
+**Approach**: Theo doi phan phoi confidence score cua cac prediction theo thoi gian.
+
+**Implementation**:
+1. **Supabase RPC `get_confidence_stats(interval_days)`**: Tra ve avg, stddev, va histogram cua confidence scores trong khoang thoi gian chi dinh.
+   ```sql
+   -- Vi du RPC function
+   CREATE OR REPLACE FUNCTION get_confidence_stats(interval_days INT DEFAULT 30)
+   RETURNS JSON AS $$
+   SELECT json_build_object(
+     'avg_confidence', AVG(confidence),
+     'stddev_confidence', STDDEV(confidence),
+     'total_predictions', COUNT(*),
+     'histogram', json_agg(json_build_object(
+       'bucket', bucket,
+       'count', cnt
+     ))
+   )
+   FROM (
+     SELECT
+       width_bucket(confidence, 0, 1, 10) AS bucket,
+       COUNT(*) AS cnt
+     FROM predictions
+     WHERE created_at >= NOW() - (interval_days || ' days')::INTERVAL
+     GROUP BY bucket
+   ) sub
+   CROSS JOIN (
+     SELECT AVG(confidence) AS confidence, STDDEV(confidence)
+     FROM predictions
+     WHERE created_at >= NOW() - (interval_days || ' days')::INTERVAL
+   ) stats;
+   $$ LANGUAGE sql SECURITY DEFINER;
+   ```
+
+2. **Admin Dashboard chart**: Trend line hien thi average confidence trong 30 ngay gan nhat. Hien thi tren trang Dashboard hoac Predictions.
+
+3. **Alert threshold**: Khi avg confidence giam duoi **70%**, danh dau la "potential drift" tren Admin Dashboard.
+
+4. **Gioi han**: Day la proxy nhe (lightweight proxy) cho data drift detection that su. True drift detection can so sanh phan phoi feature cua input data voi training data (vi du: dung Kolmogorov-Smirnov test hoac Population Stability Index). Cach nay chi phat hien khi mo hinh "khong tu tin" -- co the do data drift hoac domain shift.
+
+### 14.2 Automated Retraining Trigger (Planned)
+
+**Muc dich**: Tu dong canh bao admin khi co du feedback (model_reports) de xem xet re-train mo hinh.
+
+**Approach**: Khi so luong model_reports cho mot version vuot qua threshold (mac dinh: 50), gui thong bao.
+
+**Implementation options**:
+
+1. **Option 1 -- Supabase Database Webhook**:
+   - Cau hinh webhook tren bang `model_reports`
+   - Khi `COUNT(*) WHERE version = X` vuot threshold, gui POST den URL da cau hinh
+   - Uu diem: Real-time, khong can code them
+   - Nhuoc diem: Can endpoint nhan webhook (co the dung Supabase Edge Function)
+
+2. **Option 2 -- Supabase Edge Function (daily cron)**:
+   - Edge Function chay hang ngay (cron), dem so report theo version
+   - Khi vuot threshold, gui email hoac Slack notification
+   ```typescript
+   // Vi du Edge Function (Deno)
+   const { data } = await supabase
+     .from('model_reports')
+     .select('leaf_type, version', { count: 'exact', head: true })
+     .gte('created_at', thirtyDaysAgo)
+   // Neu count > THRESHOLD -> gui alert
+   ```
+   - Uu diem: Don gian, kiem soat logic tot
+   - Nhuoc diem: Khong real-time (chay 1 lan/ngay)
+
+3. **Option 3 -- CI Workflow (manual trigger)**:
+   - Admin xem reports tren dashboard, quyet dinh re-train
+   - Trigger GitHub Actions workflow `retrain.yml` voi params: `leaf_type`, `version`
+   - Workflow pull data tu DVC, chay KD training, push model moi
+   - Uu diem: Admin kiem soat hoan toan
+   - Nhuoc diem: Khong tu dong
+
+**Gioi han**: Full automated retraining yeu cau:
+- Training data pipeline (DVC pull + augmentation)
+- GPU compute (GitHub Actions free tier khong co GPU; can self-hosted runner hoac cloud GPU)
+- Validation gate truoc khi deploy (so sanh accuracy moi vs cu)
+- Nhung yeu to nay vuot qua pham vi zero-cost cua du an
+
+> **Khuyen nghi**: Bat dau voi Option 3 (manual trigger) vi don gian nhat va phu hop voi quy mo du an. Khi co nhieu nguoi dung hon, chuyen sang Option 2 (Edge Function cron).
+
+---
+
+## 15. Test Data Split
 
 Cac benchmark duoc thuc hien tren test split:
 - **Method**: `sklearn.model_selection.train_test_split`
@@ -1006,7 +1154,7 @@ Cac benchmark duoc thuc hien tren test split:
 
 ---
 
-## 15. Quick Start
+## 16. Quick Start
 
 ### MLOps Pipeline
 ```bash
@@ -1039,7 +1187,7 @@ cp models/tomato/tomato_student.tflite assets/models/tomato/
 flutter run --dart-define-from-file=.env
 
 # 4. Run tests
-flutter test    # 73 tests across 10 files
+flutter test    # 89 tests across 11 files
 
 # 5. Build release APK
 flutter build apk --release --dart-define-from-file=.env
@@ -1058,9 +1206,9 @@ flutter build apk --release --dart-define-from-file=.env
 
 ---
 
-## 16. Flutter Test Suite
+## 17. Flutter Test Suite
 
-### 16.1 Test Infrastructure
+### 17.1 Test Infrastructure
 - **Test runner**: `flutter test` (dart test runner)
 - **Dev dependency**: `sqflite_common_ffi: ^2.3.4+4` cho desktop SQLite
 - **Shared helper**: `test/test_helper.dart`
@@ -1070,7 +1218,7 @@ flutter build apk --release --dart-define-from-file=.env
   - `resetForTest()` (`@visibleForTesting`): Reset singleton
   - `useInMemory` (`@visibleForTesting`): Force in-memory DB (tranh file locking giua test files)
 
-### 16.2 Test Files & Coverage
+### 17.2 Test Files & Coverage
 
 | # | File | Tests | Module |
 |---|------|-------|--------|
@@ -1083,19 +1231,20 @@ flutter build apk --release --dart-define-from-file=.env
 | 7 | `test/dao/dao_test.dart` | 17 | PredictionDao (8), PreferenceDao (5), ModelDao (4), SyncQueue (4) |
 | 8 | `test/provider/settings_provider_test.dart` | 4 | loadAll, setValue, themeModeProvider system/dark |
 | 9 | `test/provider/history_provider_test.dart` | 9 | State management, filters, copyWith, clearConfidenceFilter |
-| 10 | `test/widget_test.dart` | 3 | HomeScreen renders title, scan button, bottom navigation |
+| 10 | `test/widget_test.dart` | 4 | HomeScreen renders title, scan button, bottom navigation, all leaf types |
+| 11 | `test/integration/ota_model_test.dart` | 15 | OTA version rotation (5), model integrity (4), sync queue (4), full OTA flow (2) |
 
-**Tong: 73 tests, tat ca PASS**
+**Tong: 89 tests, tat ca PASS**
 
-### 16.3 Luu y ky thuat
-- Widget tests dung `pump(Duration(milliseconds: 500))` thay vi `pumpAndSettle()` vi StatsCard co async DB query trong initState
+### 17.3 Luu y ky thuat
+- Widget tests dung `_TestableHomeBody` lightweight widget thay vi full `HomeScreen` vi IndexedStack render HistoryScreen + SettingsScreen co heavy async operations
 - DAO tests dung `databaseFactoryFfiNoIsolate` (cung isolate) de tranh SQLite locking
 - Provider tests tao `ProviderContainer` rieng cho moi test, dispose qua `addTearDown`
 
 ---
 
-*Last updated: 2026-03-25*
+*Last updated: 2026-04-02*
 *Pipeline verified: Tomato (87.2% Top-1) + Burmese Grape Leaf (87.3% Top-1)*
-*Test suite: 73/73 tests passing, flutter analyze 0 issues*
+*Test suite: 89/89 tests passing, flutter analyze 0 issues*
 *All 10 implementation steps completed*
 *Release APK: 84.2 MB (fat) / 31.3 MB (arm64-v8a)*

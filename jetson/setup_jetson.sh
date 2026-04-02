@@ -41,7 +41,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 # 4. Install Python dependencies (full OpenCV with GUI support)
 echo "[4/10] Installing Python dependencies..."
-pip3 install --no-cache-dir numpy opencv-python requests flask waitress
+pip3 install --no-cache-dir numpy==1.24.4 opencv-python==4.8.1.78 requests==2.31.0 flask==3.0.3 waitress==3.0.0
 
 # 5. Install GUI dependencies (PyQt5 + camera tools)
 echo "[5/10] Installing GUI dependencies..."
@@ -72,6 +72,33 @@ for model_dir in "$SCRIPT_DIR/../models"/*/; do
         echo "  Engine already exists: $leaf_type"
     else
         echo "  ONNX not found: $onnx_file — skipping"
+    fi
+
+    # Compute SHA-256 and inject into config.json
+    if [ -f "$engine_file" ]; then
+        HASH=$(sha256sum "$engine_file" | awk '{print $1}')
+        CFG="$INSTALL_DIR/config/config.json"
+        if [ -f "$CFG" ]; then
+            python3 -c "
+import json, sys
+try:
+    cfg_path = sys.argv[1]
+    leaf = sys.argv[2]
+    sha = sys.argv[3]
+    with open(cfg_path) as f:
+        c = json.load(f)
+    if 'models' not in c:
+        c['models'] = {}
+    if leaf not in c['models']:
+        c['models'][leaf] = {}
+    c['models'][leaf]['sha256_checksum'] = sha
+    with open(cfg_path, 'w') as f:
+        json.dump(c, f, indent=4)
+except Exception as e:
+    print(f'[WARNING] Failed to inject SHA-256 into config: {e}', file=sys.stderr)
+" "$CFG" "$leaf_type" "$HASH"
+            echo "  SHA-256: ${HASH:0:16}... → config.json"
+        fi
     fi
 done
 

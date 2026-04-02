@@ -14,6 +14,7 @@
         "tomato": {
             "engine_path": "models/tomato_student.engine",
             "sha256_checksum": "",
+            "version": "1.0.0",
             "num_classes": 10,
             "class_labels": [
                 "Bacterial_spot", "Early_blight", "Late_blight",
@@ -25,6 +26,7 @@
         "burmese_grape_leaf": {
             "engine_path": "models/burmese_grape_leaf_student.engine",
             "sha256_checksum": "",
+            "version": "1.0.0",
             "num_classes": 5,
             "class_labels": [
                 "Anthracnose", "Healthy", "Insect Damage",

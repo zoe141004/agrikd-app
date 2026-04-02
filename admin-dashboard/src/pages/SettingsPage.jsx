@@ -38,7 +38,7 @@ export default function SettingsPage() {
     const cfg = getGitHubConfig()
     setGhForm({ ghOwner: cfg.ghOwner, ghRepo: cfg.ghRepo, ghToken: cfg.ghToken, ghBranch: cfg.ghBranch })
     setApiUrl(localStorage.getItem('validation_api_url') || '')
-    setApiKey(localStorage.getItem('validation_api_key') || '')
+    setApiKey(sessionStorage.getItem('validation_api_key') || '')
   }, [])
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function SettingsPage() {
 
   const saveApiConfig = () => {
     localStorage.setItem('validation_api_url', apiUrl)
-    localStorage.setItem('validation_api_key', apiKey)
+    sessionStorage.setItem('validation_api_key', apiKey)
     setApiSaved(true)
     setTimeout(() => setApiSaved(false), 2000)
   }

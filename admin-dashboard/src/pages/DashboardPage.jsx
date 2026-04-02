@@ -17,7 +17,6 @@ export default function DashboardPage() {
   const [error, setError] = useState(null)
   const [leafFilter, setLeafFilter] = useState('')
   const [leafOptions, setLeafOptions] = useState([])
-  const firstLoad = useState(true)[0]
 
   useEffect(() => { loadDashboard(true) }, [leafFilter])
 
@@ -30,52 +29,47 @@ export default function DashboardPage() {
     if (showSpinner) setLoading(true)
     setError(null)
     try {
-    // Build filtered queries
+    const rpcFilter = leafFilter || null
     const addFilter = (q) => leafFilter ? q.eq('leaf_type', leafFilter) : q
 
     const [
-      { count: total },
-      { data: usersData },
+      { data: rpcStats },
+      { data: diseaseDist },
+      { data: leafTypeOpts },
       { count: models },
-      { data: confData },
-      { data: diseaseRows },
       { data: dailyRows },
       { data: recent },
-      { data: allLeafTypes },
     ] = await Promise.all([
-      addFilter(supabase.from('predictions').select('*', { count: 'exact', head: true })),
-      addFilter(supabase.from('predictions').select('user_id')),
+      supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
+      supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
+      supabase.rpc('get_leaf_type_options'),
       supabase.from('model_registry').select('*', { count: 'exact', head: true }),
-      addFilter(supabase.from('predictions').select('confidence')),
-      addFilter(supabase.from('predictions').select('predicted_class_name, leaf_type')),
       addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true })),
       addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, confidence, created_at').order('created_at', { ascending: false }).limit(8)),
-      supabase.from('predictions').select('leaf_type'),
     ])
 
-    const uniqueUsers = new Set(usersData?.map(r => r.user_id) || []).size
-    const avgConf = confData?.length ? (confData.reduce((s, r) => s + (r.confidence || 0), 0) / confData.length * 100).toFixed(1) : 0
-
-    // Build leaf options from all data (unfiltered)
-    if (allLeafTypes) {
-      const types = [...new Set(allLeafTypes.map(r => r.leaf_type).filter(Boolean))]
-      setLeafOptions(types.sort())
+    // Leaf type options for dropdown
+    if (leafTypeOpts) {
+      setLeafOptions(leafTypeOpts.map(r => r.leaf_type).filter(Boolean).sort())
     }
 
-    setStats({ total: total || 0, users: uniqueUsers, models: models || 0, avgConf })
+    // Stats from RPC
+    const s = rpcStats || {}
+    setStats({
+      total: s.total || 0,
+      users: s.unique_users || 0,
+      models: models || 0,
+      avgConf: s.avg_confidence ? (s.avg_confidence * 100).toFixed(1) : 0,
+    })
 
-    if (diseaseRows) {
-      const counts = {}
+    // Disease distribution from RPC
+    if (diseaseDist) {
       const leafCounts = {}
-      diseaseRows.forEach(r => {
-        const name = cleanLabel(r.predicted_class_name)
-        counts[name] = (counts[name] || 0) + 1
-        leafCounts[r.leaf_type] = (leafCounts[r.leaf_type] || 0) + 1
-      })
+      diseaseDist.forEach(r => { leafCounts[r.type] = (leafCounts[r.type] || 0) + r.count })
       setDiseaseData(
-        Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count }))
+        diseaseDist.map(r => ({ name: cleanLabel(r.name), count: Number(r.count) })).slice(0, 8)
       )
-      const total2 = Object.values(leafCounts).reduce((s, v) => s + v, 0) || 1
+      const total2 = Object.values(leafCounts).reduce((a, b) => a + b, 0) || 1
       setLeafSplit(Object.entries(leafCounts).map(([name, count]) => ({ name, count, pct: ((count / total2) * 100).toFixed(1) })))
     }
 

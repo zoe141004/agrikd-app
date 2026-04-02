@@ -1,0 +1,274 @@
+name: Model Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      leaf_type:
+        description: 'Leaf type to rollback'
+        required: true
+        type: choice
+        options:
+          - tomato
+          - burmese_grape_leaf
+      reason:
+        description: 'Reason for rollback (required)'
+        required: true
+        type: string
+
+# Required secrets:
+#   SUPABASE_URL             - Supabase project URL
+#   SUPABASE_SERVICE_ROLE_KEY - Service role key (bypasses RLS)
+# Set in: GitHub repo > Settings > Secrets and variables > Actions
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ -z "$REASON" ]; then
+            echo "::error::Rollback reason is required"
+            exit 1
+          fi
+          echo "Rollback requested for: $LEAF_TYPE"
+          echo "Reason: $REASON"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          REASON: ${{ inputs.reason }}
+
+      - name: Get current active model from model_registry
+        id: current
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys, urllib.request, urllib.error
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          leaf_type = os.environ["LEAF_TYPE"]
+
+          url = (
+              f"{supabase_url}/rest/v1/model_registry"
+              f"?leaf_type=eq.{leaf_type}"
+              f"&select=id,version,model_url,model_url_float32,file_url,"
+              f"sha256_checksum,sha256_float32,accuracy_top1,active_tflite_variant"
+          )
+          req = urllib.request.Request(url, headers={
+              "apikey": service_key,
+              "Authorization": f"Bearer {service_key}",
+              "Accept": "application/vnd.pgrst.object+json",
+          })
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  data = json.loads(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as e:
+              body = e.read().decode("utf-8")
+              print(f"::error::Failed to query model_registry: {e.code} - {body}")
+              sys.exit(1)
+
+          print("Current active model:")
+          print(f"  Version:  {data['version']}")
+          print(f"  URL:      {data.get('model_url', 'N/A')}")
+          print(f"  SHA-256:  {data.get('sha256_checksum', 'N/A')}")
+          print(f"  Accuracy: {data.get('accuracy_top1', 'N/A')}%")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"id={data['id']}\n")
+              f.write(f"version={data['version']}\n")
+              f.write(f"model_url={data.get('model_url', '')}\n")
+              f.write(f"model_url_float32={data.get('model_url_float32', '')}\n")
+              f.write(f"sha256={data.get('sha256_checksum', '')}\n")
+              f.write(f"sha256_float32={data.get('sha256_float32', '')}\n")
+              f.write(f"accuracy={data.get('accuracy_top1', '')}\n")
+          PYEOF
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+
+      - name: Get previous version from model_versions
+        id: previous
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys, urllib.request, urllib.error, urllib.parse
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          leaf_type = os.environ["LEAF_TYPE"]
+          current_version = os.environ["CURRENT_VERSION"]
+
+          encoded_version = urllib.parse.quote(current_version, safe="")
+          url = (
+              f"{supabase_url}/rest/v1/model_versions"
+              f"?leaf_type=eq.{leaf_type}"
+              f"&version=neq.{encoded_version}"
+              f"&order=archived_at.desc"
+              f"&limit=1"
+              f"&select=id,version,model_url,sha256_checksum,accuracy,size_mb"
+          )
+          req = urllib.request.Request(url, headers={
+              "apikey": service_key,
+              "Authorization": f"Bearer {service_key}",
+              "Accept": "application/json",
+          })
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  data = json.loads(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as e:
+              body = e.read().decode("utf-8")
+              print(f"::error::Failed to query model_versions: {e.code} - {body}")
+              sys.exit(1)
+
+          if not data:
+              print(f"::error::No previous version found for '{leaf_type}'. Cannot rollback.")
+              sys.exit(1)
+
+          prev = data[0]
+          print("Previous version found:")
+          print(f"  Version:  {prev['version']}")
+          print(f"  URL:      {prev.get('model_url', 'N/A')}")
+          print(f"  SHA-256:  {prev.get('sha256_checksum', 'N/A')}")
+          print(f"  Accuracy: {prev.get('accuracy', 'N/A')}%")
+          print(f"  Size:     {prev.get('size_mb', 'N/A')} MB")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={prev['version']}\n")
+              f.write(f"model_url={prev.get('model_url', '')}\n")
+              f.write(f"sha256={prev.get('sha256_checksum', '')}\n")
+              f.write(f"accuracy={prev.get('accuracy', '')}\n")
+              f.write(f"size_mb={prev.get('size_mb', '')}\n")
+          PYEOF
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+
+      - name: Update model_registry to previous version
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys, urllib.request, urllib.error
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          leaf_type = os.environ["LEAF_TYPE"]
+
+          payload = {
+              "version": os.environ["PREV_VERSION"],
+              "model_url": os.environ["PREV_URL"],
+              "file_url": os.environ["PREV_URL"],
+              "sha256_checksum": os.environ["PREV_SHA"],
+          }
+
+          prev_acc = os.environ.get("PREV_ACC", "")
+          if prev_acc:
+              try:
+                  payload["accuracy_top1"] = float(prev_acc)
+              except ValueError:
+                  pass
+
+          url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{leaf_type}"
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(url, data=data, method="PATCH", headers={
+              "apikey": service_key,
+              "Authorization": f"Bearer {service_key}",
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal",
+          })
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  print(f"model_registry updated: {leaf_type} -> v{os.environ['PREV_VERSION']}")
+          except urllib.error.HTTPError as e:
+              body = e.read().decode("utf-8")
+              print(f"::error::Failed to update model_registry: {e.code} - {body}")
+              sys.exit(1)
+          PYEOF
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          PREV_VERSION: ${{ steps.previous.outputs.version }}
+          PREV_URL: ${{ steps.previous.outputs.model_url }}
+          PREV_SHA: ${{ steps.previous.outputs.sha256 }}
+          PREV_ACC: ${{ steps.previous.outputs.accuracy }}
+
+      - name: Insert audit log entry
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys, urllib.request, urllib.error
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+          payload = {
+              "action": "model_rollback",
+              "entity_type": "model_registry",
+              "entity_id": os.environ["ENTITY_ID"],
+              "details": {
+                  "leaf_type": os.environ["LEAF_TYPE"],
+                  "from_version": os.environ["FROM_VERSION"],
+                  "to_version": os.environ["TO_VERSION"],
+                  "reason": os.environ["REASON"],
+                  "from_model_url": os.environ["FROM_URL"],
+                  "to_model_url": os.environ["TO_URL"],
+                  "from_accuracy": os.environ.get("FROM_ACC", ""),
+                  "to_accuracy": os.environ.get("TO_ACC", ""),
+              },
+          }
+
+          url = f"{supabase_url}/rest/v1/audit_log"
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(url, data=data, method="POST", headers={
+              "apikey": service_key,
+              "Authorization": f"Bearer {service_key}",
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal",
+          })
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  print("Audit log entry created")
+          except urllib.error.HTTPError as e:
+              body = e.read().decode("utf-8")
+              print(f"::warning::Failed to insert audit_log: {e.code} - {body}")
+          PYEOF
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          ENTITY_ID: ${{ steps.current.outputs.id }}
+          FROM_VERSION: ${{ steps.current.outputs.version }}
+          TO_VERSION: ${{ steps.previous.outputs.version }}
+          REASON: ${{ inputs.reason }}
+          FROM_URL: ${{ steps.current.outputs.model_url }}
+          TO_URL: ${{ steps.previous.outputs.model_url }}
+          FROM_ACC: ${{ steps.current.outputs.accuracy }}
+          TO_ACC: ${{ steps.previous.outputs.accuracy }}
+
+      - name: Rollback summary
+        run: |
+          echo "============================================"
+          echo "  MODEL ROLLBACK COMPLETE"
+          echo "============================================"
+          echo ""
+          echo "  Leaf type:      $LEAF_TYPE"
+          echo "  From version:   $FROM_VERSION"
+          echo "  To version:     $TO_VERSION"
+          echo "  Reason:         $REASON"
+          echo "  Previous URL:   $TO_URL"
+          echo "  Previous SHA:   $TO_SHA"
+          echo "  Previous Acc:   ${TO_ACC}%"
+          echo ""
+          echo "  NOTE: Mobile app users will receive the"
+          echo "  rolled-back model on next OTA check."
+          echo "============================================"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          FROM_VERSION: ${{ steps.current.outputs.version }}
+          TO_VERSION: ${{ steps.previous.outputs.version }}
+          REASON: ${{ inputs.reason }}
+          TO_URL: ${{ steps.previous.outputs.model_url }}
+          TO_SHA: ${{ steps.previous.outputs.sha256 }}
+          TO_ACC: ${{ steps.previous.outputs.accuracy }}

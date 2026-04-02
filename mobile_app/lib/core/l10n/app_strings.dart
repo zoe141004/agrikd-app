@@ -273,6 +273,14 @@ class S {
 
     // Status
     'offline_mode': 'Offline mode — sync features unavailable',
+
+    // Model report
+    'report_result': 'Report',
+    'report_wrong_result': 'Report wrong result',
+    'report_reason_hint': 'Why is this result incorrect?',
+    'submit_report': 'Submit report',
+    'report_sent': 'Report submitted. Thank you!',
+    'report_failed': 'Could not send report. Try again later.',
   };
 
   static const _vi = <String, String>{
@@ -515,5 +523,13 @@ class S {
 
     // Status
     'offline_mode': 'Chế độ ngoại tuyến — tính năng đồng bộ không khả dụng',
+
+    // Model report
+    'report_result': 'Báo lỗi',
+    'report_wrong_result': 'Báo kết quả sai',
+    'report_reason_hint': 'Tại sao kết quả này không đúng?',
+    'submit_report': 'Gửi báo cáo',
+    'report_sent': 'Đã gửi báo cáo. Cảm ơn bạn!',
+    'report_failed': 'Không thể gửi báo cáo. Thử lại sau.',
   };
 }

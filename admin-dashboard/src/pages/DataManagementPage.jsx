@@ -52,22 +52,28 @@ export default function DataManagementPage() {
     setLoading(true)
     setError(null)
     try {
-    const { data: rows } = await supabase.from('predictions').select('user_id, leaf_type, predicted_class_name, confidence, created_at').order('created_at', { ascending: false })
-    if (rows) {
-      const leafMap = {}
-      rows.forEach(r => {
-        leafMap[r.leaf_type] = (leafMap[r.leaf_type] || 0) + 1
-      })
-      setStats({ total: rows.length })
-      setQuality(Object.entries(leafMap).map(([lt, total]) => {
-        const ltRows = rows.filter(r => r.leaf_type === lt)
+    const [{ data: rpcStats }, { data: leafTypeOpts }] = await Promise.all([
+      supabase.rpc('get_dashboard_stats', { p_leaf_type: null }),
+      supabase.rpc('get_leaf_type_options'),
+    ])
+    const s = rpcStats || {}
+    setStats({ total: s.total || 0 })
+    const leafTypes = (leafTypeOpts || []).map(r => r.leaf_type).filter(Boolean)
+    setLeafOptions(leafTypes)
+
+    // Get per-leaf-type quality via individual RPC calls
+    const qualityResults = await Promise.all(
+      leafTypes.map(async lt => {
+        const { data: ltStats } = await supabase.rpc('get_dashboard_stats', { p_leaf_type: lt })
+        const ls = ltStats || {}
         return {
-          name: lt, total,
-          highConf: (ltRows.filter(r => r.confidence >= 0.8).length / total * 100).toFixed(0),
+          name: lt,
+          total: ls.total || 0,
+          highConf: ls.total ? ((ls.high_confidence_count || 0) / ls.total * 100).toFixed(0) : '0',
         }
-      }))
-      setLeafOptions(Object.keys(leafMap))
-    }
+      })
+    )
+    setQuality(qualityResults)
     } catch (err) { setError(err.message) }
     setLoading(false)
   }

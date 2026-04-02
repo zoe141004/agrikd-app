@@ -27,6 +27,10 @@ class TfliteInferenceService {
     throw UnsupportedError('TFLite inference is not supported on web.');
   }
 
+  Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
+    throw UnsupportedError('TFLite inference is not supported on web.');
+  }
+
   InferenceResult runInference(Float32List input, int numClasses) {
     throw UnsupportedError('TFLite inference is not supported on web.');
   }

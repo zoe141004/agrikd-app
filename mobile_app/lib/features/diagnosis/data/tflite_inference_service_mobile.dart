@@ -1,3 +1,4 @@
+import 'dart:io' show File;
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -63,6 +64,22 @@ class TfliteInferenceService {
     // Try delegates with fallback: GPU -> XNNPack -> CPU
     _interpreter = await _loadWithDelegateFallback(assetPath);
     _currentLeafType = leafType;
+  }
+
+  /// Load an OTA model from the filesystem (not bundled asset).
+  /// Returns false if loading fails (caller should handle rollback).
+  Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
+    dispose();
+
+    try {
+      _interpreter = await _loadFromFileWithDelegateFallback(filePath);
+      _currentLeafType = leafType;
+      return true;
+    } catch (_) {
+      _interpreter = null;
+      _currentLeafType = null;
+      return false;
+    }
   }
 
   Future<Interpreter> _loadWithDelegateFallback(String assetPath) async {
@@ -138,6 +155,83 @@ class TfliteInferenceService {
         assetPath,
         options: options,
       );
+      _delegateUsed = 'XNNPack';
+      if (currentPreferred != 'XNNPack') {
+        await _preferenceDao.setValue('preferred_delegate', 'XNNPack');
+      }
+      return interpreter;
+    } catch (e) {
+      xnnpackDelegate?.delete();
+      rethrow;
+    }
+  }
+
+  // ── File-based loading (for OTA models) ──────────────────────────────────
+
+  Future<Interpreter> _loadFromFileWithDelegateFallback(String filePath) async {
+    final preferred = await _preferenceDao.getValue('preferred_delegate');
+
+    if (preferred == 'GPU') {
+      try {
+        return await _tryGpuFile(filePath, preferred);
+      } catch (_) {}
+      try {
+        return await _tryXnnpackFile(filePath, preferred);
+      } catch (_) {}
+    } else if (preferred == 'XNNPack') {
+      try {
+        return await _tryXnnpackFile(filePath, preferred);
+      } catch (_) {}
+      try {
+        return await _tryGpuFile(filePath, preferred);
+      } catch (_) {}
+    } else {
+      try {
+        return await _tryGpuFile(filePath, preferred);
+      } catch (_) {}
+      try {
+        return await _tryXnnpackFile(filePath, preferred);
+      } catch (_) {}
+    }
+
+    // Fallback to CPU
+    final interpreter = Interpreter.fromFile(File(filePath));
+    _delegateUsed = 'CPU';
+    if (preferred != 'CPU') {
+      await _preferenceDao.setValue('preferred_delegate', 'CPU');
+    }
+    return interpreter;
+  }
+
+  Future<Interpreter> _tryGpuFile(
+    String filePath,
+    String? currentPreferred,
+  ) async {
+    GpuDelegateV2? gpuDelegate;
+    try {
+      gpuDelegate = GpuDelegateV2();
+      final options = InterpreterOptions()..addDelegate(gpuDelegate);
+      final interpreter = Interpreter.fromFile(File(filePath), options: options);
+      _delegateUsed = 'GPU';
+      if (currentPreferred != 'GPU') {
+        await _preferenceDao.setValue('preferred_delegate', 'GPU');
+      }
+      return interpreter;
+    } catch (e) {
+      gpuDelegate?.delete();
+      rethrow;
+    }
+  }
+
+  Future<Interpreter> _tryXnnpackFile(
+    String filePath,
+    String? currentPreferred,
+  ) async {
+    XNNPackDelegate? xnnpackDelegate;
+    try {
+      xnnpackDelegate = XNNPackDelegate();
+      final options = InterpreterOptions()..addDelegate(xnnpackDelegate);
+      final interpreter = Interpreter.fromFile(File(filePath), options: options);
       _delegateUsed = 'XNNPack';
       if (currentPreferred != 'XNNPack') {
         await _preferenceDao.setValue('preferred_delegate', 'XNNPack');

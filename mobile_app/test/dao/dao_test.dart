@@ -219,16 +219,25 @@ void main() {
       expect(models.isNotEmpty, isTrue);
     });
 
-    test('updateVersion modifies model entry', () async {
-      await dao.updateVersion(
-        'test_model',
-        '1.1.0',
-        'assets/new.tflite',
-        'def456',
+    test('promoteNewVersion adds new active and demotes old', () async {
+      await dao.promoteNewVersion(
+        leafType: 'test_model',
+        version: '1.1.0',
+        filePath: 'assets/new.tflite',
+        checksum: 'def456',
+        numClasses: 3,
+        classLabels: '["A","B","C"]',
       );
-      final model = await dao.getActive('test_model');
-      expect(model!['version'], '1.1.0');
-      expect(model['sha256_checksum'], 'def456');
+      final active = await dao.getActive('test_model');
+      expect(active, isNotNull);
+      expect(active!['version'], '1.1.0');
+      expect(active['sha256_checksum'], 'def456');
+      expect(active['role'], 'active');
+
+      final fallback = await dao.getFallback('test_model');
+      expect(fallback, isNotNull);
+      expect(fallback!['version'], '1.0.0');
+      expect(fallback['role'], 'fallback');
     });
   });
 

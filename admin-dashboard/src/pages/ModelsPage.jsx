@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
-const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
+const TABS = ['Registry', 'Benchmarks', 'Compare Versions', 'Upload Model', 'Validate', 'OTA Deploy']
 
 export default function ModelsPage() {
   const [tab, setTab] = useState('Registry')
@@ -37,6 +37,11 @@ export default function ModelsPage() {
   const [benchLoading, setBenchLoading] = useState(false)
   const [benchLeaf, setBenchLeaf] = useState('')
   const [benchVersion, setBenchVersion] = useState('')
+
+  // Compare Versions
+  const [compareLeaf, setCompareLeaf] = useState('')
+  const [compareData, setCompareData] = useState([])
+  const [compareLoading, setCompareLoading] = useState(false)
 
   // Version history
   const [versions, setVersions] = useState([])
@@ -105,6 +110,22 @@ export default function ModelsPage() {
       setVersions(verData || [])
     } catch (err) { setError(err.message) }
     setLoading(false)
+  }
+
+  const loadCompareData = async (leafType) => {
+    if (!leafType) { setCompareData([]); return }
+    setCompareLoading(true)
+    try {
+      const { data, error: err } = await supabase
+        .from('model_benchmarks')
+        .select('*')
+        .eq('leaf_type', leafType)
+        .order('version', { ascending: false })
+        .order('format', { ascending: true })
+      if (err) throw new Error(err.message)
+      setCompareData(data || [])
+    } catch (err) { setError(err.message) }
+    setCompareLoading(false)
   }
 
   // ── Registry Tab ──────────────────────────────────────────────────────────
@@ -340,6 +361,17 @@ export default function ModelsPage() {
     ? [...new Set(benchmarks.filter(b => b.leaf_type === activeBenchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     : []
   const resolvedBenchVersion = benchVersion || activeBenchVersions[0] || ''
+
+  // Compare Versions: available leaf types from all benchmark data
+  const compareLeafTypes = [...new Set(benchmarks.map(b => b.leaf_type))].sort()
+  const activeCompareLeaf = compareLeaf || compareLeafTypes[0] || ''
+  // Group compare data by version
+  const compareByVersion = compareData.reduce((acc, b) => {
+    if (!acc[b.version]) acc[b.version] = []
+    acc[b.version].push(b)
+    return acc
+  }, {})
+  const compareVersionList = Object.keys(compareByVersion).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
 
   const pipelineRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
 
@@ -677,6 +709,139 @@ export default function ModelsPage() {
               </div>
             )
           })()}
+        </>
+      )}
+
+      {/* ── Compare Versions Tab ── */}
+      {tab === 'Compare Versions' && (
+        <>
+          {/* Leaf type filter */}
+          <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Dataset</label>
+                <select className="form-input" style={{ width: 200, padding: '6px 10px', fontSize: 13 }} value={activeCompareLeaf} onChange={e => { setCompareLeaf(e.target.value); loadCompareData(e.target.value) }}>
+                  {compareLeafTypes.length === 0 && <option value="">No benchmark data</option>}
+                  {compareLeafTypes.map(lt => (
+                    <option key={lt} value={lt}>{models.find(m => m.leaf_type === lt)?.display_name || lt.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <button className="btn btn-sm" onClick={() => loadCompareData(activeCompareLeaf)} disabled={compareLoading || !activeCompareLeaf}>
+                {compareLoading ? 'Loading...' : 'Load Comparison'}
+              </button>
+              {compareVersionList.length > 1 && (
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>Comparing {compareVersionList.length} versions side-by-side</span>
+              )}
+            </div>
+          </div>
+
+          {/* Comparison table */}
+          {compareLoading && (
+            <div className="loading-spinner"><div className="spinner" /><span>Loading benchmark data...</span></div>
+          )}
+
+          {!compareLoading && compareData.length === 0 && (
+            <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+              {benchmarks.length === 0
+                ? 'No benchmark data available. Run the pipeline from the Validate tab to generate benchmarks.'
+                : activeCompareLeaf
+                  ? 'Click "Load Comparison" to fetch benchmark data for this dataset.'
+                  : 'Select a dataset to compare versions.'}
+            </div>
+          )}
+
+          {!compareLoading && compareData.length > 0 && (
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="card-header">
+                <div>
+                  <div className="card-label">{models.find(m => m.leaf_type === activeCompareLeaf)?.display_name || activeCompareLeaf.replace(/_/g, ' ')}</div>
+                  <div className="card-title">Cross-Version Benchmark Comparison</div>
+                </div>
+                <span className="badge badge-primary">{compareVersionList.length} version{compareVersionList.length !== 1 ? 's' : ''}</span>
+              </div>
+
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Version</th><th>Format</th><th>Accuracy (%)</th><th>Precision (%)</th><th>Recall (%)</th><th>F1 (%)</th><th>Latency (ms)</th><th>Size (MB)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compareVersionList.map((version, vIdx) => {
+                      const versionBenches = compareByVersion[version] || []
+                      const currentModel = models.find(m => m.leaf_type === activeCompareLeaf)
+                      const isCurrent = currentModel?.version === version
+                      return versionBenches.map((b, bIdx) => (
+                        <tr key={`${version}-${b.format}`} style={{ background: vIdx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.015)' }}>
+                          {bIdx === 0 ? (
+                            <td rowSpan={versionBenches.length} style={{ verticalAlign: 'middle', borderRight: '2px solid rgba(0,0,0,0.06)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <strong style={{ color: '#121c28' }}>v{version}</strong>
+                                {isCurrent && <span className="badge badge-green" style={{ fontSize: 9 }}>Current</span>}
+                              </div>
+                            </td>
+                          ) : null}
+                          <td>
+                            <strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tflite_float32' ? 'TFLite (f32)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong>
+                          </td>
+                          <td>
+                            {b.accuracy != null
+                              ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : b.accuracy >= 70 ? 'badge-yellow' : 'badge-red'}`}>{b.accuracy.toFixed(2)}</span>
+                              : '—'}
+                          </td>
+                          <td>{b.precision_macro != null ? (b.precision_macro * 100).toFixed(2) : '—'}</td>
+                          <td>{b.recall_macro != null ? (b.recall_macro * 100).toFixed(2) : '—'}</td>
+                          <td>{b.f1_macro != null ? (b.f1_macro * 100).toFixed(2) : '—'}</td>
+                          <td>{b.latency_mean_ms != null ? b.latency_mean_ms.toFixed(1) : '—'}</td>
+                          <td>{b.size_mb != null ? b.size_mb.toFixed(2) : '—'}</td>
+                        </tr>
+                      ))
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Version summary cards */}
+              {compareVersionList.length > 1 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Version Summary (TFLite deployment format)</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(compareVersionList.length, 4)}, 1fr)`, gap: 10 }}>
+                    {compareVersionList.map(version => {
+                      const vBenches = compareByVersion[version] || []
+                      const tflite = vBenches.find(b => b.format === 'tflite_float16') || vBenches.find(b => b.format === 'tflite_float32')
+                      const currentModel = models.find(m => m.leaf_type === activeCompareLeaf)
+                      const isCurrent = currentModel?.version === version
+                      return (
+                        <div key={version} style={{ padding: '12px 14px', borderRadius: 10, border: `1px solid ${isCurrent ? '#22c55e' : 'rgba(0,0,0,0.06)'}`, position: 'relative', overflow: 'hidden' }}>
+                          {isCurrent && <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 3, background: '#22c55e' }} />}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <strong style={{ fontSize: 14, color: '#121c28' }}>v{version}</strong>
+                            {isCurrent && <span className="badge badge-green" style={{ fontSize: 9 }}>Current</span>}
+                          </div>
+                          {tflite ? (
+                            <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.8 }}>
+                              <div>Accuracy: <strong style={{ color: '#121c28' }}>{tflite.accuracy?.toFixed(2) ?? '—'}%</strong></div>
+                              <div>F1: <strong style={{ color: '#121c28' }}>{tflite.f1_macro != null ? (tflite.f1_macro * 100).toFixed(2) + '%' : '—'}</strong></div>
+                              <div>Latency: <strong style={{ color: '#121c28' }}>{tflite.latency_mean_ms?.toFixed(1) ?? '—'} ms</strong></div>
+                              <div>Size: <strong style={{ color: '#121c28' }}>{tflite.size_mb?.toFixed(2) ?? '—'} MB</strong></div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12, color: '#94a3b8' }}>No TFLite benchmark</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 12, fontSize: 11, color: '#94a3b8' }}>
+                Precision, Recall, and F1 are macro-averaged (shown as %). Accuracy is top-1 test set accuracy. Latency measured on CPU.
+              </div>
+            </div>
+          )}
         </>
       )}
 

@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-dev \
     libopencv-dev \
-    python3-opencv \
     libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*

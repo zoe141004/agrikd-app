@@ -65,7 +65,7 @@ Select the appropriate build for your device:
 
 ## System Requirements
 
-- **Operating system:** Android 5.0 (Lollipop, API 21) or higher
+- **Operating system:** Android 7.0 (Nougat, API 24) or higher
 - **Storage:** approximately 85 MB (fat APK) or 31 MB (arm64-v8a)
 - **Permissions:** Camera (for live capture), Storage (for gallery picker)
 - **Network:** Not required for inference; required only for cloud sync and OTA updates
@@ -132,7 +132,7 @@ AgriKD periodically checks for updated models when the device is online.
 ## Troubleshooting
 
 **Q: The app crashes or shows a black screen on launch.**
-A: Ensure your device runs Android 5.0 or higher. Try clearing the app cache
+A: Ensure your device runs Android 7.0 or higher. Try clearing the app cache
 (Settings > Apps > AgriKD > Clear Cache) and relaunching.
 
 **Q: The camera does not open.**

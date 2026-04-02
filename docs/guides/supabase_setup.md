@@ -1,0 +1,148 @@
+# Supabase Database Setup Guide
+
+## 1. Create a Supabase Project
+
+1. Go to [supabase.com](https://supabase.com) and create a new project
+2. Note down your:
+   - **Project URL** (`https://<project-ref>.supabase.co`)
+   - **Anon Key** (public, safe for client apps)
+   - **Service Role Key** (private, for server-side operations only)
+
+## 2. Configure Authentication
+
+### Email Auth (enabled by default)
+
+Dashboard → Authentication → Providers:
+- Email: **Enabled**
+- Confirm email: Enabled (recommended for production)
+
+### Google OAuth
+
+1. Create OAuth credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+   - Application type: **Web application**
+   - Authorized redirect URIs: `https://<project-ref>.supabase.co/auth/v1/callback`
+2. Dashboard → Authentication → Providers → Google:
+   - Client ID: paste from Google Cloud
+   - Client Secret: paste from Google Cloud
+3. Save your **Web Client ID** — this goes into `GOOGLE_WEB_CLIENT_ID`
+
+### URL Configuration
+
+Dashboard → Authentication → URL Configuration:
+- **Site URL:** `com.agrikd.app://callback`
+- **Redirect URLs:** Add `com.agrikd.app://callback`
+
+This enables the PKCE auth flow for the Flutter mobile app.
+
+## 3. Run Migration SQL
+
+Open **Dashboard → SQL Editor → New query** and run these files in order:
+
+| Order | File | What it creates |
+|-------|------|-----------------|
+| 1 | `database/migrations/001_tables.sql` | 6 tables: profiles, predictions, model_registry, audit_log, model_benchmarks, model_versions |
+| 2 | `database/migrations/002_rls_policies.sql` | RLS policies for all 6 tables |
+| 3 | `database/migrations/003_functions_triggers.sql` | is_admin_role(), handle_new_user(), sync_model_urls() + triggers + backfill |
+| 4 | `database/migrations/004_indexes.sql` | 7 performance indexes |
+| 5 | `database/migrations/005_storage.sql` | 3 storage buckets + policies |
+| 6 | `database/migrations/006_model_reports_and_rpcs.sql` | Model report tables + RPC functions |
+
+**Important:** Run `003_functions_triggers.sql` before `002_rls_policies.sql` because RLS policies reference the `is_admin_role()` function created in 003.
+
+All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
+
+## 4. Verify Setup
+
+Run the verification script:
+```sql
+-- Paste contents of database/verify_rls_policies.sql into SQL Editor
+-- Check Messages/Notices tab for results
+```
+
+Expected output: All checks should show `[PASS]`. The script verifies:
+- RLS enabled on all 6 tables
+- All policies exist per table
+- `is_admin_role()` function exists and is SECURITY DEFINER
+- `handle_new_user()` trigger on auth.users
+- `sync_model_urls()` triggers on model_registry (INSERT + UPDATE)
+- Storage buckets exist (models, datasets, prediction-images)
+- All 7 indexes exist
+
+## 5. Set Admin User
+
+After a user signs up (via the Flutter app or Admin Dashboard), promote them to admin:
+
+```sql
+UPDATE profiles SET role = 'admin' WHERE email = 'your-admin@email.com';
+```
+
+## 6. Storage Buckets
+
+Created automatically by `005_storage.sql`:
+
+| Bucket | Public | Purpose |
+|--------|--------|---------|
+| `models` | Yes | TFLite model files for OTA download |
+| `datasets` | Yes | Training datasets |
+| `prediction-images` | No | User-uploaded leaf images (scoped per user) |
+
+Verify in Dashboard → Storage.
+
+## 7. Environment Variables
+
+After setup, distribute your credentials:
+
+### Root `.env`:
+```env
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+SENTRY_DSN=https://xxx@sentry.io/xxx
+GDRIVE_CREDENTIALS_DATA=<base64-encoded-service-account-json>
+```
+
+### Sync to sub-projects:
+```bash
+python sync_env.py
+```
+
+This generates:
+| Target | File | Keys included |
+|--------|------|---------------|
+| Flutter app | `mobile_app/.env` | SUPABASE_URL, SUPABASE_ANON_KEY, GOOGLE_WEB_CLIENT_ID, SENTRY_DSN |
+| Admin Dashboard | `admin-dashboard/.env` | VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_SENTRY_DSN |
+| Jetson Edge | `jetson/config/config.json` | supabase_url, supabase_key (in sync block) |
+
+## 8. Database Schema Overview
+
+### Key relationships:
+- `profiles.id` → `auth.users.id` (auto-created by `handle_new_user()` trigger)
+- `predictions.user_id` → `auth.users.id`
+- `model_registry` uses `sync_model_urls()` BEFORE trigger to route `file_url` based on `active_tflite_variant`
+- Flutter reads `file_url` + `sha256_checksum` from `model_registry` for OTA updates
+
+### OTA Model Update Flow:
+1. Admin uploads model to `models` bucket via Dashboard
+2. Admin sets `model_url` (float16) and/or `model_url_float32` in `model_registry`
+3. Admin picks `active_tflite_variant` ('float16' or 'float32')
+4. `sync_model_urls()` trigger auto-routes `file_url` and `sha256_checksum`
+5. Flutter app reads `file_url` → downloads → verifies SHA-256 → saves locally
+
+## 9. Database Backup Strategy
+
+- **Supabase Free tier:** Daily automatic backups, retained for 7 days
+- **Supabase Pro plan:** Point-in-Time Recovery (PITR) with granular restore to any point within the retention window
+- **Manual export:** Use `pg_dump` via the Supabase CLI or run export queries in the Dashboard SQL Editor
+- **Recommendation:** Always export critical data before running schema migrations
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 |
+| "function is_admin_role() does not exist" | Run 003_functions_triggers.sql before 002_rls_policies.sql |
+| RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
+| Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |
+| Google Sign-In callback fails | Add `com.agrikd.app://callback` to Redirect URLs in Auth settings |
+| `verify_rls_policies.sql` shows FAIL | Re-run the relevant migration file for the failing component |

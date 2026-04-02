@@ -10,16 +10,21 @@ import numpy as np
 class TensorRTInference:
     """Runs TensorRT FP16 inference on a loaded engine."""
 
-    def __init__(self, engine_path, model_config, expected_sha256=None):
+    def __init__(self, engine_path, model_config, expected_sha256=None, inference_config=None):
         self.engine_path = engine_path
         self.expected_sha256 = expected_sha256
         self.num_classes = model_config["num_classes"]
         self.class_labels = model_config["class_labels"]
-        self.input_size = 224  # Fixed for MobileNetV2
 
-        # ImageNet normalization
-        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        # H7: Read input_size/mean/std from config with fallback defaults
+        inf_cfg = inference_config or {}
+        self.input_size = inf_cfg.get("input_size", 224)
+        self.mean = np.array(
+            inf_cfg.get("imagenet_mean", [0.485, 0.456, 0.406]), dtype=np.float32
+        )
+        self.std = np.array(
+            inf_cfg.get("imagenet_std", [0.229, 0.224, 0.225]), dtype=np.float32
+        )
 
         self._load_engine()
 
@@ -53,6 +58,13 @@ class TensorRTInference:
         with open(self.engine_path, "rb") as f:
             runtime = trt.Runtime(self.logger)
             self.engine = runtime.deserialize_cuda_engine(f.read())
+
+        # H4: Guard against deserialization failure
+        if self.engine is None:
+            raise RuntimeError(
+                f"Failed to deserialize TensorRT engine: {self.engine_path}. "
+                "Ensure the engine was built for this GPU architecture."
+            )
 
         self.context = self.engine.create_execution_context()
 

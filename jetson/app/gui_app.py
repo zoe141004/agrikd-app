@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
     # ── Engine loading ─────────────────────────────────────────────────
 
     def _load_engines(self):
+        inference_cfg = self.config.get("inference", {})
         for leaf_type, model_cfg in self.config["models"].items():
             engine_path = model_cfg["engine_path"]
             if os.path.exists(engine_path):
@@ -178,6 +179,7 @@ class MainWindow(QMainWindow):
                     self.engines[leaf_type] = TensorRTInference(
                         engine_path, model_cfg,
                         expected_sha256=model_cfg.get("sha256_checksum"),
+                        inference_config=inference_cfg,
                     )
                     logger.info("Loaded engine: %s (%s)", leaf_type, engine_path)
                 except Exception as e:
@@ -440,7 +442,10 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{timestamp}.jpg"
         filepath = os.path.join(save_dir, filename)
-        cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        ok = cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not ok:
+            logger.warning("cv2.imwrite failed for %s", filepath)
+            return None
         return filepath
 
     # ── Helpers ────────────────────────────────────────────────────────

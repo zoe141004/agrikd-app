@@ -8,7 +8,7 @@ import 'db_factory_stub.dart'
 
 class AppDatabase {
   static Future<Database>? _dbFuture;
-  static const int _version = 1;
+  static const int _version = 2;
   static const String _dbName = 'agrikd.db';
 
   /// When true, use in-memory DB (for tests).
@@ -62,8 +62,44 @@ class AppDatabase {
     int oldVersion,
     int newVersion,
   ) async {
-    // Future migrations go here:
-    // if (oldVersion < 2) { ... }
+    if (oldVersion < 2) {
+      // Add role column for Active/Fallback model architecture
+      await db.execute(
+        "ALTER TABLE models ADD COLUMN role TEXT NOT NULL DEFAULT 'active' "
+        "CHECK (role IN ('active', 'fallback', 'archived'))",
+      );
+      // Remove old UNIQUE(leaf_type) by recreating table
+      // SQLite doesn't support DROP CONSTRAINT, so we migrate via temp table
+      await db.execute('''
+        CREATE TABLE models_v2 (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          leaf_type       TEXT NOT NULL,
+          version         TEXT NOT NULL,
+          file_path       TEXT NOT NULL,
+          sha256_checksum TEXT NOT NULL,
+          num_classes     INTEGER NOT NULL,
+          class_labels    TEXT NOT NULL,
+          accuracy_top1   REAL,
+          is_bundled      INTEGER NOT NULL DEFAULT 1,
+          is_active       INTEGER NOT NULL DEFAULT 1,
+          role            TEXT NOT NULL DEFAULT 'active'
+                          CHECK (role IN ('active', 'fallback', 'archived')),
+          updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(leaf_type, role)
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO models_v2 (id, leaf_type, version, file_path,
+          sha256_checksum, num_classes, class_labels, accuracy_top1,
+          is_bundled, is_active, role, updated_at)
+        SELECT id, leaf_type, version, file_path,
+          sha256_checksum, num_classes, class_labels, accuracy_top1,
+          is_bundled, is_active, 'active', updated_at
+        FROM models
+      ''');
+      await db.execute('DROP TABLE models');
+      await db.execute('ALTER TABLE models_v2 RENAME TO models');
+    }
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -78,8 +114,6 @@ class AppDatabase {
         confidence            REAL NOT NULL,
         all_confidences       TEXT,
         inference_time_ms     REAL,
-        latitude              REAL,
-        longitude             REAL,
         notes                 TEXT,
         created_at            TEXT NOT NULL DEFAULT (datetime('now')),
         is_synced             INTEGER NOT NULL DEFAULT 0,
@@ -101,7 +135,7 @@ class AppDatabase {
     await db.execute('''
       CREATE TABLE models (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        leaf_type       TEXT NOT NULL UNIQUE,
+        leaf_type       TEXT NOT NULL,
         version         TEXT NOT NULL,
         file_path       TEXT NOT NULL,
         sha256_checksum TEXT NOT NULL,
@@ -110,7 +144,10 @@ class AppDatabase {
         accuracy_top1   REAL,
         is_bundled      INTEGER NOT NULL DEFAULT 1,
         is_active       INTEGER NOT NULL DEFAULT 1,
-        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        role            TEXT NOT NULL DEFAULT 'active'
+                        CHECK (role IN ('active', 'fallback', 'archived')),
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(leaf_type, role)
       )
     ''');
 

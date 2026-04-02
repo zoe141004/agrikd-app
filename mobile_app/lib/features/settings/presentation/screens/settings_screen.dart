@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/providers/auth_provider.dart';
+import 'package:app/providers/model_version_provider.dart';
 import 'package:app/providers/settings_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 import 'package:app/features/auth/presentation/screens/login_screen.dart';
@@ -162,14 +163,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.memory),
                 title: Text(S.get('models')),
-                subtitle: Text(
-                  ModelConstants.availableLeafTypes
-                      .map((t) {
-                        final m = ModelConstants.getModel(t);
-                        return '${m.localizedName(S.locale)} — ${S.fmt('n_diseases', [m.diseaseCount])}';
-                      })
-                      .join('\n'),
-                ),
+                subtitle: _buildModelVersionsSummary(ref),
               ),
             ],
           ),
@@ -294,6 +288,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (diff.inMinutes < 60) return S.fmt('minutes_ago', [diff.inMinutes]);
     if (diff.inHours < 24) return S.fmt('hours_ago', [diff.inHours]);
     return S.fmt('days_ago', [diff.inDays]);
+  }
+
+  Widget _buildModelVersionsSummary(WidgetRef ref) {
+    final mvState = ref.watch(modelVersionProvider);
+    if (mvState.isLoading) {
+      return const Text('...');
+    }
+
+    final lines = <String>[];
+    for (final leafType in ModelConstants.availableLeafTypes) {
+      final m = ModelConstants.getModel(leafType);
+      final versions = mvState.versions[leafType] ?? [];
+      final active = versions.where((v) => v.role == 'active').firstOrNull;
+      final fallback = versions.where((v) => v.role == 'fallback').firstOrNull;
+
+      final activeLabel = active != null
+          ? 'v${active.version}${active.isBundled ? '' : ' (OTA)'}'
+          : '-';
+      final fbLabel = fallback != null
+          ? ' | FB: v${fallback.version}'
+          : '';
+
+      lines.add('${m.localizedName(S.locale)}: $activeLabel$fbLabel');
+    }
+    return Text(lines.join('\n'));
   }
 }
 

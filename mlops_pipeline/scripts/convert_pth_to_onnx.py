@@ -46,7 +46,7 @@ def convert_pth_to_onnx(
         checkpoint_path: Path to the .pth checkpoint.
         num_classes: Number of output classes.
         output_path: Path to save the .onnx file.
-        opset_version: ONNX opset version (13 for broad compatibility).
+        opset_version: ONNX opset version (17 for broad compatibility).
         input_size: Model input tensor shape.
         
     Returns:

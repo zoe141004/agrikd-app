@@ -160,12 +160,20 @@ agrikd/
 │   └── requirements*.txt              # Separate requirement files per stage
 │
 ├── database/                          # Infrastructure-as-Code DB scripts
+│   ├── migrations/
+│   │   ├── 001_tables.sql
+│   │   ├── 002_rls_policies.sql
+│   │   ├── 003_functions_triggers.sql
+│   │   ├── 004_indexes.sql
+│   │   ├── 005_storage.sql
+│   │   └── 006_model_reports_and_rpcs.sql
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
-├── .github/workflows/                 # CI/CD (10 workflow files)
+├── .github/workflows/                 # CI/CD (11 workflow files)
 │   ├── ci.yml                         # Lint, test, model conversion, build APK
 │   ├── release.yml                    # Tagged release build + GitHub Release
 │   ├── model-pipeline.yml             # Full convert + validate + upload
+│   ├── model-rollback.yml             # Rollback model version in registry
 │   ├── deploy.yml                     # Vercel deploy for admin dashboard
 │   ├── train.yml                      # Run model training
 │   ├── validate-model.yml             # Cross-format validation only
@@ -329,7 +337,7 @@ format to verify numerical fidelity across the conversion pipeline.
 
 ## 7. CI/CD Workflow Map
 
-All 10 workflows live in `.github/workflows/`. Flutter-related jobs use
+All 11 workflows live in `.github/workflows/`. Flutter-related jobs use
 `working-directory: mobile_app` since the Flutter project was relocated from the
 repository root to the `mobile_app/` subdirectory.
 
@@ -352,14 +360,22 @@ alongside `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 | DVC Push | `dvc-push.yml` | Manual | Push dataset files to DVC remote | - |
 | Export Data | `export-data.yml` | Manual | Export prediction records | - |
 | Dataset Upload | `dataset-upload.yml` | Manual | Upload datasets to storage | - |
+| Model Rollback | `model-rollback.yml` | Manual | Rollback model version in registry | Requires `SUPABASE_SERVICE_ROLE_KEY` |
 
 ### Required CI Secrets
 
+Seven secrets must be configured in the GitHub repository settings across all
+workflows (the `GITHUB_TOKEN` is auto-provided and not counted):
+
 | Secret | Used By | Purpose |
 |---|---|---|
-| `SUPABASE_URL` | ci.yml, release.yml | Supabase project URL for `--dart-define` |
+| `SUPABASE_URL` | ci.yml, release.yml, model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ci.yml, release.yml | Supabase anonymous key for `--dart-define` |
+| `SUPABASE_SERVICE_ROLE_KEY` | model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml | Service role key (bypasses RLS) |
 | `SENTRY_DSN` | ci.yml, release.yml | Sentry Data Source Name for error tracking |
+| `GOOGLE_WEB_CLIENT_ID` | ci.yml, release.yml | Google OAuth client ID for `--dart-define` |
+| `GDRIVE_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml | Google Drive service account JSON for DVC |
+| `VERCEL_DEPLOY_HOOK` | deploy.yml | Vercel deploy webhook URL |
 | `GITHUB_TOKEN` | release.yml | Auto-provided; used by `softprops/action-gh-release` |
 
 ### Build Command (CI and Release)
@@ -405,6 +421,7 @@ prevent key leakage in published APKs.
 | `audit_log` | id, user_id, action, details, created_at | Audit trail for administrative actions |
 | `model_benchmarks` | id, leaf_type, accuracy, kl_div, size_bytes, created_at | Stored benchmark results |
 | `model_versions` | id, leaf_type, version, changelog, created_at | Model version history |
+| `model_reports` | id, user_id, model_version, leaf_type, prediction_id, reason, created_at | User feedback on wrong predictions |
 
 Row-Level Security (RLS) policies ensure that regular users can only access their own
 prediction records, while admin-role users have full read access through the dashboard.

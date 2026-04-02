@@ -10,9 +10,9 @@ The dashboard is deployed on **Vercel** and communicates directly with the
 Supabase backend.
 
 Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
-`Referrer-Policy`, `Permissions-Policy`) are configured in the Vite dev
-server. For production, equivalent headers should be set in the hosting
-platform (Vercel `vercel.json` or reverse proxy).
+`Referrer-Policy`, `Strict-Transport-Security`, `Content-Security-Policy`)
+are configured in `vercel.json` for production. The Vite dev server mirrors
+a subset of these headers for local development.
 
 The application consists of eight pages, each described in detail below.
 
@@ -138,23 +138,34 @@ Application-level configuration.
 
 4. Deploy. Vercel will automatically build and serve the Vite application.
 
-**Security headers for production:** Add the following to `vercel.json` in
-`admin-dashboard/`:
+**Security headers for production:** The file `vercel.json` in
+`admin-dashboard/` ships with the following headers pre-configured:
 
 ```json
 {
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co https://*.sentry.io; font-src 'self' https://fonts.gstatic.com;" }
       ]
     }
   ]
 }
 ```
+
+| Header | Purpose |
+|--------|---------|
+| `X-Frame-Options: DENY` | Prevents the dashboard from being embedded in iframes (clickjacking protection) |
+| `X-Content-Type-Options: nosniff` | Stops browsers from MIME-sniffing the response away from the declared content type |
+| `Referrer-Policy` | Sends the origin only on cross-origin requests; full URL on same-origin |
+| `Strict-Transport-Security` | Enforces HTTPS for 2 years with subdomains and preload eligibility |
+| `Content-Security-Policy` | Restricts resource loading to `self`, Supabase, Sentry, and Google Fonts origins |
 
 ### Manual Trigger
 

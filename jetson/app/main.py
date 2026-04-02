@@ -70,12 +70,14 @@ def main():
 
     # Load TensorRT engines
     engines = {}
+    inference_cfg = config.get("inference", {})
     for leaf_type, model_cfg in config["models"].items():
         engine_path = model_cfg["engine_path"]
         if os.path.exists(engine_path):
             engines[leaf_type] = TensorRTInference(
                 engine_path, model_cfg,
                 expected_sha256=model_cfg.get("sha256_checksum"),
+                inference_config=inference_cfg,
             )
             logger.info("Loaded TensorRT engine: %s (%s)", leaf_type, engine_path)
         else:
@@ -90,7 +92,7 @@ def main():
     logger.info("Camera initialized: source=%s", config["camera"]["source"])
 
     # Start sync engine (background thread)
-    sync = SyncEngine(config["sync"], db)
+    sync = SyncEngine(config["sync"], db, models_config=config.get("models", {}))
     sync_thread = threading.Thread(target=sync.run, daemon=True)
     sync_thread.start()
     logger.info("Sync engine started (interval=%ds)", config["sync"]["interval_seconds"])

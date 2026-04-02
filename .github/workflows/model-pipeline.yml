@@ -14,6 +14,11 @@ on:
         description: 'Supabase Storage URL of the uploaded .pth checkpoint'
         required: true
         type: string
+      min_accuracy:
+        description: 'Minimum accuracy threshold (%) for quality gate'
+        required: false
+        type: number
+        default: 80
 
 jobs:
   pipeline:
@@ -155,6 +160,100 @@ jobs:
           fi
           echo "Test data: $(ls "$DATA_DIR" | wc -l) class folders"
           python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+
+      - name: Quality Gate
+        id: quality_gate
+        run: |
+          python3 << 'PYEOF'
+          import re, sys, os
+
+          report_path = os.environ["REPORT_PATH"]
+          min_acc = float(os.environ["MIN_ACC"])
+
+          if not os.path.exists(report_path):
+              print(f"::error::QUALITY GATE FAILED: Benchmark report not found at {report_path}")
+              sys.exit(1)
+
+          with open(report_path) as f:
+              content = f.read()
+
+          # Parse the Benchmark Summary markdown table
+          table_match = re.search(
+              r'### Benchmark Summary\s+\|(.+?)\n\|[-\s|]+\n((?:\|.+\n)+)',
+              content, re.DOTALL
+          )
+          if not table_match:
+              print("::error::QUALITY GATE FAILED: Could not parse Benchmark Summary table")
+              sys.exit(1)
+
+          headers = [h.strip() for h in table_match.group(1).split('|') if h.strip()]
+          rows = table_match.group(2).strip().split('\n')
+
+          # Find accuracy column (handles both "Accuracy (%)" and "Top-1 %" headers)
+          acc_idx = None
+          for i, h in enumerate(headers):
+              hl = h.lower()
+              if 'accuracy' in hl or 'top-1' in hl:
+                  acc_idx = i
+                  break
+
+          if acc_idx is None:
+              print(f"::error::QUALITY GATE FAILED: No accuracy column found. Headers: {headers}")
+              sys.exit(1)
+
+          # Extract accuracy for each model format
+          accuracies = {}
+          for row in rows:
+              cells = [c.strip() for c in row.split('|') if c.strip()]
+              if len(cells) <= acc_idx:
+                  continue
+              fmt = cells[0]
+              try:
+                  acc = float(cells[acc_idx])
+                  accuracies[fmt] = acc
+              except ValueError:
+                  continue
+
+          if not accuracies:
+              print("::error::QUALITY GATE FAILED: No accuracy values found in report")
+              sys.exit(1)
+
+          # Primary check target: TFLite (float16) — the mobile deployment format
+          target_fmt = None
+          target_acc = None
+          for fmt, acc in accuracies.items():
+              if 'tflite' in fmt.lower() and 'float16' in fmt.lower():
+                  target_fmt = fmt
+                  target_acc = acc
+                  break
+
+          # Fallback: use the lowest accuracy across all formats
+          if target_acc is None:
+              target_fmt = min(accuracies, key=accuracies.get)
+              target_acc = accuracies[target_fmt]
+
+          print("Benchmark accuracies:")
+          for fmt, acc in accuracies.items():
+              marker = "  <<< [CHECK TARGET]" if fmt == target_fmt else ""
+              print(f"  {fmt}: {acc:.1f}%{marker}")
+
+          print(f"\nQuality gate threshold: {min_acc}%")
+          print(f"Target format: {target_fmt}")
+          print(f"Target accuracy: {target_acc:.1f}%")
+
+          if target_acc < min_acc:
+              print(f"\n::error::QUALITY GATE FAILED: {target_fmt} accuracy {target_acc:.1f}% is below minimum threshold {min_acc}%")
+              sys.exit(1)
+
+          print(f"\nQUALITY GATE PASSED: {target_fmt} accuracy {target_acc:.1f}% >= {min_acc}% threshold")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"accuracy={target_acc}\n")
+              f.write(f"format={target_fmt}\n")
+          PYEOF
+        env:
+          REPORT_PATH: models/${{ inputs.leaf_type }}/benchmark_report.md
+          MIN_ACC: ${{ inputs.min_accuracy }}
 
       - name: Compute SHA-256 of TFLite models
         id: sha256

@@ -926,7 +926,82 @@ sudo systemctl restart agrikd
 
 ---
 
-## 12. Troubleshooting
+## 12. TLS Termination (HTTPS)
+
+The headless REST API (Section 6) runs on plain HTTP by default. For
+production deployments exposed to untrusted networks, add a TLS reverse proxy
+in front of the Flask server so that all traffic between clients and the Jetson
+is encrypted.
+
+### 12.1 Nginx Reverse Proxy Configuration
+
+Create `/etc/nginx/sites-available/agrikd`:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name agrikd.local;
+
+    ssl_certificate     /etc/ssl/certs/agrikd.crt;
+    ssl_certificate_key /etc/ssl/private/agrikd.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 10M;
+    }
+}
+```
+
+### 12.2 Quick Setup
+
+```bash
+# 1. Install Nginx
+sudo apt-get update && sudo apt-get install -y nginx
+
+# 2. Generate a self-signed certificate (valid for 365 days)
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/agrikd.key \
+    -out /etc/ssl/certs/agrikd.crt \
+    -subj "/CN=agrikd.local"
+
+# 3. Copy the site configuration
+sudo cp agrikd /etc/nginx/sites-available/agrikd
+sudo ln -sf /etc/nginx/sites-available/agrikd /etc/nginx/sites-enabled/
+
+# 4. Test configuration and restart Nginx
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+After setup, the API is available at `https://agrikd.local/health` (port 443).
+The upstream Flask server continues to listen on `127.0.0.1:8080` and should
+**not** be exposed directly to the network. Use a firewall rule to block
+external access to port 8080:
+
+```bash
+sudo ufw deny 8080
+sudo ufw allow 443
+```
+
+### 12.3 When Is TLS Required?
+
+- **LAN-only deployments behind a firewall** -- TLS is optional. The Jetson and
+  its clients reside on a trusted private network, and the overhead of
+  certificate management may not be justified.
+- **Internet-facing or multi-tenant deployments** -- TLS is **mandatory**.
+  Without encryption, prediction images and API keys transit the network in
+  plaintext.
+
+For publicly reachable deployments, replace the self-signed certificate with one
+issued by a trusted CA (e.g., Let's Encrypt).
+
+---
+
+## 13. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|

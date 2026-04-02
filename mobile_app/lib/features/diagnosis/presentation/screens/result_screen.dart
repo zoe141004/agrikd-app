@@ -11,6 +11,7 @@ import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/features/diagnosis/domain/models/prediction.dart';
 import 'package:app/providers/database_provider.dart';
 import 'package:app/providers/diagnosis_provider.dart';
+import 'package:app/providers/model_version_provider.dart';
 import 'camera_screen.dart';
 
 class ResultScreen extends ConsumerStatefulWidget {
@@ -155,6 +156,30 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                                 ).colorScheme.onSurfaceVariant,
                               ),
                         ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Chip(
+                              avatar: const Icon(Icons.memory, size: 16),
+                              label: Text(
+                                'v${prediction.modelVersion}',
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              onPressed: () =>
+                                  _showReportDialog(context, prediction),
+                              icon: const Icon(Icons.flag_outlined, size: 18),
+                              label: Text(S.get('report_result')),
+                              style: TextButton.styleFrom(
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -255,6 +280,66 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showReportDialog(BuildContext context, Prediction prediction) {
+    final reasonController = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              S.get('report_wrong_result'),
+              style: Theme.of(ctx).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: S.get('report_reason_hint'),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () async {
+                final reason = reasonController.text.trim();
+                if (reason.isEmpty) return;
+                Navigator.pop(ctx);
+                final ok = await submitModelReport(
+                  modelVersion: prediction.modelVersion,
+                  leafType: prediction.leafType,
+                  predictionId: prediction.id,
+                  reason: reason,
+                );
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok
+                          ? S.get('report_sent')
+                          : S.get('report_failed'),
+                    ),
+                  ),
+                );
+              },
+              child: Text(S.get('submit_report')),
+            ),
+          ],
         ),
       ),
     );

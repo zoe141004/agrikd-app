@@ -13,10 +13,12 @@ final diagnosisRepositoryProvider = Provider<DiagnosisRepository>((ref) {
   final inferenceService = ref.watch(inferenceServiceProvider);
   final predictionDao = ref.watch(predictionDaoProvider);
   final syncQueue = ref.watch(syncQueueProvider);
+  final modelDao = ref.watch(modelDaoProvider);
   return DiagnosisRepositoryImpl(
     inferenceService: inferenceService,
     predictionDao: predictionDao,
     syncQueue: syncQueue,
+    modelDao: modelDao,
   );
 });
 
