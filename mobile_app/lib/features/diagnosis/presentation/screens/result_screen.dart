@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:app/core/utils/image_widget.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -130,13 +129,6 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            Chip(
-                              avatar: const Icon(Icons.check_circle, size: 18),
-                              label: Text(
-                                '${(prediction.confidence * 100).toStringAsFixed(1)}%',
-                              ),
-                            ),
-                            const SizedBox(width: 8),
                             if (prediction.inferenceTimeMs != null)
                               Chip(
                                 avatar: const Icon(Icons.speed, size: 18),
@@ -222,26 +214,6 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // All class probabilities — horizontal bar chart
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          S.get('all_results'),
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 10),
-                        if (prediction.allConfidences != null)
-                          _buildConfidenceChart(context, modelInfo, prediction),
                       ],
                     ),
                   ),
@@ -344,127 +316,4 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     );
   }
 
-  Widget _buildConfidenceChart(
-    BuildContext context,
-    LeafModelInfo modelInfo,
-    Prediction prediction,
-  ) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final confs = prediction.allConfidences ?? [];
-    if (confs.isEmpty) return const SizedBox.shrink();
-    final topIndex = prediction.predictedClassIndex;
-
-    // Build sorted indices by confidence descending
-    final indices = List.generate(confs.length, (i) => i);
-    indices.sort((a, b) => confs[b].compareTo(confs[a]));
-
-    final barHeight = 28.0;
-    final chartHeight = indices.length * barHeight + 16;
-
-    return SizedBox(
-      height: chartHeight,
-      child: BarChart(
-        BarChartData(
-          alignment: BarChartAlignment.spaceAround,
-          maxY: 1.0,
-          barTouchData: BarTouchData(
-            touchTooltipData: BarTouchTooltipData(
-              getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                final idx = indices[group.x.toInt()];
-                final label = modelInfo.localizedClassName(
-                  modelInfo.classLabels[idx],
-                  S.locale,
-                );
-                return BarTooltipItem(
-                  '$label\n${(rod.toY * 100).toStringAsFixed(1)}%',
-                  TextStyle(color: colorScheme.onSurface, fontSize: 12),
-                );
-              },
-            ),
-          ),
-          titlesData: FlTitlesData(
-            show: true,
-            rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  final idx = indices[value.toInt()];
-                  final label = modelInfo.localizedClassName(
-                    modelInfo.classLabels[idx],
-                    S.locale,
-                  );
-                  return SideTitleWidget(
-                    axisSide: meta.axisSide,
-                    child: SizedBox(
-                      width: 60,
-                      child: Text(
-                        label,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontWeight: idx == topIndex
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontSize: 9,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  );
-                },
-                reservedSize: 40,
-              ),
-            ),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 40,
-                getTitlesWidget: (value, meta) {
-                  return Text(
-                    '${(value * 100).toInt()}%',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  );
-                },
-                interval: 0.25,
-              ),
-            ),
-          ),
-          borderData: FlBorderData(show: false),
-          gridData: FlGridData(
-            show: true,
-            horizontalInterval: 0.25,
-            getDrawingHorizontalLine: (value) => FlLine(
-              color: colorScheme.outlineVariant.withAlpha(80),
-              strokeWidth: 1,
-            ),
-            drawVerticalLine: false,
-          ),
-          barGroups: List.generate(indices.length, (barIndex) {
-            final idx = indices[barIndex];
-            final conf = confs[idx];
-            final isTop = idx == topIndex;
-            return BarChartGroupData(
-              x: barIndex,
-              barRods: [
-                BarChartRodData(
-                  toY: conf,
-                  color: isTop ? colorScheme.primary : colorScheme.outline,
-                  width: 16,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(4),
-                  ),
-                ),
-              ],
-            );
-          }),
-        ),
-      ),
-    );
-  }
 }

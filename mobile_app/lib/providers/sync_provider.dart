@@ -103,12 +103,16 @@ class SyncNotifier extends StateNotifier<SyncState>
     try {
       final modelDao = _ref.read(modelDaoProvider);
       final allModels = await modelDao.getAll();
-      final localVersions = <String, String>{};
+      final localVersionsByLeaf = <String, Set<String>>{};
       for (final m in allModels) {
-        localVersions[m['leaf_type'] as String] = m['version'] as String;
+        final lt = m['leaf_type'] as String;
+        localVersionsByLeaf.putIfAbsent(lt, () => {}).add(
+          m['version'] as String,
+        );
       }
 
-      final updates = await _syncService.checkModelUpdates(localVersions);
+      final updates =
+          await _syncService.checkModelUpdates(localVersionsByLeaf);
       for (final update in updates) {
         await _syncService.downloadModelUpdate(update);
       }

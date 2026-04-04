@@ -84,12 +84,10 @@ class S {
     'save_notes': 'Save Notes',
     'scan_again': 'Scan Again',
     'home': 'Home',
-    'all_results': 'All possible results',
 
     // Detail screen
     'disease_name': 'Disease',
     'local_name': 'Local name',
-    'how_sure': 'Certainty',
     'leaf_type': 'Crop type',
     'model_ver': 'App version',
     'processing_time': 'Processing time',
@@ -108,12 +106,10 @@ class S {
     'sort_by': 'Sort by',
     'newest_first': 'Newest first',
     'oldest_first': 'Oldest first',
-    'most_certain': 'Most certain first',
     'all_types': 'All types',
     'all_time': 'All time',
     'no_scans': 'No photos checked yet',
     'scans_appear_here': 'Your scan history will appear here',
-    'sure_pct': '{0}% sure',
 
     // Relative time
     'just_now': 'Just now',
@@ -268,8 +264,6 @@ class S {
     'fps': 'FPS',
 
     // Filters
-    'min_confidence': 'Minimum confidence',
-    'confidence': 'Confidence',
     'clear': 'Clear',
     'apply': 'Apply',
 
@@ -283,6 +277,18 @@ class S {
     'submit_report': 'Submit report',
     'report_sent': 'Report submitted. Thank you!',
     'report_failed': 'Could not send report. Try again later.',
+
+    // Model specs
+    'model_specs_unavailable':
+        'Model specs unavailable offline.\nConnect to load.',
+    'spec_accuracy': 'Accuracy',
+    'spec_precision': 'Precision (macro)',
+    'spec_recall': 'Recall (macro)',
+    'spec_f1': 'F1-Score (macro)',
+    'spec_flops': 'FLOPs',
+    'spec_latency': 'Latency',
+    'spec_size': 'Model Size',
+    'spec_params': 'Parameters',
   };
 
   static const _vi = <String, String>{
@@ -337,12 +343,10 @@ class S {
     'save_notes': 'Lưu ghi chú',
     'scan_again': 'Quét lại',
     'home': 'Trang chủ',
-    'all_results': 'Tất cả kết quả',
 
     // Detail
     'disease_name': 'Bệnh',
     'local_name': 'Tên địa phương',
-    'how_sure': 'Độ chắc chắn',
     'leaf_type': 'Loại cây',
     'model_ver': 'Phiên bản',
     'processing_time': 'Thời gian xử lý',
@@ -361,12 +365,10 @@ class S {
     'sort_by': 'Sắp xếp',
     'newest_first': 'Mới nhất',
     'oldest_first': 'Cũ nhất',
-    'most_certain': 'Chắc chắn nhất',
     'all_types': 'Tất cả',
     'all_time': 'Mọi lúc',
     'no_scans': 'Chưa có ảnh nào',
     'scans_appear_here': 'Lịch sử quét sẽ hiển thị ở đây',
-    'sure_pct': 'Chắc {0}%',
 
     // Relative time
     'just_now': 'Vừa xong',
@@ -520,8 +522,6 @@ class S {
     'fps': 'FPS',
 
     // Filters
-    'min_confidence': 'Độ chắc chắn tối thiểu',
-    'confidence': 'Độ chắc chắn',
     'clear': 'Xóa',
     'apply': 'Áp dụng',
 
@@ -535,5 +535,17 @@ class S {
     'submit_report': 'Gửi báo cáo',
     'report_sent': 'Đã gửi báo cáo. Cảm ơn bạn!',
     'report_failed': 'Không thể gửi báo cáo. Thử lại sau.',
+
+    // Model specs
+    'model_specs_unavailable':
+        'Thông số mô hình không khả dụng khi ngoại tuyến.\nKết nối để tải.',
+    'spec_accuracy': 'Độ chính xác',
+    'spec_precision': 'Precision (macro)',
+    'spec_recall': 'Recall (macro)',
+    'spec_f1': 'F1-Score (macro)',
+    'spec_flops': 'FLOPs',
+    'spec_latency': 'Độ trễ',
+    'spec_size': 'Kích thước mô hình',
+    'spec_params': 'Tham số',
   };
 }

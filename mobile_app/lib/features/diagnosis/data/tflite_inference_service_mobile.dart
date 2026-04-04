@@ -43,7 +43,7 @@ class TfliteInferenceService {
 
     // Verify model integrity before loading
     if (leafType != null) {
-      final modelRecord = await _modelDao.getActive(leafType);
+      final modelRecord = await _modelDao.getSelected(leafType);
       if (modelRecord != null) {
         final expectedChecksum = modelRecord['sha256_checksum'] as String?;
         if (expectedChecksum != null && expectedChecksum.isNotEmpty) {

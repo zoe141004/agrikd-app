@@ -152,29 +152,37 @@ class SupabaseSyncService {
   }
 
   /// Check for model updates from remote registry.
+  /// Only pulls models with status='active'.
   Future<List<ModelUpdate>> checkModelUpdates(
-    Map<String, String> localVersions,
+    Map<String, Set<String>> localVersionsByLeaf,
   ) async {
     try {
       final response = await _client
           .from('model_registry')
           .select()
+          .eq('status', 'active')
           .order('updated_at', ascending: false);
 
       final updates = <ModelUpdate>[];
       for (final row in response) {
         final leafType = row['leaf_type'] as String;
         final remoteVersion = row['version'] as String;
-        final localVersion = localVersions[leafType];
+        final localVersions = localVersionsByLeaf[leafType] ?? {};
 
-        if (localVersion == null || localVersion != remoteVersion) {
-          final labels = (jsonDecode(row['class_labels'] as String) as List)
-              .cast<String>();
+        if (!localVersions.contains(remoteVersion)) {
+          // class_labels may be a JSON string or a native List (JSONB)
+          final rawLabels = row['class_labels'];
+          final labels = rawLabels is List
+              ? rawLabels.cast<String>()
+              : (jsonDecode(rawLabels as String) as List).cast<String>();
+          // Prefer model_url (tflite float16), fallback to file_url
+          final url =
+              row['model_url'] as String? ?? row['file_url'] as String?;
           updates.add(
             ModelUpdate(
               leafType: leafType,
               version: remoteVersion,
-              fileUrl: row['file_url'] as String?,
+              fileUrl: url,
               sha256Checksum: row['sha256_checksum'] as String,
               classLabels: labels,
               numClasses: row['num_classes'] as int? ?? labels.length,
@@ -200,9 +208,18 @@ class SupabaseSyncService {
       final safeVersion = _sanitizeName(update.version.replaceAll('.', '_'));
 
       // 1. Download the file from Supabase Storage
+      // fileUrl may be a full public URL — extract the storage path
+      // e.g. "https://x.supabase.co/storage/v1/object/public/models/tomato/v1/file.tflite"
+      //   → storage path: "tomato/v1/file.tflite"
+      String storagePath = update.fileUrl!;
+      final publicPrefix = '/storage/v1/object/public/models/';
+      final idx = storagePath.indexOf(publicPrefix);
+      if (idx != -1) {
+        storagePath = storagePath.substring(idx + publicPrefix.length);
+      }
       final Uint8List bytes = await _client.storage
           .from('models')
-          .download(update.fileUrl!);
+          .download(storagePath);
 
       // 2. Verify SHA-256 checksum
       final actualHash = ModelIntegrity.sha256Bytes(bytes);

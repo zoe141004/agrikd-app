@@ -33,8 +33,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
   @override
   Future<void> loadModel(String leafType) async {
-    // 1. Try active OTA model from DB
-    final active = await _modelDao.getActive(leafType);
+    // 1. Try selected OTA model from DB
+    final active = await _modelDao.getSelected(leafType);
     if (active != null && (active['is_bundled'] as int) == 0) {
       final filePath = active['file_path'] as String;
       final loaded = await _inferenceService.loadModelFromFile(
@@ -46,10 +46,10 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
         return;
       }
 
-      // Active OTA failed — try rollback to fallback
-      await _modelDao.rollbackToFallback(leafType);
+      // Selected OTA failed — try removing and selecting another
+      await _modelDao.removeVersion(leafType, active['version'] as String);
 
-      final fallback = await _modelDao.getActive(leafType);
+      final fallback = await _modelDao.getSelected(leafType);
       if (fallback != null && (fallback['is_bundled'] as int) == 0) {
         final fbPath = fallback['file_path'] as String;
         final fbLoaded = await _inferenceService.loadModelFromFile(

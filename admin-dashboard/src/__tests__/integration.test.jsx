@@ -218,6 +218,7 @@ const MOCK_MODELS = [
     version: '1.0.0',
     description: 'MobileNetV2 student model for tomato diseases',
     num_classes: 10,
+    status: 'active',
     is_active: true,
     created_at: '2026-03-01T00:00:00Z',
   },
@@ -680,7 +681,7 @@ describe('Group 3: Model Reports Page', () => {
   })
 })
 
-describe('Group 4: Models Page — Compare Versions Tab', () => {
+describe('Group 4: Models Page — Benchmarks & Registry', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -697,6 +698,11 @@ describe('Group 4: Models Page — Compare Versions Tab', () => {
             error: null,
           })
         case 'model_versions':
+          return createChainable({
+            data: [],
+            error: null,
+          })
+        case 'pipeline_runs':
           return createChainable({
             data: [],
             error: null,
@@ -718,13 +724,9 @@ describe('Group 4: Models Page — Compare Versions Tab', () => {
       expect(screen.getByText('Model Registry')).toBeInTheDocument()
     })
 
-    // Tab buttons should all be present (use getByRole to avoid matching
-    // text inside page headings like "Model Registry")
-    // Note: "Upload Model" appears as both a tab and a header button,
-    // so use getAllByRole for that one.
+    // Tab buttons should all be present
     expect(screen.getByRole('button', { name: 'Registry' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Benchmarks' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Compare Versions' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Upload Model' }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('button', { name: 'Validate' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'OTA Deploy' })).toBeInTheDocument()
@@ -746,109 +748,7 @@ describe('Group 4: Models Page — Compare Versions Tab', () => {
       expect(screen.getByText('Dataset')).toBeInTheDocument()
     })
 
-    // Since benchmarks include tomato data, verify the benchmark display
-    // The first benchmark leaf type (alphabetically sorted) is 'tomato'
     expect(screen.getByText('Version')).toBeInTheDocument()
-  })
-
-  it('shows compare versions table with multi-version data', async () => {
-    renderPage(ModelsPage)
-
-    // Wait for initial load to complete
-    await waitFor(() => {
-      expect(screen.getByText('Model Registry')).toBeInTheDocument()
-    })
-
-    // Click the "Compare Versions" tab
-    fireEvent.click(screen.getByText('Compare Versions'))
-
-    // Compare tab should show dataset selector
-    await waitFor(() => {
-      expect(screen.getByText('Dataset')).toBeInTheDocument()
-    })
-
-    // The "Load Comparison" button should be present
-    expect(screen.getByText('Load Comparison')).toBeInTheDocument()
-
-    // Mock compareData returned when loadCompareData is called
-    // The compare logic calls from('model_benchmarks').select('*').eq(...).order(...).order(...)
-    // We need to ensure the mock returns data for the comparison
-    mockFrom.mockImplementation((tableName) => {
-      if (tableName === 'model_benchmarks') {
-        return createChainable({
-          data: MOCK_BENCHMARKS,
-          error: null,
-        })
-      }
-      if (tableName === 'model_registry') {
-        return createChainable({ data: MOCK_MODELS, error: null })
-      }
-      if (tableName === 'model_versions') {
-        return createChainable({ data: [], error: null })
-      }
-      return createChainable({ data: null, error: null })
-    })
-
-    // Click "Load Comparison" to trigger loadCompareData
-    fireEvent.click(screen.getByText('Load Comparison'))
-
-    // Wait for comparison table to render
-    await waitFor(() => {
-      expect(
-        screen.getByText('Cross-Version Benchmark Comparison'),
-      ).toBeInTheDocument()
-    })
-
-    // Table headers should include benchmark columns
-    expect(screen.getByText('Accuracy (%)')).toBeInTheDocument()
-    expect(screen.getByText('Precision (%)')).toBeInTheDocument()
-    expect(screen.getByText('Recall (%)')).toBeInTheDocument()
-    expect(screen.getByText('F1 (%)')).toBeInTheDocument()
-    expect(screen.getByText('Latency (ms)')).toBeInTheDocument()
-    expect(screen.getByText('Size (MB)')).toBeInTheDocument()
-
-    // Verify version labels are shown
-    // MOCK_BENCHMARKS has v1.0.0 and v2.0.0
-    // Multiple elements may contain "v2.0.0" (table row + version history)
-    expect(screen.getAllByText('v2.0.0').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('v1.0.0').length).toBeGreaterThanOrEqual(1)
-
-    // Verify accuracy values are rendered (formatted to 2 decimal places)
-    // Values may appear in both badge and td elements, so use getAllByText
-    // v2.0.0 pytorch: 89.50
-    expect(screen.getAllByText('89.50').length).toBeGreaterThanOrEqual(1)
-    // v1.0.0 pytorch: 87.20
-    expect(screen.getAllByText('87.20').length).toBeGreaterThanOrEqual(1)
-
-    // Verify version count badge: "2 versions"
-    expect(screen.getByText('2 versions')).toBeInTheDocument()
-  })
-
-  it('shows empty state when no benchmark data exists', async () => {
-    // Override to return empty benchmarks
-    mockFrom.mockImplementation((tableName) => {
-      if (tableName === 'model_registry') {
-        return createChainable({ data: MOCK_MODELS, error: null })
-      }
-      return createChainable({ data: [], error: null })
-    })
-
-    renderPage(ModelsPage)
-
-    await waitFor(() => {
-      expect(screen.getByText('Model Registry')).toBeInTheDocument()
-    })
-
-    // Navigate to Compare tab
-    fireEvent.click(screen.getByText('Compare Versions'))
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          'No benchmark data available. Run the pipeline from the Validate tab to generate benchmarks.',
-        ),
-      ).toBeInTheDocument()
-    })
   })
 
   it('handles model loading error', async () => {

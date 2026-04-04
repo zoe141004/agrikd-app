@@ -11,12 +11,14 @@ class ModelVersionInfo {
   final String version;
   final String role; // 'active' or 'fallback'
   final bool isBundled;
+  final bool isSelected;
 
   const ModelVersionInfo({
     required this.leafType,
     required this.version,
     required this.role,
     required this.isBundled,
+    required this.isSelected,
   });
 }
 
@@ -49,6 +51,7 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
                 version: r['version'] as String,
                 role: r['role'] as String,
                 isBundled: (r['is_bundled'] as int) == 1,
+                isSelected: (r['is_selected'] as int) == 1,
               ),
             )
             .toList();
@@ -60,12 +63,12 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
     }
   }
 
-  Future<void> switchVersion(String leafType) async {
+  /// Select a specific version as the active inference model.
+  Future<void> selectVersion(String leafType, String version) async {
     try {
-      await _modelDao.switchRole(leafType);
+      await _modelDao.selectVersion(leafType, version);
       await load();
     } catch (_) {
-      // Reload current state to reflect actual DB state
       await load();
     }
   }

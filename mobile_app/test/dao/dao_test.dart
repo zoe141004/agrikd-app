@@ -202,14 +202,15 @@ void main() {
         },
       ]);
 
-      final model = await dao.getActive('test_model');
+      final model = await dao.getSelected('test_model');
       expect(model, isNotNull);
       expect(model!['version'], '1.0.0');
       expect(model['num_classes'], 3);
+      expect(model['is_selected'], 1);
     });
 
-    test('getActive returns null for non-existent leaf type', () async {
-      final model = await dao.getActive('nonexistent_leaf');
+    test('getSelected returns null for non-existent leaf type', () async {
+      final model = await dao.getSelected('nonexistent_leaf');
       expect(model, isNull);
     });
 
@@ -219,7 +220,7 @@ void main() {
       expect(models.isNotEmpty, isTrue);
     });
 
-    test('promoteNewVersion adds new active and demotes old', () async {
+    test('promoteNewVersion adds new active and keeps both active', () async {
       await dao.promoteNewVersion(
         leafType: 'test_model',
         version: '1.1.0',
@@ -228,16 +229,18 @@ void main() {
         numClasses: 3,
         classLabels: '["A","B","C"]',
       );
-      final active = await dao.getActive('test_model');
-      expect(active, isNotNull);
-      expect(active!['version'], '1.1.0');
-      expect(active['sha256_checksum'], 'def456');
-      expect(active['role'], 'active');
+      final selected = await dao.getSelected('test_model');
+      expect(selected, isNotNull);
+      expect(selected!['version'], '1.1.0');
+      expect(selected['sha256_checksum'], 'def456');
+      expect(selected['role'], 'active');
+      expect(selected['is_selected'], 1);
 
-      final fallback = await dao.getFallback('test_model');
-      expect(fallback, isNotNull);
-      expect(fallback!['version'], '1.0.0');
-      expect(fallback['role'], 'fallback');
+      // Both should be active (2-active model)
+      final actives = await dao.getActiveVersions('test_model');
+      expect(actives.length, 2);
+      final versions = actives.map((m) => m['version']).toSet();
+      expect(versions, containsAll(['1.0.0', '1.1.0']));
     });
   });
 

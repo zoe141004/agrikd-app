@@ -8,7 +8,6 @@ import 'package:intl/intl.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/features/diagnosis/domain/models/prediction.dart';
-import 'package:app/features/diagnosis/presentation/widgets/confidence_bar.dart';
 import 'package:app/providers/database_provider.dart';
 
 class DetailScreen extends ConsumerStatefulWidget {
@@ -141,10 +140,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                                     prediction.predictedClassName),
                         ),
                         _InfoRow(
-                          S.get('how_sure'),
-                          '${(prediction.confidence * 100).toStringAsFixed(1)}%',
-                        ),
-                        _InfoRow(
                           S.get('leaf_type'),
                           modelInfo.localizedName(S.locale),
                         ),
@@ -265,33 +260,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Probability distribution
-                if (prediction.allConfidences != null)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            S.get('all_results'),
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 12),
-                          ...List.generate(modelInfo.classLabels.length, (i) {
-                            return ConfidenceBar(
-                              label: modelInfo.localizedClassName(
-                                modelInfo.classLabels[i],
-                                S.locale,
-                              ),
-                              confidence: prediction.allConfidences![i],
-                              isTop: i == prediction.predictedClassIndex,
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),

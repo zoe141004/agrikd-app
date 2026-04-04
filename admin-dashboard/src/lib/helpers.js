@@ -76,7 +76,7 @@ export async function getGitHubWorkflowRuns(workflow) {
   const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
   if (!ghToken || !ghOwner || !ghRepo) return null
   const res = await fetch(
-    `https://api.github.com/repos/${ghOwner}/${ghRepo}/actions/workflows/${workflow}/runs?per_page=5`,
+    `https://api.github.com/repos/${ghOwner}/${ghRepo}/actions/workflows/${workflow}/runs?per_page=10`,
     { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }
   )
   if (!res.ok) return null

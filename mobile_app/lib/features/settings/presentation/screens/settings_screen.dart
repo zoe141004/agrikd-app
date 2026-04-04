@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/providers/auth_provider.dart';
+import 'package:app/providers/benchmark_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
 import 'package:app/providers/settings_provider.dart';
 import 'package:app/providers/sync_provider.dart';
@@ -160,11 +161,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: Text(S.get('app_name')),
                 subtitle: Text(S.get('app_version')),
               ),
-              ListTile(
-                leading: const Icon(Icons.memory),
-                title: Text(S.get('models')),
-                subtitle: _buildModelVersionsSummary(ref),
-              ),
+              ...ModelConstants.availableLeafTypes.map((leafType) {
+                final modelInfo = ModelConstants.getModel(leafType);
+                return ListTile(
+                  leading: const Icon(Icons.memory),
+                  title: Text(modelInfo.localizedName(S.locale)),
+                  subtitle: _buildModelVersionLine(ref, leafType),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showModelSpecsSheet(context, ref, leafType),
+                );
+              }),
             ],
           ),
         ),
@@ -290,28 +296,134 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return S.fmt('days_ago', [diff.inDays]);
   }
 
-  Widget _buildModelVersionsSummary(WidgetRef ref) {
+  Widget _buildModelVersionLine(WidgetRef ref, String leafType) {
     final mvState = ref.watch(modelVersionProvider);
-    if (mvState.isLoading) {
-      return const Text('...');
-    }
+    if (mvState.isLoading) return const Text('...');
 
-    final lines = <String>[];
-    for (final leafType in ModelConstants.availableLeafTypes) {
-      final m = ModelConstants.getModel(leafType);
-      final versions = mvState.versions[leafType] ?? [];
-      final active = versions.where((v) => v.role == 'active').firstOrNull;
-      final fallback = versions.where((v) => v.role == 'fallback').firstOrNull;
+    final versions = mvState.versions[leafType] ?? [];
+    final selected = versions.where((v) => v.isSelected).firstOrNull;
+    if (selected == null) return Text(S.get('no_data'));
 
-      final activeLabel = active != null
-          ? 'v${active.version}${active.isBundled ? '' : ' (OTA)'}'
-          : '-';
-      final fbLabel = fallback != null ? ' | FB: v${fallback.version}' : '';
-
-      lines.add('${m.localizedName(S.locale)}: $activeLabel$fbLabel');
-    }
-    return Text(lines.join('\n'));
+    final label = 'v${selected.version}${selected.isBundled ? '' : ' (OTA)'}';
+    return Text(label);
   }
+
+  void _showModelSpecsSheet(
+    BuildContext context,
+    WidgetRef ref,
+    String leafType,
+  ) {
+    final benchState = ref.read(benchmarkProvider);
+    final bench = benchState.benchmarks[leafType];
+    final modelInfo = ModelConstants.getModel(leafType);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          minChildSize: 0.3,
+          maxChildSize: 0.85,
+          expand: false,
+          builder: (context, scrollController) {
+            return ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.all(20),
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant
+                          .withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  modelInfo.localizedName(S.locale),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (bench != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'v${bench.version} — TFLite Float16',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                const SizedBox(height: 20),
+                if (bench == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.cloud_off,
+                          size: 48,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          S.get('model_specs_unavailable'),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  _SpecRow(S.get('spec_accuracy'),
+                      _pct(bench.accuracy)),
+                  _SpecRow(S.get('spec_precision'),
+                      _pct(bench.precisionMacro)),
+                  _SpecRow(S.get('spec_recall'),
+                      _pct(bench.recallMacro)),
+                  _SpecRow(S.get('spec_f1'),
+                      _pct(bench.f1Macro)),
+                  const Divider(height: 24),
+                  _SpecRow(S.get('spec_flops'),
+                      bench.flopsM != null
+                          ? '${bench.flopsM!.toStringAsFixed(1)} M'
+                          : '—'),
+                  _SpecRow(S.get('spec_latency'),
+                      bench.latencyMeanMs != null
+                          ? '${bench.latencyMeanMs!.toStringAsFixed(1)} ms'
+                          : '—'),
+                  _SpecRow(S.get('spec_size'),
+                      bench.sizeMb != null
+                          ? '${bench.sizeMb!.toStringAsFixed(2)} MB'
+                          : '—'),
+                  _SpecRow(S.get('spec_params'),
+                      bench.paramsM != null
+                          ? '${bench.paramsM!.toStringAsFixed(2)} M'
+                          : '—'),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _pct(double? v) => v != null ? '${v.toStringAsFixed(1)}%' : '—';
 }
 
 class _SectionHeader extends StatelessWidget {
@@ -328,6 +440,37 @@ class _SectionHeader extends StatelessWidget {
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
           color: Theme.of(context).colorScheme.primary,
         ),
+      ),
+    );
+  }
+}
+
+class _SpecRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SpecRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

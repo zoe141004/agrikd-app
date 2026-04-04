@@ -1,12 +1,12 @@
 """
 Upload pipeline results to Supabase after model-pipeline.yml completes.
 
-1. Upload converted models (.pth, .onnx, .tflite float16/float32) to Supabase Storage
-2. Parse benchmark_report.md and write metrics to model_benchmarks table
-3. Update model_registry with accuracy, model_url (float16/float32), sha256
+1. Upload .pth + .tflite float16 to Supabase Storage (ONNX/float32 not uploaded)
+2. Parse benchmark_report.md and write metrics for ALL 4 formats to model_benchmarks
+3. Update model_registry with model_url, pth_url, sha256, accuracy (status stays 'staging')
 
 Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION,
-          TFLITE_FLOAT16_SHA256, TFLITE_FLOAT32_SHA256
+          TFLITE_FLOAT16_SHA256, PIPELINE_RUN_ID (optional)
 """
 
 import json
@@ -16,6 +16,7 @@ import sys
 import urllib.request
 import urllib.error
 import urllib.parse
+from datetime import datetime, timezone
 
 
 def supabase_request(url, headers, body=None, method="POST"):
@@ -62,16 +63,18 @@ def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
 
 
 def upload_all_models(supabase_url, service_key, leaf_type, version):
-    """Upload PTH, ONNX, TFLite float16, and TFLite float32 to Supabase Storage. Returns dict of URLs."""
+    """Upload PTH and TFLite float16 to Supabase Storage. Returns dict of URLs.
+
+    ONNX and TFLite float32 are NOT uploaded (metrics still extracted from
+    benchmark_report.md and stored in model_benchmarks table).
+    """
     prefix = f"{leaf_type}/v{version}"
     models_dir = f"models/{leaf_type}"
     checkpoint_dir = "model_checkpoints_student"
 
     files = [
         (f"{checkpoint_dir}/{leaf_type}_student.pth",           f"{prefix}/{leaf_type}_v{version}_checkpoint.pth", "pth"),
-        (f"{models_dir}/{leaf_type}_student.onnx",              f"{prefix}/{leaf_type}_v{version}.onnx",           "onnx"),
         (f"{models_dir}/{leaf_type}_student_float16.tflite",    f"{prefix}/{leaf_type}_v{version}_float16.tflite", "tflite_float16"),
-        (f"{models_dir}/{leaf_type}_student_float32.tflite",    f"{prefix}/{leaf_type}_v{version}_float32.tflite", "tflite_float32"),
     ]
 
     urls = {}
@@ -215,13 +218,32 @@ def safe_float(val):
         return None
 
 
+def update_pipeline_status(supabase_url, service_key, pipeline_run_id, status, error_message=None):
+    """Update pipeline_runs table status. Called when PIPELINE_RUN_ID is set."""
+    if not pipeline_run_id:
+        return
+    api_headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Content-Type": "application/json",
+    }
+    encoded_id = urllib.parse.quote(pipeline_run_id, safe="")
+    url = f"{supabase_url}/rest/v1/pipeline_runs?id=eq.{encoded_id}"
+    body = {"status": status}
+    if status in ("completed", "failed"):
+        body["completed_at"] = datetime.now(timezone.utc).isoformat()
+    if error_message:
+        body["error_message"] = error_message
+    supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, body, "PATCH")
+
+
 def main():
     supabase_url = os.environ.get("SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     leaf_type = os.environ.get("LEAF_TYPE")
     version = os.environ.get("VERSION")
     tflite_f16_sha256 = os.environ.get("TFLITE_FLOAT16_SHA256", "")
-    tflite_f32_sha256 = os.environ.get("TFLITE_FLOAT32_SHA256", "")
+    pipeline_run_id = os.environ.get("PIPELINE_RUN_ID", "")
 
     if not all([supabase_url, service_key, leaf_type, version]):
         print("[ERROR] Missing env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION")
@@ -233,41 +255,37 @@ def main():
         "Content-Type": "application/json",
     }
 
-    # ── 1. Upload all model formats to Supabase Storage ─────────────────────
+    # Update pipeline status to 'uploading'
+    update_pipeline_status(supabase_url, service_key, pipeline_run_id, "uploading")
+
+    # ── 1. Upload .pth + .tflite float16 to Supabase Storage ─────────────────
     print("\n=== Step 1: Upload model files to Supabase Storage ===")
+    print("  (Only uploading .pth + .tflite float16 — ONNX/float32 not uploaded)")
     model_urls = upload_all_models(supabase_url, service_key, leaf_type, version)
     tflite_f16_url = model_urls.get("tflite_float16")
-    tflite_f32_url = model_urls.get("tflite_float32")
+    pth_url = model_urls.get("pth")
 
-    # ── 2. Update model_registry with model_url + sha256 ──────────────────
-    if tflite_f16_url or tflite_f32_url:
+    # ── 2. Update model_registry with model_url + pth_url + sha256 ───────────
+    if tflite_f16_url:
         print("\n=== Step 2: Update model_registry ===")
-        registry_update = {
-            "updated_at": "now()",
-        }
-        if tflite_f16_url:
-            registry_update["model_url"] = tflite_f16_url
-        if tflite_f32_url:
-            registry_update["model_url_float32"] = tflite_f32_url
-        if tflite_f16_sha256:
-            registry_update["sha256_checksum"] = tflite_f16_sha256
-        if tflite_f32_sha256:
-            registry_update["sha256_float32"] = tflite_f32_sha256
-
         encoded_leaf = urllib.parse.quote(leaf_type, safe="")
         encoded_ver = urllib.parse.quote(version, safe="")
+
+        registry_update = {
+            "model_url": tflite_f16_url,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if pth_url:
+            registry_update["pth_url"] = pth_url
+        if tflite_f16_sha256:
+            registry_update["sha256_checksum"] = tflite_f16_sha256
+
         url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
         ok, resp = supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
         if ok:
-            print(f"  [OK] model_registry updated (float16 + float32 URLs)")
+            print(f"  [OK] model_registry updated (tflite_float16 URL + pth_url)")
         else:
-            # Version might not match — try matching just leaf_type
-            url2 = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"
-            ok2, resp2 = supabase_request(url2, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
-            if ok2:
-                print(f"  [OK] model_registry updated (by leaf_type)")
-            else:
-                print(f"  [WARN] Could not update model_registry: {resp2}")
+            print(f"  [WARN] Could not update model_registry: {resp}")
 
     # ── 3. Parse benchmark report and write to model_benchmarks ──────────────
     report_path = f"models/{leaf_type}/benchmark_report.md"
@@ -290,6 +308,7 @@ def main():
     else:
         print(f"  [WARN] Could not clear old benchmarks: {resp_del}")
 
+    fail_count = 0
     for r in results:
         payload = {
             "leaf_type": leaf_type,
@@ -316,13 +335,15 @@ def main():
         if ok:
             print(f"  [OK] {r['format']}: accuracy={r.get('accuracy')}, latency={r.get('latency_mean_ms')}ms")
         else:
+            fail_count += 1
             print(f"  [FAIL] {r['format']}: {resp}")
 
     # Update accuracy_top1 in model_registry from TFLite float16 result
     tflite_result = next((r for r in results if r["format"] == "tflite_float16"), None)
     if tflite_result and tflite_result.get("accuracy") is not None:
         encoded_leaf = urllib.parse.quote(leaf_type, safe="")
-        url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}"
+        encoded_ver = urllib.parse.quote(version, safe="")
+        url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
         ok, resp = supabase_request(
             url,
             {**api_headers, "Prefer": "return=minimal"},
@@ -333,6 +354,13 @@ def main():
             print(f"  [OK] model_registry accuracy_top1 = {tflite_result['accuracy']}%")
         else:
             print(f"  [WARN] Could not update accuracy: {resp}")
+
+    # Update pipeline status to 'completed' (with warning if partial failures)
+    if fail_count > 0:
+        update_pipeline_status(supabase_url, service_key, pipeline_run_id, "completed",
+                               error_message=f"{fail_count}/{len(results)} benchmark uploads failed")
+    else:
+        update_pipeline_status(supabase_url, service_key, pipeline_run_id, "completed")
 
     print("\n[DONE] Pipeline upload complete.")
 

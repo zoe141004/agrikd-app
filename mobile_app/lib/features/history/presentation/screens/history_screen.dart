@@ -102,15 +102,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 Navigator.pop(context);
               },
             ),
-            _SortOption(
-              label: S.get('most_certain'),
-              icon: Icons.trending_up,
-              isSelected: state.sortBy == 'confidence DESC',
-              onTap: () {
-                ref.read(historyProvider.notifier).setSortBy('confidence DESC');
-                Navigator.pop(context);
-              },
-            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -118,75 +109,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  void _showConfidenceFilter() {
-    double threshold = ref.read(historyProvider).minConfidence ?? 0.0;
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: StatefulBuilder(
-          builder: (context, setSheetState) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  S.get('min_confidence'),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: threshold,
-                        min: 0.0,
-                        max: 1.0,
-                        divisions: 20,
-                        label: '${(threshold * 100).toInt()}%',
-                        onChanged: (v) => setSheetState(() => threshold = v),
-                      ),
-                    ),
-                    Text(
-                      '${(threshold * 100).toInt()}%',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        ref
-                            .read(historyProvider.notifier)
-                            .setMinConfidence(null);
-                        Navigator.pop(context);
-                      },
-                      child: Text(S.get('clear')),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        ref
-                            .read(historyProvider.notifier)
-                            .setMinConfidence(threshold > 0 ? threshold : null);
-                        Navigator.pop(context);
-                      },
-                      child: Text(S.get('apply')),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   String _sortLabel(String sortBy) {
     switch (sortBy) {
@@ -194,8 +116,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         return S.get('newest_first');
       case 'created_at ASC':
         return S.get('oldest_first');
-      case 'confidence DESC':
-        return S.get('most_certain');
       default:
         return S.get('newest_first');
     }
@@ -333,28 +253,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                             label: Text(S.get('all_time')),
                             onPressed: _pickDateRange,
                           ),
-                    const SizedBox(width: 8),
-
-                    // Confidence chip
-                    state.minConfidence != null
-                        ? InputChip(
-                            avatar: const Icon(Icons.speed, size: 16),
-                            label: Text(
-                              '≥ ${(state.minConfidence! * 100).toInt()}%',
-                            ),
-                            onPressed: _showConfidenceFilter,
-                            onDeleted: () {
-                              ref
-                                  .read(historyProvider.notifier)
-                                  .setMinConfidence(null);
-                            },
-                            side: BorderSide(color: colorScheme.primary),
-                          )
-                        : ActionChip(
-                            avatar: const Icon(Icons.speed, size: 16),
-                            label: Text(S.get('confidence')),
-                            onPressed: _showConfidenceFilter,
-                          ),
                   ],
                 ),
               ),
@@ -409,8 +307,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                             }
 
                             final prediction = state.predictions[index];
-                            final confidence = (prediction.confidence * 100)
-                                .toStringAsFixed(1);
                             final predModelInfo = ModelConstants.getModel(
                               prediction.leafType,
                             );
@@ -438,8 +334,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                subtitle: Text(S.fmt('sure_pct', [confidence])),
-                                trailing: Text(
+                                subtitle: Text(
                                   _formatDate(prediction.createdAt),
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),

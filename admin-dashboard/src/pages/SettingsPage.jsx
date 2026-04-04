@@ -25,7 +25,7 @@ export default function SettingsPage() {
   const [auditLoading, setAuditLoading] = useState(false)
 
   useEffect(() => {
-    supabase.from('model_registry').select('leaf_type, version, model_url, is_active').then(({ data }) => setModels(data || []))
+    supabase.from('model_registry').select('leaf_type, version, model_url, status').then(({ data }) => setModels(data || []))
     setEnvInfo({
       supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
       env: import.meta.env.MODE || 'production',
@@ -163,8 +163,8 @@ export default function SettingsPage() {
                     <td><strong style={{ color: '#121c28' }}>{m.leaf_type}</strong></td>
                     <td><span className="badge badge-primary">v{m.version}</span></td>
                     <td className="font-mono" style={{ color: '#94a3b8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.model_url ? maskUrl(m.model_url) : '—'}</td>
-                    <td><span className={`badge ${m.is_active !== false ? 'badge-green' : 'badge-gray'}`}>{m.is_active !== false ? 'Active' : 'Inactive'}</span></td>
-                    <td><span className={`badge ${m.model_url && m.is_active !== false ? 'badge-green' : 'badge-red'}`}>{m.model_url && m.is_active !== false ? '✓ Serving' : '✗ Not live'}</span></td>
+                    <td><span className={`badge ${m.status === 'active' ? 'badge-green' : m.status === 'backup' ? 'badge-gray' : 'badge-yellow'}`}>{(m.status || 'staging').charAt(0).toUpperCase() + (m.status || 'staging').slice(1)}</span></td>
+                    <td><span className={`badge ${m.model_url && m.status === 'active' ? 'badge-green' : 'badge-red'}`}>{m.model_url && m.status === 'active' ? '✓ Serving' : '✗ Not live'}</span></td>
                   </tr>
                 ))}
                 {models.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No models. Upload via Model Registry.</td></tr>}

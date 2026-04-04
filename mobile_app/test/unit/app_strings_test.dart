@@ -25,7 +25,7 @@ void main() {
 
     test('fmt replaces placeholders', () {
       expect(S.fmt('n_diseases', [9]), '9 diseases');
-      expect(S.fmt('sure_pct', ['95.0']), '95.0% sure');
+      expect(S.fmt('minutes_ago', [5]), '5 min ago');
     });
 
     test('fmt replaces multiple placeholders', () {
@@ -57,8 +57,6 @@ void main() {
         'login',
         'email',
         'password',
-        'min_confidence',
-        'confidence',
         'clear',
         'apply',
         'offline_mode',

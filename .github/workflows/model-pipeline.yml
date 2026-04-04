@@ -19,6 +19,11 @@ on:
         required: false
         type: number
         default: 80
+      pipeline_run_id:
+        description: 'Pipeline run ID for status tracking (from pipeline_runs table)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   pipeline:
@@ -91,8 +96,8 @@ jobs:
       - name: Download .pth checkpoint
         run: |
           mkdir -p model_checkpoints_student
-          PTH_FILE="model_checkpoints_student/${{ inputs.leaf_type }}_student.pth"
-          MODEL_URL="${{ inputs.model_url }}"
+          PTH_FILE="model_checkpoints_student/${LEAF_TYPE}_student.pth"
+          MODEL_URL="$MODEL_URL_INPUT"
           echo "Model URL: $MODEL_URL"
 
           # If URL points to .tflite (from previous pipeline run), find the .pth checkpoint instead
@@ -100,7 +105,7 @@ jobs:
             echo "URL points to .tflite — looking for checkpoint .pth in same folder..."
             # Derive .pth URL from convention: <leaf>_v<ver>_checkpoint.pth
             PTH_URL=$(echo "$MODEL_URL" | sed 's|/[^/]*\.tflite$|/|')
-            PTH_URL="${PTH_URL}${{ inputs.leaf_type }}_v${{ inputs.version }}_checkpoint.pth"
+            PTH_URL="${PTH_URL}${LEAF_TYPE}_v${VERSION}_checkpoint.pth"
             echo "Derived .pth URL: $PTH_URL"
             MODEL_URL="$PTH_URL"
           fi
@@ -140,18 +145,59 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MODEL_URL_INPUT: ${{ inputs.model_url }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          VERSION: ${{ inputs.version }}
+
+      - name: Update pipeline status — converting
+        if: inputs.pipeline_run_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"converting\",\"github_run_id\":$GH_RUN_ID,\"github_run_url\":\"$GH_RUN_URL\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PIPELINE_RUN_ID: ${{ inputs.pipeline_run_id }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: 'Convert PTH → ONNX'
+        id: convert_onnx
         run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
       - name: 'Convert ONNX → TFLite'
+        id: convert_tflite
         run: python mlops_pipeline/scripts/convert_onnx_to_tflite.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
 
       - name: 'Cross-format validation'
+        id: validation
         run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
         continue-on-error: true
 
+      - name: 'Log validation result'
+        if: steps.validation.outcome == 'failure'
+        run: echo "::warning::Cross-format validation failed (non-blocking — known random-noise issue with fresh model instances)"
+
+      - name: Update pipeline status — evaluating
+        if: inputs.pipeline_run_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"evaluating"}'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PIPELINE_RUN_ID: ${{ inputs.pipeline_run_id }}
+
       - name: 'Full evaluation on real test data'
+        id: evaluate
         run: |
           DATA_DIR="data/${{ inputs.leaf_type }}"
           if [ ! -d "$DATA_DIR" ]; then
@@ -255,24 +301,32 @@ jobs:
           REPORT_PATH: models/${{ inputs.leaf_type }}/benchmark_report.md
           MIN_ACC: ${{ inputs.min_accuracy }}
 
-      - name: Compute SHA-256 of TFLite models
+      - name: Cleanup intermediate files (keep only .pth + .tflite float16)
+        if: always()
+        run: |
+          BASE="models/${{ inputs.leaf_type }}"
+          echo "Cleaning up ONNX and TFLite float32 (metrics already extracted)..."
+          rm -f "${BASE}/${{ inputs.leaf_type }}_student.onnx"
+          rm -f "${BASE}/${{ inputs.leaf_type }}_student_float32.tflite"
+          echo "[OK] Cleaned intermediate files. Remaining:"
+          ls -la "${BASE}/" || true
+
+      - name: Compute SHA-256 of TFLite float16 model
         id: sha256
         run: |
-          BASE="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student"
-          for VARIANT in float16 float32; do
-            TFLITE_PATH="${BASE}_${VARIANT}.tflite"
-            if [ -f "$TFLITE_PATH" ]; then
-              HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
-              SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
-              echo "hash_${VARIANT}=$HASH" >> "$GITHUB_OUTPUT"
-              echo "size_mb_${VARIANT}=$SIZE_MB" >> "$GITHUB_OUTPUT"
-              echo "[OK] ${VARIANT} SHA-256: $HASH  Size: ${SIZE_MB} MB"
-            else
-              echo "[WARN] TFLite ${VARIANT} not found: $TFLITE_PATH"
-              echo "hash_${VARIANT}=" >> "$GITHUB_OUTPUT"
-              echo "size_mb_${VARIANT}=" >> "$GITHUB_OUTPUT"
-            fi
-          done
+          TFLITE_PATH="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student_float16.tflite"
+          if [ -f "$TFLITE_PATH" ]; then
+            HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
+            SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
+            echo "hash_float16=$HASH" >> "$GITHUB_OUTPUT"
+            echo "size_mb_float16=$SIZE_MB" >> "$GITHUB_OUTPUT"
+            echo "[OK] float16 SHA-256: $HASH  Size: ${SIZE_MB} MB"
+          else
+            echo "[ERROR] TFLite float16 not found: $TFLITE_PATH"
+            echo "hash_float16=" >> "$GITHUB_OUTPUT"
+            echo "size_mb_float16=" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
       - name: Upload results to Supabase
         env:
@@ -281,8 +335,22 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
           VERSION: ${{ inputs.version }}
           TFLITE_FLOAT16_SHA256: ${{ steps.sha256.outputs.hash_float16 }}
-          TFLITE_FLOAT32_SHA256: ${{ steps.sha256.outputs.hash_float32 }}
+          PIPELINE_RUN_ID: ${{ inputs.pipeline_run_id }}
         run: python .github/scripts/upload_benchmarks.py
+
+      - name: Update pipeline status — failed
+        if: failure() && inputs.pipeline_run_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Pipeline failed — check GitHub Actions logs\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PIPELINE_RUN_ID: ${{ inputs.pipeline_run_id }}
 
       - name: Upload artifacts
         if: always()

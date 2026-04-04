@@ -15,9 +15,9 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // Group 1: OTA Model Version Rotation
+  // Group 1: Multi-Version Model Rotation (REQ-3)
   // ---------------------------------------------------------------------------
-  group('OTA Model Version Rotation', () {
+  group('Multi-Version Model Rotation', () {
     late ModelDao modelDao;
 
     setUp(() async {
@@ -46,7 +46,7 @@ void main() {
     }
 
     test(
-      'promoteNewVersion creates active model and demotes old to fallback',
+      'promoteNewVersion creates active model and keeps both active',
       () async {
         await seedBundledTomato();
 
@@ -63,27 +63,28 @@ void main() {
               '"Mosaic_virus","Yellow_Leaf_Curl_Virus","healthy"]',
         );
 
-        // Active should be v1.1.0 (OTA)
-        final active = await modelDao.getActive('tomato');
-        expect(active, isNotNull);
-        expect(active!['version'], '1.1.0');
-        expect(active['role'], 'active');
-        expect(active['is_bundled'], 0);
-        expect(active['sha256_checksum'], 'ota_sha256_def');
+        // Selected (for inference) should be v1.1.0 (OTA)
+        final selected = await modelDao.getSelected('tomato');
+        expect(selected, isNotNull);
+        expect(selected!['version'], '1.1.0');
+        expect(selected['role'], 'active');
+        expect(selected['is_bundled'], 0);
+        expect(selected['is_selected'], 1);
+        expect(selected['sha256_checksum'], 'ota_sha256_def');
 
-        // Fallback should be the original bundled v1.0.0
-        final fallback = await modelDao.getFallback('tomato');
-        expect(fallback, isNotNull);
-        expect(fallback!['version'], '1.0.0');
-        expect(fallback['role'], 'fallback');
-        expect(fallback['is_bundled'], 1);
+        // Both versions should be active (2-active-version model)
+        final actives = await modelDao.getActiveVersions('tomato');
+        expect(actives.length, 2);
+        final versions = actives.map((m) => m['version']).toSet();
+        expect(versions, contains('1.0.0'));
+        expect(versions, contains('1.1.0'));
       },
     );
 
-    test('second promotion deletes old fallback', () async {
+    test('third promotion deletes oldest active (max 2 rule)', () async {
       await seedBundledTomato();
 
-      // First promotion: v1.0.0 -> fallback, v1.1.0 -> active
+      // First promotion: v1.0.0 + v1.1.0 both active
       await modelDao.promoteNewVersion(
         leafType: 'tomato',
         version: '1.1.0',
@@ -93,8 +94,7 @@ void main() {
         classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
       );
 
-      // Second promotion: v1.0.0 fallback deleted, v1.1.0 -> fallback,
-      // v1.2.0 -> active
+      // Second promotion: v1.0.0 deleted, v1.1.0 + v1.2.0 active
       await modelDao.promoteNewVersion(
         leafType: 'tomato',
         version: '1.2.0',
@@ -104,25 +104,28 @@ void main() {
         classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
       );
 
-      // Only 2 models should remain for tomato (no archived v1.0.0)
+      // Only 2 models should remain for tomato
       final allModels = await modelDao.getByLeafType('tomato');
       expect(allModels.length, 2);
 
-      final active = await modelDao.getActive('tomato');
-      expect(active!['version'], '1.2.0');
-      expect(active['role'], 'active');
+      // Selected should be v1.2.0
+      final selected = await modelDao.getSelected('tomato');
+      expect(selected!['version'], '1.2.0');
+      expect(selected['role'], 'active');
+      expect(selected['is_selected'], 1);
 
-      final fallback = await modelDao.getFallback('tomato');
-      expect(fallback!['version'], '1.1.0');
-      expect(fallback['role'], 'fallback');
+      // Both remaining should be active
+      final actives = await modelDao.getActiveVersions('tomato');
+      expect(actives.length, 2);
+      final versions = actives.map((m) => m['version']).toSet();
+      expect(versions, containsAll(['1.1.0', '1.2.0']));
 
       // v1.0.0 must not exist anywhere
-      final versions = allModels.map((m) => m['version']).toList();
-      expect(versions, isNot(contains('1.0.0')));
+      expect(allModels.any((m) => m['version'] == '1.0.0'), isFalse);
     });
 
     test(
-      'rollbackToFallback deletes active OTA and promotes fallback',
+      'removeVersion deletes OTA version and selects remaining',
       () async {
         await seedBundledTomato();
 
@@ -136,25 +139,21 @@ void main() {
           classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
         );
 
-        // Verify pre-rollback state
-        var active = await modelDao.getActive('tomato');
-        expect(active!['version'], '1.1.0');
-        expect(active['is_bundled'], 0);
+        // Verify pre-removal state: v1.1.0 selected
+        var selected = await modelDao.getSelected('tomato');
+        expect(selected!['version'], '1.1.0');
+        expect(selected['is_bundled'], 0);
 
-        // Rollback: should delete active OTA and promote fallback
-        final success = await modelDao.rollbackToFallback('tomato');
+        // Remove v1.1.0: should delete and select remaining v1.0.0
+        final success = await modelDao.removeVersion('tomato', '1.1.0');
         expect(success, isTrue);
 
-        // Bundled v1.0.0 should be active again
-        active = await modelDao.getActive('tomato');
-        expect(active, isNotNull);
-        expect(active!['version'], '1.0.0');
-        expect(active['role'], 'active');
-        expect(active['is_bundled'], 1);
-
-        // No fallback should remain
-        final fallback = await modelDao.getFallback('tomato');
-        expect(fallback, isNull);
+        // v1.0.0 should be selected
+        selected = await modelDao.getSelected('tomato');
+        expect(selected, isNotNull);
+        expect(selected!['version'], '1.0.0');
+        expect(selected['is_selected'], 1);
+        expect(selected['is_bundled'], 1);
 
         // Only 1 model total
         final allModels = await modelDao.getByLeafType('tomato');
@@ -162,10 +161,10 @@ void main() {
       },
     );
 
-    test('switchRole swaps active and fallback', () async {
+    test('selectVersion switches selected model', () async {
       await seedBundledTomato();
 
-      // Promote OTA so we have active (v1.1.0) + fallback (v1.0.0)
+      // Promote OTA so we have 2 active versions
       await modelDao.promoteNewVersion(
         leafType: 'tomato',
         version: '1.1.0',
@@ -175,43 +174,36 @@ void main() {
         classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
       );
 
-      // Confirm pre-switch state
-      var active = await modelDao.getActive('tomato');
-      expect(active!['version'], '1.1.0');
-      var fallback = await modelDao.getFallback('tomato');
-      expect(fallback!['version'], '1.0.0');
+      // v1.1.0 should be selected initially
+      var selected = await modelDao.getSelected('tomato');
+      expect(selected!['version'], '1.1.0');
 
-      // Switch roles
-      await modelDao.switchRole('tomato');
+      // Select v1.0.0 instead
+      await modelDao.selectVersion('tomato', '1.0.0');
 
-      // After switch: v1.0.0 should be active, v1.1.0 fallback
-      active = await modelDao.getActive('tomato');
-      expect(active, isNotNull);
-      expect(active!['version'], '1.0.0');
+      selected = await modelDao.getSelected('tomato');
+      expect(selected, isNotNull);
+      expect(selected!['version'], '1.0.0');
+      expect(selected['is_selected'], 1);
 
-      fallback = await modelDao.getFallback('tomato');
-      expect(fallback, isNotNull);
-      expect(fallback!['version'], '1.1.0');
+      // v1.1.0 should no longer be selected
+      final allModels = await modelDao.getByLeafType('tomato');
+      final v110 = allModels.firstWhere((m) => m['version'] == '1.1.0');
+      expect(v110['is_selected'], 0);
     });
 
-    test('rollback with no fallback keeps current active', () async {
-      // Only seed a single bundled active model, no fallback
+    test('removeVersion with only one model returns false', () async {
+      // Only seed a single bundled model
       await seedBundledTomato();
 
       // Verify only one model exists
       final before = await modelDao.getByLeafType('tomato');
       expect(before.length, 1);
 
-      // Attempt rollback — no fallback, and active is bundled (is_bundled=1)
-      // so it is not deleted by rollbackToFallback
-      final success = await modelDao.rollbackToFallback('tomato');
+      // Remove the only model — no remaining active to select
+      final success = await modelDao.removeVersion('tomato', '1.0.0');
+      // Returns false because no remaining active model was selected
       expect(success, isFalse);
-
-      // Active model should remain unchanged
-      final active = await modelDao.getActive('tomato');
-      expect(active, isNotNull);
-      expect(active!['version'], '1.0.0');
-      expect(active['is_bundled'], 1);
     });
   });
 
@@ -418,10 +410,11 @@ void main() {
         },
       ]);
 
-      var active = await modelDao.getActive('tomato');
-      expect(active, isNotNull);
-      expect(active!['version'], '1.0.0');
-      expect(active['role'], 'active');
+      var selected = await modelDao.getSelected('tomato');
+      expect(selected, isNotNull);
+      expect(selected!['version'], '1.0.0');
+      expect(selected['role'], 'active');
+      expect(selected['is_selected'], 1);
 
       // --- Step 2: First OTA update to v1.1.0 ---
       await modelDao.promoteNewVersion(
@@ -433,14 +426,14 @@ void main() {
         classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
       );
 
-      active = await modelDao.getActive('tomato');
-      expect(active!['version'], '1.1.0');
-      expect(active['is_bundled'], 0);
+      selected = await modelDao.getSelected('tomato');
+      expect(selected!['version'], '1.1.0');
+      expect(selected['is_bundled'], 0);
+      expect(selected['is_selected'], 1);
 
-      var fallback = await modelDao.getFallback('tomato');
-      expect(fallback, isNotNull);
-      expect(fallback!['version'], '1.0.0');
-      expect(fallback['is_bundled'], 1);
+      // Both versions active
+      var actives = await modelDao.getActiveVersions('tomato');
+      expect(actives.length, 2);
 
       // --- Step 3: Second OTA update to v1.2.0 (rotates out v1.0.0) ---
       await modelDao.promoteNewVersion(
@@ -452,29 +445,28 @@ void main() {
         classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
       );
 
-      active = await modelDao.getActive('tomato');
-      expect(active!['version'], '1.2.0');
+      selected = await modelDao.getSelected('tomato');
+      expect(selected!['version'], '1.2.0');
+      expect(selected['is_selected'], 1);
 
-      fallback = await modelDao.getFallback('tomato');
-      expect(fallback!['version'], '1.1.0');
+      actives = await modelDao.getActiveVersions('tomato');
+      expect(actives.length, 2);
+      final activeVersions = actives.map((m) => m['version']).toSet();
+      expect(activeVersions, containsAll(['1.1.0', '1.2.0']));
 
       // v1.0.0 should be completely gone
       var allModels = await modelDao.getByLeafType('tomato');
       expect(allModels.length, 2);
       expect(allModels.any((m) => m['version'] == '1.0.0'), isFalse);
 
-      // --- Step 4: Rollback ---
-      // v1.2.0 (OTA, is_bundled=0) is deleted; v1.1.0 promoted to active
-      final rollbackOk = await modelDao.rollbackToFallback('tomato');
-      expect(rollbackOk, isTrue);
+      // --- Step 4: Remove v1.2.0 ---
+      final removeOk = await modelDao.removeVersion('tomato', '1.2.0');
+      expect(removeOk, isTrue);
 
-      active = await modelDao.getActive('tomato');
-      expect(active, isNotNull);
-      expect(active!['version'], '1.1.0');
-      expect(active['role'], 'active');
-
-      fallback = await modelDao.getFallback('tomato');
-      expect(fallback, isNull);
+      selected = await modelDao.getSelected('tomato');
+      expect(selected, isNotNull);
+      expect(selected!['version'], '1.1.0');
+      expect(selected['is_selected'], 1);
 
       // Only one model left
       allModels = await modelDao.getByLeafType('tomato');

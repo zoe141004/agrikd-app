@@ -1,9 +1,9 @@
-import { useState, useEffect, Fragment, useRef, useCallback } from 'react'
+import { useState, useEffect, Fragment, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
+import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
-const TABS = ['Registry', 'Benchmarks', 'Compare Versions', 'Upload Model', 'Validate', 'OTA Deploy']
+const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
 
 export default function ModelsPage() {
   const [tab, setTab] = useState('Registry')
@@ -24,83 +24,44 @@ export default function ModelsPage() {
   const [uploadMsg, setUploadMsg] = useState(null)
   const fileInputRef = useRef()
 
-  // Validation (GitHub Actions)
+  // Validation (pipeline)
   const [valTarget, setValTarget] = useState('')
+  const [valVersion, setValVersion] = useState('')
   const [valRunning, setValRunning] = useState(false)
   const [valMsg, setValMsg] = useState(null)
-  const [ghRuns, setGhRuns] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
 
   // Benchmarks
   const [benchmarks, setBenchmarks] = useState([])
-  const [benchLoading, setBenchLoading] = useState(false)
   const [benchLeaf, setBenchLeaf] = useState('')
   const [benchVersion, setBenchVersion] = useState('')
-
-  // Compare Versions
-  const [compareLeaf, setCompareLeaf] = useState('')
-  const [compareData, setCompareData] = useState([])
-  const [compareLoading, setCompareLoading] = useState(false)
 
   // Version history
   const [versions, setVersions] = useState([])
   const [expandedVersions, setExpandedVersions] = useState(null)
 
-  // Pipeline tracking
-  const [pipelineStatus, setPipelineStatus] = useState(null) // null | 'triggered' | 'queued' | 'in_progress' | 'completed' | 'failure'
-  const [pipelineRun, setPipelineRun] = useState(null) // { url, conclusion, runNumber }
+  // Pipeline tracking (Supabase Realtime)
+  const [pipelineStatus, setPipelineStatus] = useState(null)
+  const [pipelineRuns, setPipelineRuns] = useState([])
   const [pipelineDismissed, setPipelineDismissed] = useState(false)
-  const pollingRef = useRef(null)
-  const pipelineTriggeredAtRef = useRef(null)
+  const realtimeChannelRef = useRef(null)
 
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
+  // Cleanup realtime on unmount
+  useEffect(() => () => {
+    if (realtimeChannelRef.current) {
+      supabase.removeChannel(realtimeChannelRef.current)
+      realtimeChannelRef.current = null
+    }
   }, [])
 
-  const pollPipelineStatus = useCallback(async () => {
-    const data = await getGitHubWorkflowRuns('model-pipeline.yml')
-    if (!data?.workflow_runs?.length) return
-    setGhRuns(data)
-    // Find the run triggered after our dispatch
-    const triggeredAt = pipelineTriggeredAtRef.current
-    const latestRun = triggeredAt
-      ? data.workflow_runs.find(r => new Date(r.created_at) >= new Date(triggeredAt - 30000))
-      : data.workflow_runs[0]
-    if (!latestRun) return
-    const status = latestRun.status === 'completed' ? (latestRun.conclusion || 'completed') : latestRun.status
-    setPipelineRun({ url: latestRun.html_url, conclusion: latestRun.conclusion, runNumber: latestRun.run_number })
-    setPipelineStatus(status)
-    setPipelineDismissed(false)
-    if (latestRun.status === 'completed') {
-      stopPolling()
-      loadModels() // refresh benchmarks
-    }
-  }, [stopPolling])
-
-  const startPolling = useCallback(() => {
-    stopPolling()
-    pipelineTriggeredAtRef.current = Date.now()
-    setPipelineStatus('triggered')
-    setPipelineDismissed(false)
-    setPipelineRun(null)
-    // First poll after 5s (GitHub needs time to register the run), then every 15s
-    setTimeout(() => {
-      pollPipelineStatus()
-      pollingRef.current = setInterval(pollPipelineStatus, 15000)
-    }, 5000)
-  }, [stopPolling, pollPipelineStatus])
-
-  // Cleanup polling on unmount
-  useEffect(() => () => stopPolling(), [stopPolling])
-
-  useEffect(() => { loadModels(); loadGhRuns() }, [])
+  useEffect(() => { loadModels(); loadPipelineRuns() }, [])
 
   const loadModels = async () => {
     setLoading(true)
     try {
       const [{ data, error: err }, { data: benchData }, { data: verData }] = await Promise.all([
-        supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }),
+        supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }).order('updated_at', { ascending: false }),
         supabase.from('model_benchmarks').select('*').order('created_at', { ascending: false }),
         supabase.from('model_versions').select('*').order('archived_at', { ascending: false }),
       ])
@@ -112,25 +73,53 @@ export default function ModelsPage() {
     setLoading(false)
   }
 
-  const loadCompareData = async (leafType) => {
-    if (!leafType) { setCompareData([]); return }
-    setCompareLoading(true)
+  const loadPipelineRuns = async () => {
     try {
-      const { data, error: err } = await supabase
-        .from('model_benchmarks')
-        .select('*')
-        .eq('leaf_type', leafType)
-        .order('version', { ascending: false })
-        .order('format', { ascending: true })
-      if (err) throw new Error(err.message)
-      setCompareData(data || [])
-    } catch (err) { setError(err.message) }
-    setCompareLoading(false)
+      const { data } = await supabase.from('pipeline_runs').select('*').order('started_at', { ascending: false }).limit(10)
+      setPipelineRuns(data || [])
+      // Derive banner status from latest run
+      if (data?.length) {
+        const latest = data[0]
+        if (['pending', 'converting', 'evaluating', 'uploading'].includes(latest.status)) {
+          setPipelineStatus(latest.status)
+          setPipelineDismissed(false)
+        } else if (latest.status === 'completed') {
+          setPipelineStatus('completed')
+        } else if (latest.status === 'failed') {
+          setPipelineStatus('failed')
+        }
+      }
+    } catch { /* pipeline_runs table may not exist yet */ }
+  }
+
+  const subscribeToPipelineRun = (runId) => {
+    if (realtimeChannelRef.current) {
+      supabase.removeChannel(realtimeChannelRef.current)
+    }
+    const channel = supabase
+      .channel(`pipeline-${runId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'pipeline_runs',
+        filter: `id=eq.${runId}`
+      }, (payload) => {
+        const newStatus = payload.new.status
+        setPipelineStatus(newStatus)
+        setPipelineDismissed(false)
+        // Update the run in our local list
+        setPipelineRuns(prev => prev.map(r => r.id === runId ? { ...r, ...payload.new } : r))
+        if (['completed', 'failed'].includes(newStatus)) {
+          supabase.removeChannel(channel)
+          realtimeChannelRef.current = null
+          loadModels()
+        }
+      })
+      .subscribe()
+    realtimeChannelRef.current = channel
   }
 
   // ── Registry Tab ──────────────────────────────────────────────────────────
   const openEdit = (m) => {
-    setForm({ display_name: m.display_name, version: m.version, model_url: m.model_url || '', description: m.description || '', is_active: m.is_active ?? true, accuracy_top1: m.accuracy_top1 || '', sha256_checksum: m.sha256_checksum || '' })
+    setForm({ display_name: m.display_name, version: m.version, model_url: m.model_url || '', description: m.description || '', status: m.status || 'staging', accuracy_top1: m.accuracy_top1 || '', sha256_checksum: m.sha256_checksum || '' })
     setEditModal(m)
   }
 
@@ -141,7 +130,7 @@ export default function ModelsPage() {
       version: form.version,
       model_url: form.model_url,
       description: form.description,
-      is_active: form.is_active,
+      status: form.status,
       accuracy_top1: form.accuracy_top1 || null,
       sha256_checksum: form.sha256_checksum || 'pending',
       updated_at: new Date().toISOString(),
@@ -157,10 +146,8 @@ export default function ModelsPage() {
     try {
       const errors = []
       const warnings = []
-      // Required fields
       if (!m.class_labels?.length) errors.push('No class labels configured')
       if (!m.num_classes) errors.push('Number of classes not set')
-      // Model URL — warn if missing, error if broken
       if (!m.model_url) {
         warnings.push('No model URL configured (bundled models don\'t need one)')
       } else {
@@ -173,12 +160,10 @@ export default function ModelsPage() {
           }
         } catch { warnings.push('Model URL unreachable or CORS blocked') }
       }
-      // SHA-256
       if (!m.sha256_checksum || m.sha256_checksum === 'pending') {
         warnings.push('No SHA-256 checksum recorded (pipeline will compute after conversion)')
       }
       if (!m.accuracy_top1) warnings.push('No accuracy metric recorded')
-      // Benchmarks
       const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
       if (!hasBench) warnings.push('No benchmark evaluation results')
       const issues = [...errors, ...warnings]
@@ -188,18 +173,36 @@ export default function ModelsPage() {
     }
   }
 
-  const toggleActive = async (m) => {
+  const activateModel = async (m) => {
+    const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
+    if (!hasBench || !m.model_url || !m.sha256_checksum || m.sha256_checksum === 'pending') {
+      alert('Cannot activate: model must have benchmarks, a valid URL, and SHA-256 checksum.')
+      return
+    }
     setConfirmAction({
-      title: m.is_active !== false ? 'Deactivate Model' : 'Activate Model',
-      message: m.is_active !== false
-        ? `Deactivate "${m.display_name || m.leaf_type}"? This will stop serving this model to mobile users via OTA.`
-        : `Reactivate "${m.display_name || m.leaf_type}"? It will become available for OTA again.`,
-      danger: m.is_active !== false,
-      confirmLabel: m.is_active !== false ? 'Deactivate' : 'Activate',
+      title: 'Activate Model',
+      message: `Activate "${m.display_name || m.leaf_type}" v${m.version}? If there are already 2 active versions for this dataset, the oldest will be demoted to backup.`,
+      danger: false,
+      confirmLabel: 'Activate',
       onConfirm: async () => {
         setConfirmAction(null)
-        const { error } = await supabase.from('model_registry').update({ is_active: !m.is_active, updated_at: new Date().toISOString() }).eq('id', m.id)
-        if (!error) { loadModels(); logAudit(supabase, m.is_active !== false ? 'model_deactivated' : 'model_activated', 'model', m.id, { leaf_type: m.leaf_type }) }
+        const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
+        if (!error) { loadModels(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
+        else alert(error.message)
+      }
+    })
+  }
+
+  const deactivateModel = async (m) => {
+    setConfirmAction({
+      title: 'Deactivate Model',
+      message: `Deactivate "${m.display_name || m.leaf_type}" v${m.version}? This will stop serving this model to mobile users via OTA. Status will change to backup.`,
+      danger: true,
+      confirmLabel: 'Deactivate',
+      onConfirm: async () => {
+        setConfirmAction(null)
+        const { error } = await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', m.id)
+        if (!error) { loadModels(); logAudit(supabase, 'model_deactivated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else alert(error.message)
       }
     })
@@ -236,8 +239,8 @@ export default function ModelsPage() {
 
     setUploading(true); setUploadProgress(10); setUploadMsg(null)
     try {
-      // 1. Archive current model if exists
-      const existing = models.find(m => m.leaf_type === leaf_type)
+      // 1. Archive current model if exists (match exact leaf_type + version being uploaded)
+      const existing = models.find(m => m.leaf_type === leaf_type && m.version === version)
       if (existing) {
         await supabase.from('model_versions').upsert({
           leaf_type: existing.leaf_type,
@@ -246,7 +249,7 @@ export default function ModelsPage() {
           model_url: existing.model_url,
           sha256_checksum: existing.sha256_checksum,
           accuracy: existing.accuracy_top1,
-          size_mb: uploadFile ? null : null,
+          size_mb: null,
         }, { onConflict: 'leaf_type,version' })
       }
       setUploadProgress(15)
@@ -268,35 +271,50 @@ export default function ModelsPage() {
         : (existing?.class_labels || [])
       const finalNumClasses = num_classes ? parseInt(num_classes) : (classLabels.length || existing?.num_classes || null)
 
-      // 4. Register as INACTIVE candidate (not auto-activated)
+      // 4. Register as STAGING candidate (not auto-activated) — REQ-7
       const payload = {
         leaf_type,
         display_name: display_name || existing?.display_name || leaf_type,
         version,
-        model_url: publicUrl, // temporary: points to .pth; pipeline will update to .tflite URL
-        sha256_checksum: 'pending', // will be set by pipeline after conversion
+        model_url: publicUrl,
+        sha256_checksum: 'pending',
         description: description || existing?.description || null,
-        accuracy_top1: null, // will be computed by pipeline
+        accuracy_top1: null,
         num_classes: finalNumClasses,
         class_labels: classLabels.length ? classLabels : (existing?.class_labels || null),
-        is_active: false, // inactive until admin reviews benchmarks
+        status: 'staging',
         updated_at: new Date().toISOString(),
       }
 
-      const { error } = await supabase.from('model_registry').upsert(payload, { onConflict: 'leaf_type' })
+      const { error } = await supabase.from('model_registry').upsert(payload, { onConflict: 'leaf_type,version' })
       setUploadProgress(80)
       if (error) throw new Error(error.message)
 
       logAudit(supabase, 'model_uploaded', 'model', leaf_type, { version, display_name: display_name || leaf_type })
 
-      // 5. Auto-trigger full pipeline (convert + validate + evaluate)
+      // 5. Auto-trigger full pipeline
       let pipelineMsg = ''
       try {
         const { ghToken } = getGitHubConfig()
         if (ghToken) {
-          await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type, version, model_url: publicUrl })
-          pipelineMsg = ' Full pipeline triggered — track progress in the status banner above.'
-          startPolling()
+          // Create pipeline_run record
+          let runId = null
+          try {
+            const { data: { user } } = await supabase.auth.getUser()
+            const { data: run } = await supabase.from('pipeline_runs').insert({
+              leaf_type, version, status: 'pending', triggered_by: user?.id
+            }).select().single()
+            runId = run?.id
+          } catch { /* pipeline_runs may not exist yet */ }
+
+          await triggerGitHubWorkflow('model-pipeline.yml', {
+            leaf_type, version, model_url: publicUrl,
+            ...(runId ? { pipeline_run_id: runId } : {})
+          })
+          pipelineMsg = ' Full pipeline triggered — track progress in the Validate tab.'
+          if (runId) subscribeToPipelineRun(runId)
+          setPipelineStatus('pending')
+          setPipelineDismissed(false)
           logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version, workflow: 'model-pipeline.yml' })
         } else {
           pipelineMsg = ' Configure GitHub in Settings to auto-trigger the pipeline.'
@@ -306,7 +324,7 @@ export default function ModelsPage() {
       }
 
       setUploadProgress(100)
-      setUploadMsg({ type: 'success', text: `Checkpoint "${display_name || leaf_type}" v${version} uploaded. Pipeline will convert to ONNX + TFLite, validate, and evaluate.${pipelineMsg}` })
+      setUploadMsg({ type: 'success', text: `Checkpoint "${display_name || leaf_type}" v${version} uploaded as staging. Pipeline will convert to ONNX + TFLite, validate, and evaluate.${pipelineMsg}` })
       setUploadFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadModels()
@@ -318,23 +336,42 @@ export default function ModelsPage() {
     }
   }
 
-  // ── Validate Tab (GitHub Actions) ─────────────────────────────────────────
-  const loadGhRuns = async () => {
-    const data = await getGitHubWorkflowRuns('model-pipeline.yml')
-    setGhRuns(data)
-  }
-
+  // ── Validate Tab (Pipeline) ────────────────────────────────────────────────
   const runValidation = async () => {
-    if (!valTarget) { setValMsg({ type: 'error', text: 'Select a model first.' }); return }
+    if (!valTarget) { setValMsg({ type: 'error', text: 'Select a dataset first.' }); return }
     setValRunning(true); setValMsg(null)
     try {
       const { ghToken } = getGitHubConfig()
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations.')
-      const targetModel = models.find(m => m.leaf_type === valTarget)
-      await triggerGitHubWorkflow('model-pipeline.yml', { leaf_type: valTarget, version: targetModel?.version || '1.0.0', model_url: targetModel?.model_url || '' })
-      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}". Track progress in the status banner above.` })
-      startPolling()
-      logAudit(supabase, 'pipeline_triggered', 'model', valTarget, { workflow: 'model-pipeline.yml' })
+
+      // Find the specific version to validate
+      const targetModels = models.filter(m => m.leaf_type === valTarget)
+      const targetModel = valVersion
+        ? targetModels.find(m => m.version === valVersion)
+        : targetModels[0]
+      if (!targetModel) throw new Error('No model found for selected dataset/version.')
+
+      // Create pipeline_run record
+      let runId = null
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        const { data: run } = await supabase.from('pipeline_runs').insert({
+          leaf_type: valTarget, version: targetModel.version, status: 'pending', triggered_by: user?.id
+        }).select().single()
+        runId = run?.id
+      } catch { /* pipeline_runs may not exist yet */ }
+
+      await triggerGitHubWorkflow('model-pipeline.yml', {
+        leaf_type: valTarget, version: targetModel.version,
+        model_url: targetModel.model_url || '',
+        ...(runId ? { pipeline_run_id: runId } : {})
+      })
+      setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}" v${targetModel.version}. Track progress in the status banner.` })
+      if (runId) subscribeToPipelineRun(runId)
+      setPipelineStatus('pending')
+      setPipelineDismissed(false)
+      loadPipelineRuns()
+      logAudit(supabase, 'pipeline_triggered', 'model', valTarget, { version: targetModel.version, workflow: 'model-pipeline.yml' })
     } catch (err) {
       setValMsg({ type: 'error', text: err.message })
     } finally {
@@ -351,29 +388,25 @@ export default function ModelsPage() {
 
   // Available leaf types and versions from benchmark data
   const benchLeafTypes = [...new Set(benchmarks.map(b => b.leaf_type))].sort()
-  const benchVersionsForLeaf = benchLeaf
-    ? [...new Set(benchmarks.filter(b => b.leaf_type === benchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-    : []
   const activeBenchLeaf = benchLeaf || benchLeafTypes[0] || ''
-  const activeBenchVersion = benchVersion || benchVersionsForLeaf[0] || ''
-  // Recompute versions using activeBenchLeaf (in case benchLeaf was empty and we fell back)
   const activeBenchVersions = activeBenchLeaf
     ? [...new Set(benchmarks.filter(b => b.leaf_type === activeBenchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     : []
   const resolvedBenchVersion = benchVersion || activeBenchVersions[0] || ''
 
-  // Compare Versions: available leaf types from all benchmark data
-  const compareLeafTypes = [...new Set(benchmarks.map(b => b.leaf_type))].sort()
-  const activeCompareLeaf = compareLeaf || compareLeafTypes[0] || ''
-  // Group compare data by version
-  const compareByVersion = compareData.reduce((acc, b) => {
-    if (!acc[b.version]) acc[b.version] = []
-    acc[b.version].push(b)
+  // Versions available for validation target
+  const valVersionsForLeaf = valTarget
+    ? [...new Set(models.filter(m => m.leaf_type === valTarget).map(m => m.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    : []
+
+  const pipelineRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(pipelineStatus)
+
+  // Group models by leaf_type for OTA display
+  const modelsByLeaf = models.reduce((acc, m) => {
+    if (!acc[m.leaf_type]) acc[m.leaf_type] = []
+    acc[m.leaf_type].push(m)
     return acc
   }, {})
-  const compareVersionList = Object.keys(compareByVersion).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-
-  const pipelineRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /><span>Loading models…</span></div>
 
@@ -402,13 +435,13 @@ export default function ModelsPage() {
 
       {/* ── Pipeline Status Banner ── */}
       {pipelineStatus && !pipelineDismissed && (() => {
-        const isRunning = ['triggered', 'queued', 'in_progress'].includes(pipelineStatus)
-        const isSuccess = pipelineStatus === 'success' || (pipelineStatus === 'completed')
-        const isFailed = ['failure', 'cancelled', 'timed_out'].includes(pipelineStatus)
+        const isRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(pipelineStatus)
+        const isSuccess = pipelineStatus === 'completed'
+        const isFailed = pipelineStatus === 'failed'
         const bg = isRunning ? '#fef9c3' : isSuccess ? '#dcfce7' : '#fee2e2'
         const border = isRunning ? '#facc15' : isSuccess ? '#22c55e' : '#ef4444'
         const color = isRunning ? '#854d0e' : isSuccess ? '#166534' : '#991b1b'
-        const statusLabels = { triggered: 'Pipeline dispatched, waiting for GitHub...', queued: 'Pipeline queued...', in_progress: 'Pipeline running...' }
+        const statusLabels = { pending: 'Pipeline pending...', converting: 'Converting formats...', evaluating: 'Running evaluation...', uploading: 'Uploading results...' }
         return (
           <div style={{ padding: '12px 16px', marginBottom: 16, borderRadius: 8, border: `1px solid ${border}`, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color }}>
@@ -419,15 +452,13 @@ export default function ModelsPage() {
                 <strong style={{ fontWeight: 600 }}>
                   {isRunning ? statusLabels[pipelineStatus] || 'Pipeline running...'
                     : isSuccess ? 'Pipeline completed successfully!'
-                    : `Pipeline failed (${pipelineStatus})`}
+                    : 'Pipeline failed'}
                 </strong>
                 {isRunning && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Convert PTH → ONNX → TFLite → Validate → Evaluate → Upload results</div>}
                 {isSuccess && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Benchmark results are now available in the Benchmarks tab.</div>}
-                {pipelineRun?.runNumber && <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(Run #{pipelineRun.runNumber})</span>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-              {pipelineRun?.url && <a href={pipelineRun.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color, textDecoration: 'underline' }}>View on GitHub</a>}
               {!isRunning && <button onClick={() => setPipelineDismissed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color, fontSize: 16, padding: '0 4px', lineHeight: 1 }}>&times;</button>}
             </div>
           </div>
@@ -449,7 +480,11 @@ export default function ModelsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {models.map(m => (
+                  {models.map(m => {
+                    const status = m.status || 'staging'
+                    const statusColor = status === 'active' ? 'badge-green' : status === 'backup' ? 'badge-gray' : 'badge-yellow'
+                    const statusDot = status === 'active' ? 'green' : status === 'backup' ? 'gray' : 'yellow'
+                    return (
                     <Fragment key={m.id}>
                       <tr>
                         <td><strong style={{ color: '#121c28' }}>{m.leaf_type}</strong></td>
@@ -462,9 +497,9 @@ export default function ModelsPage() {
                             : <span style={{ color: '#94a3b8' }}>—</span>}
                         </td>
                         <td>
-                          <span className={`badge ${m.is_active !== false ? 'badge-green' : 'badge-gray'}`}>
-                            <span className={`status-dot ${m.is_active !== false ? 'green' : 'gray'}`} />
-                            {m.is_active !== false ? 'Active' : 'Inactive'}
+                          <span className={`badge ${statusColor}`}>
+                            <span className={`status-dot ${statusDot}`} />
+                            {status.charAt(0).toUpperCase() + status.slice(1)}
                           </span>
                         </td>
                         <td style={{ fontSize: 12, color: '#94a3b8' }}>{new Date(m.updated_at).toLocaleDateString()}</td>
@@ -474,15 +509,17 @@ export default function ModelsPage() {
                             <button className="btn btn-sm" onClick={() => quickValidate(m)} disabled={validating[m.id]}>
                               {validating[m.id] ? '…' : 'Quick Check'}
                             </button>
-                            <button className="btn btn-sm" onClick={() => { setValTarget(m.leaf_type); setTab('Validate') }}>
+                            <button className="btn btn-sm" onClick={() => { setValTarget(m.leaf_type); setValVersion(m.version); setTab('Validate') }}>
                               Deep Validate
                             </button>
                             <button className="btn btn-sm" onClick={() => setExpandedId(expandedId === m.id ? null : m.id)}>
                               {expandedId === m.id ? 'Hide' : 'Labels'}
                             </button>
-                            <button className={`btn btn-sm ${m.is_active !== false ? 'btn-danger' : ''}`} onClick={() => toggleActive(m)}>
-                              {m.is_active !== false ? 'Deactivate' : 'Activate'}
-                            </button>
+                            {status === 'active' ? (
+                              <button className="btn btn-sm btn-danger" onClick={() => deactivateModel(m)}>Deactivate</button>
+                            ) : (
+                              <button className="btn btn-sm" onClick={() => activateModel(m)}>Activate</button>
+                            )}
                             <button className="btn btn-sm btn-danger" onClick={() => deleteModel(m)}>Delete</button>
                           </div>
                         </td>
@@ -531,7 +568,6 @@ export default function ModelsPage() {
                                 <span className="font-mono" style={{ color: '#3d4f62' }}>{m.sha256_checksum}</span>
                               </div>
                             )}
-                            {/* Version History */}
                             {getVersionsForLeaf(m.leaf_type).length > 0 && (
                               <>
                                 <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 4, marginTop: 4 }}>Version History</div>
@@ -551,7 +587,7 @@ export default function ModelsPage() {
                         </tr>
                       )}
                     </Fragment>
-                  ))}
+                  )})}
                   {models.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 32 }}>No models registered yet. Upload your first model.</td></tr>}
                 </tbody>
               </table>
@@ -583,7 +619,7 @@ export default function ModelsPage() {
                 </select>
               </div>
               {activeBenchVersions.length > 1 && (
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>{activeBenchVersions.length} versions available</span>
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>{activeBenchVersions.length} versions available — compare by switching versions</span>
               )}
             </div>
           </div>
@@ -591,7 +627,8 @@ export default function ModelsPage() {
           {/* Benchmark results for selected leaf + version */}
           {(() => {
             const modelBench = getBenchmarksForModel(activeBenchLeaf, resolvedBenchVersion)
-            const model = models.find(m => m.leaf_type === activeBenchLeaf)
+            const model = models.find(m => m.leaf_type === activeBenchLeaf && m.version === resolvedBenchVersion)
+              || models.find(m => m.leaf_type === activeBenchLeaf)
 
             if (!activeBenchLeaf || !modelBench.length) return (
               <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
@@ -616,8 +653,8 @@ export default function ModelsPage() {
                     <div className="card-title">v{resolvedBenchVersion} — Full Benchmark Results</div>
                   </div>
                   {model && (
-                    <span className={`badge ${model.version === resolvedBenchVersion ? 'badge-green' : 'badge-gray'}`}>
-                      {model.version === resolvedBenchVersion ? 'Current' : 'Older'}
+                    <span className={`badge ${(model.status || 'staging') === 'active' ? 'badge-green' : (model.status || 'staging') === 'backup' ? 'badge-gray' : 'badge-yellow'}`}>
+                      {(model.status || 'staging').charAt(0).toUpperCase() + (model.status || 'staging').slice(1)}
                     </span>
                   )}
                 </div>
@@ -670,7 +707,7 @@ export default function ModelsPage() {
                   </div>
                 </div>
 
-                {/* Per-class metrics (from active TFLite variant — the deployment format) */}
+                {/* Per-class metrics */}
                 {activeTflite?.per_class_metrics?.length > 0 && (
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 6 }}>Per-Class Metrics ({activeTflite.format === 'tflite_float16' ? 'TFLite float16' : 'TFLite float32'})</div>
@@ -712,139 +749,6 @@ export default function ModelsPage() {
         </>
       )}
 
-      {/* ── Compare Versions Tab ── */}
-      {tab === 'Compare Versions' && (
-        <>
-          {/* Leaf type filter */}
-          <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Dataset</label>
-                <select className="form-input" style={{ width: 200, padding: '6px 10px', fontSize: 13 }} value={activeCompareLeaf} onChange={e => { setCompareLeaf(e.target.value); loadCompareData(e.target.value) }}>
-                  {compareLeafTypes.length === 0 && <option value="">No benchmark data</option>}
-                  {compareLeafTypes.map(lt => (
-                    <option key={lt} value={lt}>{models.find(m => m.leaf_type === lt)?.display_name || lt.replace(/_/g, ' ')}</option>
-                  ))}
-                </select>
-              </div>
-              <button className="btn btn-sm" onClick={() => loadCompareData(activeCompareLeaf)} disabled={compareLoading || !activeCompareLeaf}>
-                {compareLoading ? 'Loading...' : 'Load Comparison'}
-              </button>
-              {compareVersionList.length > 1 && (
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>Comparing {compareVersionList.length} versions side-by-side</span>
-              )}
-            </div>
-          </div>
-
-          {/* Comparison table */}
-          {compareLoading && (
-            <div className="loading-spinner"><div className="spinner" /><span>Loading benchmark data...</span></div>
-          )}
-
-          {!compareLoading && compareData.length === 0 && (
-            <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
-              {benchmarks.length === 0
-                ? 'No benchmark data available. Run the pipeline from the Validate tab to generate benchmarks.'
-                : activeCompareLeaf
-                  ? 'Click "Load Comparison" to fetch benchmark data for this dataset.'
-                  : 'Select a dataset to compare versions.'}
-            </div>
-          )}
-
-          {!compareLoading && compareData.length > 0 && (
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header">
-                <div>
-                  <div className="card-label">{models.find(m => m.leaf_type === activeCompareLeaf)?.display_name || activeCompareLeaf.replace(/_/g, ' ')}</div>
-                  <div className="card-title">Cross-Version Benchmark Comparison</div>
-                </div>
-                <span className="badge badge-primary">{compareVersionList.length} version{compareVersionList.length !== 1 ? 's' : ''}</span>
-              </div>
-
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Version</th><th>Format</th><th>Accuracy (%)</th><th>Precision (%)</th><th>Recall (%)</th><th>F1 (%)</th><th>Latency (ms)</th><th>Size (MB)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {compareVersionList.map((version, vIdx) => {
-                      const versionBenches = compareByVersion[version] || []
-                      const currentModel = models.find(m => m.leaf_type === activeCompareLeaf)
-                      const isCurrent = currentModel?.version === version
-                      return versionBenches.map((b, bIdx) => (
-                        <tr key={`${version}-${b.format}`} style={{ background: vIdx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.015)' }}>
-                          {bIdx === 0 ? (
-                            <td rowSpan={versionBenches.length} style={{ verticalAlign: 'middle', borderRight: '2px solid rgba(0,0,0,0.06)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <strong style={{ color: '#121c28' }}>v{version}</strong>
-                                {isCurrent && <span className="badge badge-green" style={{ fontSize: 9 }}>Current</span>}
-                              </div>
-                            </td>
-                          ) : null}
-                          <td>
-                            <strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tflite_float32' ? 'TFLite (f32)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong>
-                          </td>
-                          <td>
-                            {b.accuracy != null
-                              ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : b.accuracy >= 70 ? 'badge-yellow' : 'badge-red'}`}>{b.accuracy.toFixed(2)}</span>
-                              : '—'}
-                          </td>
-                          <td>{b.precision_macro != null ? (b.precision_macro * 100).toFixed(2) : '—'}</td>
-                          <td>{b.recall_macro != null ? (b.recall_macro * 100).toFixed(2) : '—'}</td>
-                          <td>{b.f1_macro != null ? (b.f1_macro * 100).toFixed(2) : '—'}</td>
-                          <td>{b.latency_mean_ms != null ? b.latency_mean_ms.toFixed(1) : '—'}</td>
-                          <td>{b.size_mb != null ? b.size_mb.toFixed(2) : '—'}</td>
-                        </tr>
-                      ))
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Version summary cards */}
-              {compareVersionList.length > 1 && (
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Version Summary (TFLite deployment format)</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(compareVersionList.length, 4)}, 1fr)`, gap: 10 }}>
-                    {compareVersionList.map(version => {
-                      const vBenches = compareByVersion[version] || []
-                      const tflite = vBenches.find(b => b.format === 'tflite_float16') || vBenches.find(b => b.format === 'tflite_float32')
-                      const currentModel = models.find(m => m.leaf_type === activeCompareLeaf)
-                      const isCurrent = currentModel?.version === version
-                      return (
-                        <div key={version} style={{ padding: '12px 14px', borderRadius: 10, border: `1px solid ${isCurrent ? '#22c55e' : 'rgba(0,0,0,0.06)'}`, position: 'relative', overflow: 'hidden' }}>
-                          {isCurrent && <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 3, background: '#22c55e' }} />}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <strong style={{ fontSize: 14, color: '#121c28' }}>v{version}</strong>
-                            {isCurrent && <span className="badge badge-green" style={{ fontSize: 9 }}>Current</span>}
-                          </div>
-                          {tflite ? (
-                            <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.8 }}>
-                              <div>Accuracy: <strong style={{ color: '#121c28' }}>{tflite.accuracy?.toFixed(2) ?? '—'}%</strong></div>
-                              <div>F1: <strong style={{ color: '#121c28' }}>{tflite.f1_macro != null ? (tflite.f1_macro * 100).toFixed(2) + '%' : '—'}</strong></div>
-                              <div>Latency: <strong style={{ color: '#121c28' }}>{tflite.latency_mean_ms?.toFixed(1) ?? '—'} ms</strong></div>
-                              <div>Size: <strong style={{ color: '#121c28' }}>{tflite.size_mb?.toFixed(2) ?? '—'} MB</strong></div>
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: 12, color: '#94a3b8' }}>No TFLite benchmark</div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: 12, fontSize: 11, color: '#94a3b8' }}>
-                Precision, Recall, and F1 are macro-averaged (shown as %). Accuracy is top-1 test set accuracy. Latency measured on CPU.
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
       {/* ── Upload Model Tab ── */}
       {tab === 'Upload Model' && (
         <div className="card" style={{ maxWidth: 640 }}>
@@ -859,7 +763,7 @@ export default function ModelsPage() {
               <br />2. Validate cross-format consistency (PyTorch vs ONNX vs TFLite)
               <br />3. Run full evaluation (accuracy, precision, recall, F1, latency, etc.)
               <br />4. Upload the converted <strong>.tflite</strong> to Supabase Storage for OTA
-              <br />The model starts as <strong>inactive</strong> — review benchmarks before activating.
+              <br />The model starts as <strong>staging</strong> — review benchmarks before activating.
             </div>
           </div>
 
@@ -875,7 +779,6 @@ export default function ModelsPage() {
                       const existing = models.find(m => m.leaf_type === lt)
                       if (existing) {
                         const labels = Array.isArray(existing.class_labels) ? existing.class_labels.join('\n') : ''
-                        // Auto-bump version: 1.0.0 → 1.1.0
                         const curVer = existing.version || '1.0.0'
                         const parts = curVer.split('.')
                         parts[1] = String(parseInt(parts[1] || '0') + 1)
@@ -886,7 +789,10 @@ export default function ModelsPage() {
                       }
                     }}>
                       <option value="">Select existing leaf type…</option>
-                      {models.map(m => <option key={m.leaf_type} value={m.leaf_type}>{m.display_name} ({m.leaf_type})</option>)}
+                      {[...new Set(models.map(m => m.leaf_type))].map(lt => {
+                        const m = models.find(x => x.leaf_type === lt)
+                        return <option key={lt} value={lt}>{m?.display_name || lt} ({lt})</option>
+                      })}
                     </select>
                   )
                 }
@@ -940,7 +846,6 @@ export default function ModelsPage() {
               )}
             </div>
 
-            {/* SHA-256 will be computed by pipeline for the converted .tflite */}
             {uploadFile && (
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, fontStyle: 'italic' }}>
                 SHA-256 checksum will be computed automatically for the converted .tflite file by the pipeline.
@@ -948,7 +853,7 @@ export default function ModelsPage() {
             )}
 
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#166534' }}>
-              <strong>Full Pipeline:</strong> .pth → ONNX → TFLite → cross-format validation → full evaluation (accuracy, precision, recall, F1, latency, FPS, memory, model size, KL divergence). The converted <strong>.tflite</strong> and SHA-256 checksum will be set automatically. Model starts as <strong>inactive</strong> — review benchmarks before activating.
+              <strong>Full Pipeline:</strong> .pth → ONNX → TFLite → cross-format validation → full evaluation. The converted <strong>.tflite</strong> and SHA-256 checksum will be set automatically. Model starts as <strong>staging</strong> — review benchmarks before activating.
             </div>
 
             {uploading && (
@@ -995,12 +900,26 @@ export default function ModelsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Model to Validate</label>
-              <select className="form-input" value={valTarget} onChange={e => setValTarget(e.target.value)}>
-                <option value="">Select model…</option>
-                {models.map(m => <option key={m.leaf_type} value={m.leaf_type}>{m.display_name || m.leaf_type} (v{m.version})</option>)}
+              <label className="form-label">Dataset</label>
+              <select className="form-input" value={valTarget} onChange={e => { setValTarget(e.target.value); setValVersion('') }}>
+                <option value="">Select dataset…</option>
+                {[...new Set(models.map(m => m.leaf_type))].map(lt => {
+                  const m = models.find(x => x.leaf_type === lt)
+                  return <option key={lt} value={lt}>{m?.display_name || lt} ({lt})</option>
+                })}
               </select>
             </div>
+
+            {valTarget && valVersionsForLeaf.length > 0 && (
+              <div className="form-group">
+                <label className="form-label">Version</label>
+                <select className="form-input" value={valVersion || valVersionsForLeaf[0]} onChange={e => setValVersion(e.target.value)}>
+                  {valVersionsForLeaf.map(v => (
+                    <option key={v} value={v}>v{v}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="alert alert-info" style={{ marginBottom: 12 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
@@ -1021,29 +940,27 @@ export default function ModelsPage() {
 
           <div className="card">
             <div className="card-header">
-              <div><div className="card-label">Recent Runs</div><div className="card-title">Pipeline Workflow History</div></div>
-              <button className="btn btn-sm" onClick={loadGhRuns}>Refresh</button>
+              <div><div className="card-label">Recent Runs</div><div className="card-title">Pipeline History</div></div>
+              <button className="btn btn-sm" onClick={loadPipelineRuns}>Refresh</button>
             </div>
-            {ghRuns === null && (
-              <div className="alert alert-warn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                <div>GitHub not configured. <strong>Settings → Integrations</strong> to add your token.</div>
-              </div>
-            )}
-            {ghRuns && ghRuns.workflow_runs?.length === 0 && <p style={{ fontSize: 13, color: '#94a3b8' }}>No runs yet. Trigger a pipeline to see history here.</p>}
-            {ghRuns?.workflow_runs?.map(run => (
-              <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
-                <div>
-                  <span className={`status-dot ${run.conclusion === 'success' ? 'green' : run.status === 'in_progress' ? 'yellow' : 'red'}`} style={{ marginRight: 8 }} />
-                  <a href={run.html_url} target="_blank" rel="noopener noreferrer" style={{ color: '#121c28', textDecoration: 'none', fontWeight: 500 }}>Run #{run.run_number}</a>
-                  <span style={{ color: '#94a3b8', marginLeft: 8 }}>{run.head_commit?.message?.slice(0, 40)}</span>
+            {pipelineRuns.length === 0 && <p style={{ fontSize: 13, color: '#94a3b8' }}>No pipeline runs yet. Trigger a pipeline to see history here.</p>}
+            {pipelineRuns.map(run => {
+              const isRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(run.status)
+              const isSuccess = run.status === 'completed'
+              return (
+                <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
+                  <div>
+                    <span className={`status-dot ${isSuccess ? 'green' : isRunning ? 'yellow' : 'red'}`} style={{ marginRight: 8 }} />
+                    <strong>{run.leaf_type}</strong> v{run.version}
+                    {run.github_run_url && <a href={run.github_run_url} target="_blank" rel="noopener noreferrer" style={{ color: '#16a34a', marginLeft: 8, fontSize: 11 }}>GitHub</a>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span className={`badge ${isSuccess ? 'badge-green' : isRunning ? 'badge-yellow' : 'badge-red'}`}>{run.status}</span>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{new Date(run.started_at).toLocaleString()}</div>
+                  </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span className={`badge ${run.conclusion === 'success' ? 'badge-green' : run.status === 'in_progress' ? 'badge-yellow' : 'badge-red'}`}>{run.status === 'in_progress' ? 'Running' : run.conclusion || run.status}</span>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{new Date(run.created_at).toLocaleString()}</div>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -1067,65 +984,52 @@ export default function ModelsPage() {
           {/* OTA flow */}
           <div style={{ background: '#f8fafc', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 12, fontFamily: 'monospace', lineHeight: 2, color: '#3d4f62' }}>
             <div style={{ fontWeight: 700, fontSize: 12, fontFamily: 'inherit', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' }}>Deployment Flow</div>
-            Admin uploads model → <strong>Supabase Storage</strong><br />
-            Admin activates model → <code>model_registry.is_active = true</code><br />
-            User opens app → app queries <code>model_registry</code><br />
+            Admin uploads model → <strong>Supabase Storage</strong> (status: staging)<br />
+            Admin activates model → <code>model_registry.status = 'active'</code> (max 2 active/dataset)<br />
+            User opens app → app queries <code>model_registry WHERE status = 'active'</code><br />
             App detects new version → downloads <code>.tflite</code> from <code>model_url</code><br />
             App verifies SHA-256 → loads new model
           </div>
 
-          {/* Deployment status table */}
+          {/* Deployment status table — grouped by leaf_type */}
           <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Deployment Status</div>
           <table>
             <thead>
-              <tr><th>Leaf Type</th><th>Version</th><th>TFLite Variant</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>OTA</th></tr>
+              <tr><th>Leaf Type</th><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {models.map(m => {
-                const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
-                const hasUrl = !!m.model_url
-                const hasHash = !!m.sha256_checksum
-                const isActive = m.is_active !== false
-                const allGood = hasUrl && hasHash && hasBench && isActive
-                const variant = m.active_tflite_variant || 'float16'
-                const f16Bench = benchmarks.find(b => b.leaf_type === m.leaf_type && b.version === m.version && b.format === 'tflite_float16')
-                const f32Bench = benchmarks.find(b => b.leaf_type === m.leaf_type && b.version === m.version && b.format === 'tflite_float32')
-                return (
-                  <tr key={m.id}>
-                    <td><strong style={{ color: '#121c28' }}>{m.leaf_type}</strong></td>
-                    <td><span className="badge badge-primary">v{m.version}</span></td>
-                    <td>
-                      <select
-                        value={variant}
-                        onChange={async (e) => {
-                          const v = e.target.value
-                          const { error } = await supabase.from('model_registry').update({
-                            active_tflite_variant: v,
-                            updated_at: new Date().toISOString(),
-                          }).eq('id', m.id)
-                          if (!error) {
-                            loadModels()
-                            logAudit(supabase, 'ota_variant_switched', 'model', m.id, { leaf_type: m.leaf_type, variant: v })
-                          } else alert('Error: ' + error.message)
-                        }}
-                        style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #d1d5db' }}
-                      >
-                        <option value="float16">float16{f16Bench?.size_mb ? ` (${f16Bench.size_mb.toFixed(2)} MB)` : ''}</option>
-                        <option value="float32">float32{f32Bench?.size_mb ? ` (${f32Bench.size_mb.toFixed(2)} MB)` : ''}</option>
-                      </select>
-                    </td>
-                    <td>{hasUrl ? <span className="badge badge-green" style={{ fontSize: 10 }}>Uploaded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
-                    <td>{hasHash ? <span className="badge badge-green" style={{ fontSize: 10 }}>Recorded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
-                    <td>{hasBench ? <span className="badge badge-green" style={{ fontSize: 10 }}>Complete</span> : <span className="badge badge-yellow" style={{ fontSize: 10 }}>Pending</span>}</td>
-                    <td><span className={`badge ${isActive ? 'badge-green' : 'badge-gray'}`}>{isActive ? 'Active' : 'Inactive'}</span></td>
-                    <td>
-                      <span className={`badge ${allGood ? 'badge-green' : 'badge-red'}`}>
-                        {allGood ? 'Live' : 'Not ready'}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
+              {Object.entries(modelsByLeaf).map(([leafType, leafModels]) =>
+                leafModels.map((m, idx) => {
+                  const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
+                  const hasUrl = !!m.model_url
+                  const hasHash = !!m.sha256_checksum && m.sha256_checksum !== 'pending'
+                  const status = m.status || 'staging'
+                  const statusColor = status === 'active' ? 'badge-green' : status === 'backup' ? 'badge-gray' : 'badge-yellow'
+                  return (
+                    <tr key={m.id} style={{ borderTop: idx === 0 ? '2px solid rgba(0,0,0,0.1)' : undefined }}>
+                      {idx === 0 ? (
+                        <td rowSpan={leafModels.length} style={{ verticalAlign: 'middle', borderRight: '2px solid rgba(0,0,0,0.06)', fontWeight: 700 }}>{leafType}</td>
+                      ) : null}
+                      <td><span className="badge badge-primary">v{m.version}</span></td>
+                      <td>{hasUrl ? <span className="badge badge-green" style={{ fontSize: 10 }}>Uploaded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
+                      <td>{hasHash ? <span className="badge badge-green" style={{ fontSize: 10 }}>Recorded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
+                      <td>{hasBench ? <span className="badge badge-green" style={{ fontSize: 10 }}>Complete</span> : <span className="badge badge-yellow" style={{ fontSize: 10 }}>Pending</span>}</td>
+                      <td><span className={`badge ${statusColor}`}>{status.charAt(0).toUpperCase() + status.slice(1)}</span></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {status !== 'active' && (
+                            <button className="btn btn-sm" onClick={() => activateModel(m)} disabled={!hasBench || !hasUrl || !hasHash}>Activate</button>
+                          )}
+                          {status === 'active' && (
+                            <button className="btn btn-sm btn-danger" onClick={() => deactivateModel(m)}>Deactivate</button>
+                          )}
+                          <button className="btn btn-sm btn-danger" onClick={() => deleteModel(m)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
 
@@ -1135,7 +1039,7 @@ export default function ModelsPage() {
             <br />1. Model file uploaded to Supabase Storage (model_url set)
             <br />2. SHA-256 checksum recorded (for integrity verification on device)
             <br />3. Benchmark evaluation completed (accuracy verified)
-            <br />4. Model set to Active (is_active = true)
+            <br />4. Model set to Active (status = 'active', max 2 per dataset)
           </div>
         </div>
       )}
@@ -1145,7 +1049,7 @@ export default function ModelsPage() {
         <div className="modal-overlay" onClick={() => setEditModal(null)}>
           <div className="modal" style={{ width: 520 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">Edit — {editModal.leaf_type}</span>
+              <span className="modal-title">Edit — {editModal.leaf_type} v{editModal.version}</span>
               <button className="modal-close" onClick={() => setEditModal(null)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
@@ -1176,9 +1080,13 @@ export default function ModelsPage() {
                 <input className="form-input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
               </div>
             </div>
-            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input type="checkbox" id="is_active" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} style={{ accentColor: '#16a34a' }} />
-              <label htmlFor="is_active" className="form-label" style={{ marginBottom: 0 }}>Active — served to mobile app via OTA</label>
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select className="form-input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                <option value="staging">Staging</option>
+                <option value="active">Active</option>
+                <option value="backup">Backup</option>
+              </select>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setEditModal(null)}>Cancel</button>

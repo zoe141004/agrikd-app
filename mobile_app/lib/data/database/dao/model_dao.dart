@@ -16,16 +16,29 @@ class ModelDao {
     );
   }
 
-  /// Get the active model for a leaf type.
-  Future<Map<String, dynamic>?> getActive(String leafType) async {
+  /// Get the selected (currently used for inference) model for a leaf type.
+  Future<Map<String, dynamic>?> getSelected(String leafType) async {
     final db = await _db;
     final results = await db.query(
       'models',
-      where: "leaf_type = ? AND is_active = 1 AND role = 'active'",
+      where: "leaf_type = ? AND is_selected = 1",
       whereArgs: [leafType],
       limit: 1,
     );
     return results.isEmpty ? null : results.first;
+  }
+
+  /// Get all active models for a leaf type (up to 2).
+  Future<List<Map<String, dynamic>>> getActiveVersions(
+    String leafType,
+  ) async {
+    final db = await _db;
+    return db.query(
+      'models',
+      where: "leaf_type = ? AND role = 'active'",
+      whereArgs: [leafType],
+      orderBy: "updated_at DESC",
+    );
   }
 
   /// Get the fallback model for a leaf type.
@@ -45,10 +58,10 @@ class ModelDao {
     return db.query('models', orderBy: 'leaf_type ASC, role ASC');
   }
 
-  /// Promote a new OTA model version. Manages the 2-version rotation:
-  /// 1. Delete any archived model (+ file on disk)
-  /// 2. Demote current active → fallback
-  /// 3. Insert new version as active
+  /// Add a new active version via OTA. Manages the 2-active-version rotation:
+  /// 1. If already 2 active versions, delete the oldest (+ file on disk)
+  /// 2. Deselect all versions for this leaf type
+  /// 3. Insert new version as active + selected
   Future<void> promoteNewVersion({
     required String leafType,
     required String version,
@@ -58,55 +71,40 @@ class ModelDao {
     required String classLabels,
   }) async {
     final db = await _db;
-    // Collect file paths to delete AFTER transaction commits
     final filesToDelete = <String>[];
 
     await db.transaction((txn) async {
-      // 1. Collect archived model files for deletion
-      final archived = await txn.query(
+      // 1. Get current active versions
+      final actives = await txn.query(
         'models',
-        where: "leaf_type = ? AND role = 'archived'",
-        whereArgs: [leafType],
-      );
-      for (final row in archived) {
-        final path = row['file_path'] as String?;
-        if (path != null && (row['is_bundled'] as int) == 0) {
-          filesToDelete.add(path);
-        }
-      }
-      await txn.delete(
-        'models',
-        where: "leaf_type = ? AND role = 'archived'",
-        whereArgs: [leafType],
-      );
-
-      // 2. Collect fallback model files for deletion
-      final fallback = await txn.query(
-        'models',
-        where: "leaf_type = ? AND role = 'fallback'",
-        whereArgs: [leafType],
-      );
-      for (final row in fallback) {
-        final path = row['file_path'] as String?;
-        if (path != null && (row['is_bundled'] as int) == 0) {
-          filesToDelete.add(path);
-        }
-      }
-      await txn.delete(
-        'models',
-        where: "leaf_type = ? AND role = 'fallback'",
-        whereArgs: [leafType],
-      );
-
-      // 3. Demote current active → fallback
-      await txn.update(
-        'models',
-        {'role': 'fallback'},
         where: "leaf_type = ? AND role = 'active'",
         whereArgs: [leafType],
+        orderBy: "updated_at ASC",
       );
 
-      // 4. Insert new version as active
+      // 2. If already 2 active, delete the oldest
+      if (actives.length >= 2) {
+        final oldest = actives.first;
+        final path = oldest['file_path'] as String?;
+        if (path != null && (oldest['is_bundled'] as int) == 0) {
+          filesToDelete.add(path);
+        }
+        await txn.delete(
+          'models',
+          where: "id = ?",
+          whereArgs: [oldest['id']],
+        );
+      }
+
+      // 3. Deselect all versions for this leaf type
+      await txn.update(
+        'models',
+        {'is_selected': 0},
+        where: "leaf_type = ?",
+        whereArgs: [leafType],
+      );
+
+      // 4. Insert new version as active + selected
       await txn.insert('models', {
         'leaf_type': leafType,
         'version': version,
@@ -117,6 +115,7 @@ class ModelDao {
         'is_bundled': 0,
         'is_active': 1,
         'role': 'active',
+        'is_selected': 1,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
     });
@@ -129,85 +128,87 @@ class ModelDao {
     }
   }
 
-  /// Rollback: delete current active OTA model, promote fallback → active.
-  /// Returns true if rollback succeeded (had a fallback to promote).
-  Future<bool> rollbackToFallback(String leafType) async {
+  /// Remove a version and select the remaining active version (if any).
+  /// Returns true if a remaining version was selected.
+  Future<bool> removeVersion(String leafType, String version) async {
     final db = await _db;
     final filesToDelete = <String>[];
 
     final success = await db.transaction((txn) async {
-      // Check if a fallback exists before deleting active
-      final fallbackCount = Sqflite.firstIntValue(
-        await txn.rawQuery(
-          "SELECT COUNT(*) FROM models WHERE leaf_type = ? AND role = 'fallback'",
-          [leafType],
-        ),
-      );
-      if (fallbackCount == null || fallbackCount == 0) return false;
-
-      // Collect active OTA model files for deletion
-      final active = await txn.query(
+      // Collect files for deletion
+      final rows = await txn.query(
         'models',
-        where: "leaf_type = ? AND role = 'active'",
-        whereArgs: [leafType],
+        where: "leaf_type = ? AND version = ?",
+        whereArgs: [leafType, version],
       );
-      for (final row in active) {
+      for (final row in rows) {
         if ((row['is_bundled'] as int) == 0) {
           final path = row['file_path'] as String?;
           if (path != null) filesToDelete.add(path);
         }
       }
+
+      // Delete the version
       await txn.delete(
         'models',
-        where: "leaf_type = ? AND role = 'active' AND is_bundled = 0",
-        whereArgs: [leafType],
+        where: "leaf_type = ? AND version = ?",
+        whereArgs: [leafType, version],
       );
 
-      // Promote fallback → active
-      await txn.update(
+      // Select the remaining active version (if any)
+      final remaining = await txn.query(
         'models',
-        {'role': 'active', 'is_active': 1},
-        where: "leaf_type = ? AND role = 'fallback'",
+        where: "leaf_type = ? AND role = 'active'",
         whereArgs: [leafType],
+        orderBy: "updated_at DESC",
+        limit: 1,
       );
-      return true;
+
+      if (remaining.isNotEmpty) {
+        await txn.update(
+          'models',
+          {'is_selected': 1},
+          where: "id = ?",
+          whereArgs: [remaining.first['id']],
+        );
+        return true;
+      }
+      return false;
     });
 
-    // Delete files AFTER transaction commits successfully
-    if (success) {
-      for (final path in filesToDelete) {
-        try {
-          await File(path).delete();
-        } catch (_) {}
-      }
+    for (final path in filesToDelete) {
+      try {
+        await File(path).delete();
+      } catch (_) {}
     }
     return success;
   }
 
-  /// Swap active ↔ fallback for a leaf type (user manual switch).
-  /// Uses 'archived' as a valid intermediate role to satisfy the CHECK
-  /// constraint (role IN ('active', 'fallback', 'archived')) while avoiding
-  /// the UNIQUE(leaf_type, role) conflict during the swap.
-  Future<void> switchRole(String leafType) async {
+  /// Select a specific version as the active inference model.
+  Future<void> selectVersion(String leafType, String version) async {
     final db = await _db;
     await db.transaction((txn) async {
-      // 1. Temporarily park current active → 'archived'
-      await txn.rawUpdate(
-        "UPDATE models SET role = 'archived' "
-        "WHERE leaf_type = ? AND role = 'active'",
-        [leafType],
+      // Verify the target version exists before deselecting
+      final exists = await txn.query(
+        'models',
+        where: "leaf_type = ? AND version = ?",
+        whereArgs: [leafType, version],
       );
-      // 2. Promote fallback → active
-      await txn.rawUpdate(
-        "UPDATE models SET role = 'active' "
-        "WHERE leaf_type = ? AND role = 'fallback'",
-        [leafType],
+      if (exists.isEmpty) return;
+
+      // Deselect all for this leaf type
+      await txn.update(
+        'models',
+        {'is_selected': 0},
+        where: "leaf_type = ?",
+        whereArgs: [leafType],
       );
-      // 3. Move archived (was active) → fallback
-      await txn.rawUpdate(
-        "UPDATE models SET role = 'fallback' "
-        "WHERE leaf_type = ? AND role = 'archived'",
-        [leafType],
+      // Select the requested version
+      await txn.update(
+        'models',
+        {'is_selected': 1},
+        where: "leaf_type = ? AND version = ?",
+        whereArgs: [leafType, version],
       );
     });
   }
@@ -233,6 +234,7 @@ class ModelDao {
       batch.insert('models', {
         ...model,
         'role': 'active',
+        'is_selected': 1,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
     await batch.commit(noResult: true);
