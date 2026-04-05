@@ -64,7 +64,6 @@ A paginated table of all prediction records submitted by mobile app users.
 | Search | Free-text search across prediction metadata |
 | Filter by leaf type | Narrow results to Tomato or Burmese Grape Leaf |
 | Filter by date | Select a date range to scope results |
-| Filter by confidence | Set a minimum confidence threshold |
 | CSV export | Download the current filtered view as a `.csv` file |
 
 ### Models (`/models`)

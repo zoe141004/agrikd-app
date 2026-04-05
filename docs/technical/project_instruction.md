@@ -441,7 +441,6 @@ lib/
 |   |   |   |   |-- result_screen.dart       # Ket qua chan doan
 |   |   |   |-- widgets/
 |   |   |       |-- leaf_type_card.dart
-|   |   |       |-- confidence_bar.dart
 |   |   |-- domain/
 |   |   |   |-- models/
 |   |   |   |   |-- prediction.dart

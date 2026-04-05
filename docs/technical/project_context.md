@@ -250,7 +250,7 @@ TFLite Interpreter (GPU -> XNNPack -> CPU delegate fallback)
 Softmax over logits -> class probabilities
     |
     v
-Result Screen (top prediction + confidence bar chart)
+Result Screen (top prediction + probability bar chart)
     |
     v
 SQLite (predictions table) --> SyncQueue --> Supabase REST
@@ -418,7 +418,7 @@ prevent key leakage in published APKs.
 | Table | Key Columns | Purpose |
 |---|---|---|
 | `predictions` | id, user_id, device_type, leaf_type, predicted_class, confidence, image_url, created_at | Aggregated predictions from all clients |
-| `model_registry` | id, leaf_type, version, status, model_url, sha256, UNIQUE(leaf_type, version) | Published model versions for OTA (status: staging/active/backup) |
+| `model_registry` | id, leaf_type, version, status, model_url, pth_url, sha256, UNIQUE(leaf_type, version) | Published model versions for OTA (status: staging/active/backup) |
 | `profiles` | id (FK auth.users), display_name, role, created_at | User profile and role management |
 | `audit_log` | id, user_id, action, details, created_at | Audit trail for administrative actions |
 | `model_benchmarks` | id, leaf_type, version, format, accuracy, per_class_metrics | Stored benchmark results per format |

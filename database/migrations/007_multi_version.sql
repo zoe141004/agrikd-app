@@ -15,18 +15,41 @@ ALTER TABLE public.model_registry
     DROP CONSTRAINT IF EXISTS model_registry_leaf_type_key;
 
 -- Add status column (replaces is_active boolean)
+-- If status column already exists as enum type model_status (e.g. created via
+-- Supabase Dashboard), convert it to TEXT first for consistency.
 DO $$
+DECLARE
+    col_type TEXT;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'model_registry'
-          AND column_name = 'status'
-    ) THEN
+    SELECT data_type INTO col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'model_registry'
+      AND column_name = 'status';
+
+    IF col_type = 'USER-DEFINED' THEN
+        -- Convert enum → TEXT to avoid cast issues
+        ALTER TABLE public.model_registry
+            ALTER COLUMN status DROP DEFAULT;
+        ALTER TABLE public.model_registry
+            ALTER COLUMN status TYPE TEXT USING status::TEXT;
+        ALTER TABLE public.model_registry
+            ALTER COLUMN status SET DEFAULT 'staging';
+        -- Add CHECK constraint matching TEXT version
+        ALTER TABLE public.model_registry
+            DROP CONSTRAINT IF EXISTS model_registry_status_check;
+        ALTER TABLE public.model_registry
+            ADD CONSTRAINT model_registry_status_check
+                CHECK (status IN ('staging', 'active', 'backup'));
+        -- Drop the now-unused enum type
+        DROP TYPE IF EXISTS model_status;
+    ELSIF col_type IS NULL THEN
+        -- Column doesn't exist yet — create as TEXT
         ALTER TABLE public.model_registry
             ADD COLUMN status TEXT DEFAULT 'staging'
                 CHECK (status IN ('staging', 'active', 'backup'));
     END IF;
+    -- If col_type = 'text', column already correct — do nothing
 END $$;
 
 -- Add pth_url column (source checkpoint reference)
