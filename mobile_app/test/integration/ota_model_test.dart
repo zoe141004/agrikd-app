@@ -124,42 +124,39 @@ void main() {
       expect(allModels.any((m) => m['version'] == '1.0.0'), isFalse);
     });
 
-    test(
-      'removeVersion deletes OTA version and selects remaining',
-      () async {
-        await seedBundledTomato();
+    test('removeVersion deletes OTA version and selects remaining', () async {
+      await seedBundledTomato();
 
-        // Promote OTA v1.1.0
-        await modelDao.promoteNewVersion(
-          leafType: 'tomato',
-          version: '1.1.0',
-          filePath: '/data/models/tomato_1.1.0.tflite',
-          checksum: 'ota_hash',
-          numClasses: 10,
-          classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
-        );
+      // Promote OTA v1.1.0
+      await modelDao.promoteNewVersion(
+        leafType: 'tomato',
+        version: '1.1.0',
+        filePath: '/data/models/tomato_1.1.0.tflite',
+        checksum: 'ota_hash',
+        numClasses: 10,
+        classLabels: '["A","B","C","D","E","F","G","H","I","J"]',
+      );
 
-        // Verify pre-removal state: v1.1.0 selected
-        var selected = await modelDao.getSelected('tomato');
-        expect(selected!['version'], '1.1.0');
-        expect(selected['is_bundled'], 0);
+      // Verify pre-removal state: v1.1.0 selected
+      var selected = await modelDao.getSelected('tomato');
+      expect(selected!['version'], '1.1.0');
+      expect(selected['is_bundled'], 0);
 
-        // Remove v1.1.0: should delete and select remaining v1.0.0
-        final success = await modelDao.removeVersion('tomato', '1.1.0');
-        expect(success, isTrue);
+      // Remove v1.1.0: should delete and select remaining v1.0.0
+      final success = await modelDao.removeVersion('tomato', '1.1.0');
+      expect(success, isTrue);
 
-        // v1.0.0 should be selected
-        selected = await modelDao.getSelected('tomato');
-        expect(selected, isNotNull);
-        expect(selected!['version'], '1.0.0');
-        expect(selected['is_selected'], 1);
-        expect(selected['is_bundled'], 1);
+      // v1.0.0 should be selected
+      selected = await modelDao.getSelected('tomato');
+      expect(selected, isNotNull);
+      expect(selected!['version'], '1.0.0');
+      expect(selected['is_selected'], 1);
+      expect(selected['is_bundled'], 1);
 
-        // Only 1 model total
-        final allModels = await modelDao.getByLeafType('tomato');
-        expect(allModels.length, 1);
-      },
-    );
+      // Only 1 model total
+      final allModels = await modelDao.getByLeafType('tomato');
+      expect(allModels.length, 1);
+    });
 
     test('selectVersion switches selected model', () async {
       await seedBundledTomato();

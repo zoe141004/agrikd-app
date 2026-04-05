@@ -304,8 +304,7 @@ class _LeafTypeItem extends ConsumerWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final versionState = ref.watch(modelVersionProvider);
     final versions = versionState.versions[modelInfo.leafType] ?? [];
-    final activeVersions =
-        versions.where((v) => v.role == 'active').toList();
+    final activeVersions = versions.where((v) => v.role == 'active').toList();
 
     return Card(
       elevation: isSelected ? 0 : 1,
@@ -486,9 +485,7 @@ class _LeafTypeItem extends ConsumerWidget {
                               const SizedBox(height: 8),
                               Text(
                                 S.get('model_version_label'),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelMedium
+                                style: Theme.of(context).textTheme.labelMedium
                                     ?.copyWith(
                                       fontWeight: FontWeight.w600,
                                       color: colorScheme.onPrimaryContainer,
@@ -501,9 +498,7 @@ class _LeafTypeItem extends ConsumerWidget {
                                   onTap: v.isSelected
                                       ? null
                                       : () => ref
-                                            .read(
-                                              modelVersionProvider.notifier,
-                                            )
+                                            .read(modelVersionProvider.notifier)
                                             .selectVersion(
                                               modelInfo.leafType,
                                               v.version,
@@ -516,18 +511,13 @@ class _LeafTypeItem extends ConsumerWidget {
                                       children: [
                                         Icon(
                                           v.isSelected
-                                              ? Icons
-                                                    .radio_button_checked
-                                              : Icons
-                                                    .radio_button_unchecked,
+                                              ? Icons.radio_button_checked
+                                              : Icons.radio_button_unchecked,
                                           size: 18,
                                           color: v.isSelected
                                               ? colorScheme.primary
-                                              : colorScheme
-                                                    .onPrimaryContainer
-                                                    .withValues(
-                                                      alpha: 0.5,
-                                                    ),
+                                              : colorScheme.onPrimaryContainer
+                                                    .withValues(alpha: 0.5),
                                         ),
                                         const SizedBox(width: 8),
                                         Expanded(
@@ -546,16 +536,16 @@ class _LeafTypeItem extends ConsumerWidget {
                                           ),
                                         ),
                                         Container(
-                                          padding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 2,
-                                              ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: colorScheme
                                                 .surfaceContainerHighest,
-                                            borderRadius:
-                                                BorderRadius.circular(4),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                           ),
                                           child: Text(
                                             v.isBundled

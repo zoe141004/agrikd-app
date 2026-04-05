@@ -176,8 +176,7 @@ class SupabaseSyncService {
               ? rawLabels.cast<String>()
               : (jsonDecode(rawLabels as String) as List).cast<String>();
           // Prefer model_url (tflite float16), fallback to file_url
-          final url =
-              row['model_url'] as String? ?? row['file_url'] as String?;
+          final url = row['model_url'] as String? ?? row['file_url'] as String?;
           updates.add(
             ModelUpdate(
               leafType: leafType,

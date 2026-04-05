@@ -109,7 +109,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-
   String _sortLabel(String sortBy) {
     switch (sortBy) {
       case 'created_at DESC':

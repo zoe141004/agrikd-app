@@ -106,13 +106,12 @@ class SyncNotifier extends StateNotifier<SyncState>
       final localVersionsByLeaf = <String, Set<String>>{};
       for (final m in allModels) {
         final lt = m['leaf_type'] as String;
-        localVersionsByLeaf.putIfAbsent(lt, () => {}).add(
-          m['version'] as String,
-        );
+        localVersionsByLeaf
+            .putIfAbsent(lt, () => {})
+            .add(m['version'] as String);
       }
 
-      final updates =
-          await _syncService.checkModelUpdates(localVersionsByLeaf);
+      final updates = await _syncService.checkModelUpdates(localVersionsByLeaf);
       for (final update in updates) {
         await _syncService.downloadModelUpdate(update);
       }

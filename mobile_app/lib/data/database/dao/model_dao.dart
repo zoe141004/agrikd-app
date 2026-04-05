@@ -29,9 +29,7 @@ class ModelDao {
   }
 
   /// Get all active models for a leaf type (up to 2).
-  Future<List<Map<String, dynamic>>> getActiveVersions(
-    String leafType,
-  ) async {
+  Future<List<Map<String, dynamic>>> getActiveVersions(String leafType) async {
     final db = await _db;
     return db.query(
       'models',
@@ -89,11 +87,7 @@ class ModelDao {
         if (path != null && (oldest['is_bundled'] as int) == 0) {
           filesToDelete.add(path);
         }
-        await txn.delete(
-          'models',
-          where: "id = ?",
-          whereArgs: [oldest['id']],
-        );
+        await txn.delete('models', where: "id = ?", whereArgs: [oldest['id']]);
       }
 
       // 3. Deselect all versions for this leaf type

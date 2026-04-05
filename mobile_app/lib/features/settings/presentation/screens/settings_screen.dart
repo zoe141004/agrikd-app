@@ -339,8 +339,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant
-                          .withValues(alpha: 0.4),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -348,9 +349,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(height: 16),
                 Text(
                   modelInfo.localizedName(S.locale),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                   textAlign: TextAlign.center,
                 ),
                 if (bench != null) ...[
@@ -379,9 +380,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           S.get('model_specs_unavailable'),
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                           textAlign: TextAlign.center,
                         ),
@@ -389,31 +390,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   )
                 else ...[
-                  _SpecRow(S.get('spec_accuracy'),
-                      _pct(bench.accuracy)),
-                  _SpecRow(S.get('spec_precision'),
-                      _pct(bench.precisionMacro)),
-                  _SpecRow(S.get('spec_recall'),
-                      _pct(bench.recallMacro)),
-                  _SpecRow(S.get('spec_f1'),
-                      _pct(bench.f1Macro)),
+                  _SpecRow(S.get('spec_accuracy'), _pct(bench.accuracy)),
+                  _SpecRow(S.get('spec_precision'), _pct(bench.precisionMacro)),
+                  _SpecRow(S.get('spec_recall'), _pct(bench.recallMacro)),
+                  _SpecRow(S.get('spec_f1'), _pct(bench.f1Macro)),
                   const Divider(height: 24),
-                  _SpecRow(S.get('spec_flops'),
-                      bench.flopsM != null
-                          ? '${bench.flopsM!.toStringAsFixed(1)} M'
-                          : '—'),
-                  _SpecRow(S.get('spec_latency'),
-                      bench.latencyMeanMs != null
-                          ? '${bench.latencyMeanMs!.toStringAsFixed(1)} ms'
-                          : '—'),
-                  _SpecRow(S.get('spec_size'),
-                      bench.sizeMb != null
-                          ? '${bench.sizeMb!.toStringAsFixed(2)} MB'
-                          : '—'),
-                  _SpecRow(S.get('spec_params'),
-                      bench.paramsM != null
-                          ? '${bench.paramsM!.toStringAsFixed(2)} M'
-                          : '—'),
+                  _SpecRow(
+                    S.get('spec_flops'),
+                    bench.flopsM != null
+                        ? '${bench.flopsM!.toStringAsFixed(1)} M'
+                        : '—',
+                  ),
+                  _SpecRow(
+                    S.get('spec_latency'),
+                    bench.latencyMeanMs != null
+                        ? '${bench.latencyMeanMs!.toStringAsFixed(1)} ms'
+                        : '—',
+                  ),
+                  _SpecRow(
+                    S.get('spec_size'),
+                    bench.sizeMb != null
+                        ? '${bench.sizeMb!.toStringAsFixed(2)} MB'
+                        : '—',
+                  ),
+                  _SpecRow(
+                    S.get('spec_params'),
+                    bench.paramsM != null
+                        ? '${bench.paramsM!.toStringAsFixed(2)} M'
+                        : '—',
+                  ),
                 ],
               ],
             );
@@ -466,9 +471,9 @@ class _SpecRow extends StatelessWidget {
           ),
           Text(
             value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),

@@ -315,5 +315,4 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
       ),
     );
   }
-
 }

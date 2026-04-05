@@ -98,5 +98,5 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
 
 final benchmarkProvider =
     StateNotifierProvider<BenchmarkNotifier, BenchmarkState>((ref) {
-  return BenchmarkNotifier();
-});
+      return BenchmarkNotifier();
+    });
