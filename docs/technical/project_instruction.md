@@ -140,7 +140,6 @@ app/
 |   |   |   |   |-- camera_screen.dart    # Conditional export (stub/mobile)
 |   |   |   |   |-- result_screen.dart    # Diagnosis result, fl_chart, notes
 |   |   |   |-- presentation/widgets/
-|   |   |       |-- confidence_bar.dart   # Horizontal confidence bar
 |   |   |       |-- stats_card.dart       # Home stats summary
 |   |   |-- history/
 |   |   |   |-- presentation/screens/
@@ -153,11 +152,13 @@ app/
 |   |           |-- benchmark_screen.dart # On-device TFLite benchmark
 |   |-- providers/
 |       |-- auth_provider.dart         # AuthNotifier, AuthStatus (incl. passwordRecovery)
+|       |-- benchmark_provider.dart    # Remote model benchmark metrics from Supabase
 |       |-- connectivity_provider.dart # Stream-based online/offline detection
 |       |-- database_provider.dart     # DAO providers
 |       |-- diagnosis_provider.dart    # DiagnosisNotifier, selectedLeafType
 |       |-- history_provider.dart      # Paginated load, filters, search, sort
 |       |-- inference_provider.dart    # TfliteInferenceService singleton
+|       |-- model_version_provider.dart # Multi-version model state (select, list)
 |       |-- settings_provider.dart     # Key-value settings, themeModeProvider
 |       |-- sync_provider.dart         # Auto-sync, model updates, sync status
 |
@@ -209,6 +210,7 @@ app/
 |   |-- 004_indexes.sql               # Performance indexes
 |   |-- 005_storage.sql               # Storage buckets + policies
 |   |-- 006_model_reports_and_rpcs.sql # Model reports table + dashboard RPCs
+|   |-- 007_multi_version.sql         # Multi-version model registry + pipeline_runs
 |
 |-- .github/workflows/               # CI/CD (11 workflows)
 |   |-- ci.yml                        # Lint, Test, Model Conversion, Build APK
@@ -678,12 +680,12 @@ CREATE INDEX idx_predictions_is_synced ON predictions(is_synced);
 ```
 
 ### 6.2 models
-Quan ly cac model da cai dat tren thiet bi.
+Quan ly cac model da cai dat tren thiet bi (multi-version, max 2 active per leaf_type).
 ```sql
 CREATE TABLE models (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    leaf_type       TEXT NOT NULL UNIQUE,    -- 'tomato', 'burmese_grape_leaf'
-    version         TEXT NOT NULL,           -- '1.0.0'
+    leaf_type       TEXT NOT NULL,
+    version         TEXT NOT NULL,
     file_path       TEXT NOT NULL,           -- Duong dan TFLite file
     sha256_checksum TEXT NOT NULL,           -- Verify truoc khi load
     num_classes     INTEGER NOT NULL,
@@ -691,7 +693,11 @@ CREATE TABLE models (
     accuracy_top1   REAL,                    -- Accuracy benchmark
     is_bundled      INTEGER NOT NULL DEFAULT 1,  -- 1: trong APK, 0: downloaded
     is_active       INTEGER NOT NULL DEFAULT 1,  -- Model dang duoc su dung
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    role            TEXT NOT NULL DEFAULT 'active'
+                    CHECK (role IN ('active', 'fallback', 'archived')),
+    is_selected     INTEGER NOT NULL DEFAULT 0,  -- 1: version dang dung cho inference
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(leaf_type, version)
 );
 ```
 
@@ -795,7 +801,7 @@ CREATE INDEX idx_sync_queue_status ON sync_queue(status);
   - Login: Email/password (admin account)
   - Dashboard: Aggregated stats (server-side RPCs) + BarChart daily scans + PieChart disease distribution
   - Predictions: Paginated table 25/page, filters (leaf type, date range), Export CSV/JSON (max 10000 rows)
-  - Models: Model registry table voi class labels, version, accuracy, SHA-256
+  - Models: Model registry management (5 tabs: Registry, Compare, Upload, Pipeline, Benchmarks). Multi-version support with staging/active/backup lifecycle. Upload .pth checkpoints, trigger CI/CD pipeline, compare model versions, view benchmark metrics.
   - Users: Danh sach nguoi dung, so predictions, ngay tham gia, trang thai admin
   - Data Management: Quan ly datasets, export/import du lieu, DVC operations
   - Releases: Quan ly cac phien ban phat hanh, APK, release notes

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/providers/diagnosis_provider.dart';
+import 'package:app/providers/model_version_provider.dart';
 import 'package:app/features/history/presentation/screens/history_screen.dart';
 import 'package:app/features/settings/presentation/screens/settings_screen.dart';
 import '../widgets/stats_card.dart';
@@ -287,7 +288,7 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
 }
 
 /// A selectable leaf-type card with expandable disease details.
-class _LeafTypeItem extends StatelessWidget {
+class _LeafTypeItem extends ConsumerWidget {
   final LeafModelInfo modelInfo;
   final bool isSelected;
   final VoidCallback onTap;
@@ -299,8 +300,12 @@ class _LeafTypeItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final versionState = ref.watch(modelVersionProvider);
+    final versions = versionState.versions[modelInfo.leafType] ?? [];
+    final activeVersions =
+        versions.where((v) => v.role == 'active').toList();
 
     return Card(
       elevation: isSelected ? 0 : 1,
@@ -471,6 +476,106 @@ class _LeafTypeItem extends StatelessWidget {
                                   ],
                                 ),
                               ),
+                            // Version picker (only when ≥2 active versions)
+                            if (activeVersions.length >= 2) ...[
+                              const SizedBox(height: 8),
+                              Divider(
+                                height: 1,
+                                color: colorScheme.outlineVariant,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                S.get('model_version_label'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: colorScheme.onPrimaryContainer,
+                                    ),
+                              ),
+                              const SizedBox(height: 6),
+                              ...activeVersions.map((v) {
+                                return InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: v.isSelected
+                                      ? null
+                                      : () => ref
+                                            .read(
+                                              modelVersionProvider.notifier,
+                                            )
+                                            .selectVersion(
+                                              modelInfo.leafType,
+                                              v.version,
+                                            ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          v.isSelected
+                                              ? Icons
+                                                    .radio_button_checked
+                                              : Icons
+                                                    .radio_button_unchecked,
+                                          size: 18,
+                                          color: v.isSelected
+                                              ? colorScheme.primary
+                                              : colorScheme
+                                                    .onPrimaryContainer
+                                                    .withValues(
+                                                      alpha: 0.5,
+                                                    ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'v${v.version}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  fontWeight: v.isSelected
+                                                      ? FontWeight.w600
+                                                      : FontWeight.w400,
+                                                  color: colorScheme
+                                                      .onPrimaryContainer,
+                                                ),
+                                          ),
+                                        ),
+                                        Container(
+                                          padding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
+                                          decoration: BoxDecoration(
+                                            color: colorScheme
+                                                .surfaceContainerHighest,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            v.isBundled
+                                                ? S.get('bundled')
+                                                : S.get('ota'),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(
+                                                  color: colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
                             const SizedBox(height: 4),
                           ],
                         ),

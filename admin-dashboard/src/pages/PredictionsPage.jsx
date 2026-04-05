@@ -11,10 +11,10 @@ export default function PredictionsPage() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
-  const [filters, setFilters] = useState({ leafType: '', startDate: '', endDate: '', minConf: '' })
+  const [filters, setFilters] = useState({ leafType: '', startDate: '', endDate: '' })
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
-  const [summary, setSummary] = useState({ avgConf: 0, highConf: 0, lowConf: 0, topDisease: '—', uniqueUsers: 0 })
+  const [summary, setSummary] = useState({ topDisease: '—', uniqueUsers: 0 })
   const [classDist, setClassDist] = useState([])
 
   useEffect(() => { loadPredictions() }, [page, filters])
@@ -23,7 +23,6 @@ export default function PredictionsPage() {
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
     if (filters.startDate) query = query.gte('created_at', filters.startDate)
     if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
-    if (filters.minConf) query = query.gte('confidence', parseFloat(filters.minConf) / 100)
     return query
   }
 
@@ -51,14 +50,11 @@ export default function PredictionsPage() {
       const topDisease = diseaseDist?.length ? `${cleanLabel(diseaseDist[0].name)} (${diseaseDist[0].count})` : '—'
       setClassDist((diseaseDist || []).map(r => ({ name: cleanLabel(r.name), count: Number(r.count) })))
       setSummary({
-        avgConf: s.avg_confidence ? (s.avg_confidence * 100).toFixed(1) : 0,
-        highConf: s.high_confidence_count || 0,
-        lowConf: s.low_confidence_count || 0,
         topDisease,
         uniqueUsers: s.unique_users || 0,
       })
     } else {
-      setSummary({ avgConf: 0, highConf: 0, lowConf: 0, topDisease: '—', uniqueUsers: 0 })
+      setSummary({ topDisease: '—', uniqueUsers: 0 })
       setClassDist([])
     }
     } catch (err) { setError(err.message) }
@@ -73,7 +69,6 @@ export default function PredictionsPage() {
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
     if (filters.startDate) query = query.gte('created_at', filters.startDate)
     if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59')
-    if (filters.minConf) query = query.gte('confidence', parseFloat(filters.minConf) / 100)
     const { data } = await query
     if (!data?.length) return
     const filename = `agrikd-predictions-${new Date().toISOString().slice(0, 10)}`
@@ -97,12 +92,9 @@ export default function PredictionsPage() {
         <p className="page-subtitle">Browse and export all leaf disease prediction records</p>
       </div>
 
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 16 }}>
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 16 }}>
         {[
           { label: 'Total Records', value: total.toLocaleString(), accent: '#16a34a' },
-          { label: 'Avg Confidence', value: `${summary.avgConf}%`, accent: '#0284c7' },
-          { label: 'High Conf (≥80%)', value: summary.highConf.toLocaleString(), accent: '#065f46' },
-          { label: 'Low Conf (<50%)', value: summary.lowConf.toLocaleString(), accent: '#dc2626' },
           { label: 'Unique Users', value: summary.uniqueUsers, accent: '#7c3aed' },
         ].map(s => (
           <div key={s.label} className="stat-card" style={{ padding: '14px 16px' }}>
@@ -117,8 +109,6 @@ export default function PredictionsPage() {
         <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
           <div style={{ fontSize: 13, color: '#3d4f62' }}>
             <strong style={{ color: '#121c28' }}>Most Detected:</strong> {summary.topDisease}
-            <span style={{ color: '#94a3b8', margin: '0 12px' }}>|</span>
-            <strong style={{ color: '#121c28' }}>High/Low Ratio:</strong> {summary.lowConf > 0 ? (summary.highConf / summary.lowConf).toFixed(1) + ':1' : summary.highConf > 0 ? 'All high' : '—'}
           </div>
         </div>
       )}
@@ -154,12 +144,6 @@ export default function PredictionsPage() {
           </select>
           <input type="date" value={filters.startDate} onChange={e => setFilter('startDate', e.target.value)} />
           <input type="date" value={filters.endDate} onChange={e => setFilter('endDate', e.target.value)} />
-          <select value={filters.minConf} onChange={e => setFilter('minConf', e.target.value)}>
-            <option value="">All Confidence</option>
-            <option value="80">High ≥ 80%</option>
-            <option value="50">Medium ≥ 50%</option>
-            <option value="0">All (incl. low)</option>
-          </select>
           <button className="btn" onClick={() => exportData('csv')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
             Export CSV
@@ -180,7 +164,6 @@ export default function PredictionsPage() {
                   <th>ID</th>
                   <th>Leaf Type</th>
                   <th>Disease</th>
-                  <th>Confidence</th>
                   <th>Date</th>
                 </tr>
               </thead>
@@ -190,16 +173,11 @@ export default function PredictionsPage() {
                     <td className="font-mono" style={{ color: '#94a3b8' }}>{String(p.id).slice(0, 8)}…</td>
                     <td><span className="badge badge-primary">{p.leaf_type}</span></td>
                     <td>{cleanLabel(p.predicted_class_name)}</td>
-                    <td>
-                      <span className={`badge ${p.confidence >= 0.8 ? 'badge-green' : p.confidence >= 0.5 ? 'badge-yellow' : 'badge-red'}`}>
-                        {(p.confidence * 100).toFixed(1)}%
-                      </span>
-                    </td>
                     <td style={{ color: '#64748b', fontSize: 12 }}>{new Date(p.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
                 {predictions.length === 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: '#94a3b8' }}>No predictions found</td></tr>
+                  <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, color: '#94a3b8' }}>No predictions found</td></tr>
                 )}
               </tbody>
             </table>
@@ -233,7 +211,6 @@ export default function PredictionsPage() {
                 ['User ID', selected.user_id],
                 ['Leaf Type', selected.leaf_type],
                 ['Disease', cleanLabel(selected.predicted_class_name)],
-                ['Confidence', `${(selected.confidence * 100).toFixed(2)}%`],
                 ['Model Version', selected.model_version || '—'],
                 ['Date', new Date(selected.created_at).toLocaleString()],
                 ['Notes', selected.notes || '—'],

@@ -8,7 +8,7 @@ import { cleanLabel } from '../lib/helpers'
 import CustomTooltip from '../components/CustomTooltip'
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ total: 0, users: 0, models: 0, avgConf: 0 })
+  const [stats, setStats] = useState({ total: 0, users: 0, models: 0 })
   const [diseaseData, setDiseaseData] = useState([])
   const [dailyData, setDailyData] = useState([])
   const [recentPreds, setRecentPreds] = useState([])
@@ -45,7 +45,7 @@ export default function DashboardPage() {
       supabase.rpc('get_leaf_type_options'),
       supabase.from('model_registry').select('*', { count: 'exact', head: true }),
       addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true })),
-      addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, confidence, created_at').order('created_at', { ascending: false }).limit(8)),
+      addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, created_at').order('created_at', { ascending: false }).limit(8)),
     ])
 
     // Leaf type options for dropdown
@@ -59,7 +59,6 @@ export default function DashboardPage() {
       total: s.total || 0,
       users: s.unique_users || 0,
       models: models || 0,
-      avgConf: s.avg_confidence ? (s.avg_confidence * 100).toFixed(1) : 0,
     })
 
     // Disease distribution from RPC
@@ -101,8 +100,6 @@ export default function DashboardPage() {
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> },
     { label: 'Registered Models', value: stats.models, accent: '#7c3aed', iconColor: '#7c3aed', iconBg: '#ede9fe',
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> },
-    { label: 'Avg Confidence', value: `${stats.avgConf}%`, accent: '#ca8a04', iconColor: '#ca8a04', iconBg: '#fef9c3',
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
   ]
 
   return (
@@ -119,7 +116,7 @@ export default function DashboardPage() {
         </select>
       </div>
 
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         {statCards.map(s => (
           <div key={s.label} className="stat-card">
             <div className="stat-card-accent" style={{ background: s.accent }} />
@@ -212,7 +209,6 @@ export default function DashboardPage() {
               <tr>
                 <th>Leaf</th>
                 <th>Disease</th>
-                <th>Confidence</th>
                 <th>Date</th>
               </tr>
             </thead>
@@ -221,16 +217,11 @@ export default function DashboardPage() {
                 <tr key={p.id}>
                   <td><span className="badge badge-primary">{p.leaf_type}</span></td>
                   <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanLabel(p.predicted_class_name)}</td>
-                  <td>
-                    <span className={`badge ${p.confidence >= 0.8 ? 'badge-green' : p.confidence >= 0.5 ? 'badge-yellow' : 'badge-red'}`}>
-                      {(p.confidence * 100).toFixed(0)}%
-                    </span>
-                  </td>
                   <td style={{ color: '#94a3b8', fontSize: 12 }}>{new Date(p.created_at).toLocaleDateString()}</td>
                 </tr>
               ))}
               {recentPreds.length === 0 && (
-                <tr><td colSpan={4} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No predictions yet</td></tr>
+                <tr><td colSpan={3} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No predictions yet</td></tr>
               )}
             </tbody>
           </table>

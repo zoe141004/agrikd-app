@@ -51,6 +51,7 @@ base64 -w 0 service-account.json
 | **Export Data** | `export-data.yml` | Export predictions from Supabase |
 | **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive or predictions |
 | **Deploy** | `deploy.yml` | Trigger Vercel deployment for admin dashboard |
+| **Model Rollback** | `model-rollback.yml` | Rollback model version in registry |
 
 ## 3. CI Workflow (`ci.yml`)
 
@@ -107,9 +108,10 @@ Steps:
 1. Download checkpoint from Supabase Storage
 2. Convert PTH → ONNX → TFLite (float16 + float32)
 3. Validate cross-format consistency
-4. Evaluate on test dataset
+4. Evaluate on test dataset (quality gate: configurable min accuracy)
 5. Compute SHA-256 hashes
-6. Upload benchmark results to Supabase `model_benchmarks` table
+6. Upload TFLite model + benchmark results to Supabase
+7. Update pipeline_runs table status (converting → evaluating → completed/failed)
 
 ## 6. DVC Workflows
 

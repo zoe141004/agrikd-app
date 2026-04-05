@@ -25,7 +25,8 @@ DECLARE
         'profiles',
         'audit_log',
         'model_benchmarks',
-        'model_versions'
+        'model_versions',
+        'pipeline_runs'
     ];
 BEGIN
     RAISE NOTICE '===================================================================';
@@ -177,41 +178,38 @@ BEGIN
     RAISE NOTICE '';
 
     -- ═════════════════════════════════════════════════════════════════
-    -- SECTION 5: Verify sync_model_urls() trigger on model_registry
+    -- SECTION 5: Verify enforce_version_lifecycle() trigger on model_registry
     -- ═════════════════════════════════════════════════════════════════
-    RAISE NOTICE '── 5. sync_model_urls() TRIGGER ─────────────────────────────────';
+    RAISE NOTICE '── 5. enforce_version_lifecycle() TRIGGER ──────────────────────────';
 
     SELECT EXISTS (
         SELECT 1 FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE p.proname = 'sync_model_urls' AND n.nspname = 'public'
+        WHERE p.proname = 'enforce_version_lifecycle' AND n.nspname = 'public'
     ) INTO _found;
 
     IF _found THEN
-        RAISE NOTICE '[PASS] sync_model_urls() function exists.';
+        RAISE NOTICE '[PASS] enforce_version_lifecycle() function exists.';
         _pass_count := _pass_count + 1;
     ELSE
-        RAISE NOTICE '[FAIL] sync_model_urls() function NOT found.';
+        RAISE NOTICE '[FAIL] enforce_version_lifecycle() function NOT found.';
         _fail_count := _fail_count + 1;
     END IF;
 
-    -- Check both INSERT and UPDATE triggers
+    -- Check BEFORE INSERT OR UPDATE trigger
     SELECT COUNT(*) INTO _count
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_proc p ON p.oid = t.tgfoid
      WHERE n.nspname = 'public' AND c.relname = 'model_registry'
-       AND p.proname = 'sync_model_urls' AND NOT t.tgisinternal;
+       AND p.proname = 'enforce_version_lifecycle' AND NOT t.tgisinternal;
 
-    IF _count >= 2 THEN
-        RAISE NOTICE '[PASS] % sync_model_urls triggers on model_registry (INSERT+UPDATE).', _count;
+    IF _count >= 1 THEN
+        RAISE NOTICE '[PASS] % enforce_version_lifecycle trigger(s) on model_registry.', _count;
         _pass_count := _pass_count + 1;
-    ELSIF _count = 1 THEN
-        RAISE NOTICE '[WARN] Only 1 sync_model_urls trigger (expected 2: INSERT+UPDATE).';
-        _fail_count := _fail_count + 1;
     ELSE
-        RAISE NOTICE '[FAIL] No sync_model_urls triggers on model_registry.';
+        RAISE NOTICE '[FAIL] No enforce_version_lifecycle triggers on model_registry.';
         _fail_count := _fail_count + 1;
     END IF;
 

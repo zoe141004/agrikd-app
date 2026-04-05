@@ -46,6 +46,7 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 4 | `database/migrations/004_indexes.sql` | 7 performance indexes |
 | 5 | `database/migrations/005_storage.sql` | 3 storage buckets + policies |
 | 6 | `database/migrations/006_model_reports_and_rpcs.sql` | Model report tables + RPC functions |
+| 7 | `database/migrations/007_multi_version.sql` | Multi-version model registry (status lifecycle), enforce_version_lifecycle() trigger, pipeline_runs table |
 
 All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
 
@@ -62,7 +63,7 @@ Expected output: All checks should show `[PASS]`. The script verifies:
 - All policies exist per table
 - `is_admin_role()` function exists and is SECURITY DEFINER
 - `handle_new_user()` trigger on auth.users
-- `sync_model_urls()` triggers on model_registry (INSERT + UPDATE)
+- `enforce_version_lifecycle()` trigger on model_registry (replaces old sync_model_urls)
 - Storage buckets exist (models, datasets, prediction-images)
 - All 7 indexes exist
 
@@ -117,15 +118,16 @@ This generates:
 ### Key relationships:
 - `profiles.id` → `auth.users.id` (auto-created by `handle_new_user()` trigger)
 - `predictions.user_id` → `auth.users.id`
-- `model_registry` uses `sync_model_urls()` BEFORE trigger to route `file_url` based on `active_tflite_variant`
-- Flutter reads `file_url` + `sha256_checksum` from `model_registry` for OTA updates
+- `model_registry` uses `enforce_version_lifecycle()` BEFORE trigger to enforce max 2 active versions per leaf_type and sync `file_url = model_url` for backward compatibility
+- `pipeline_runs` tracks CI/CD pipeline progress with Supabase Realtime
+- Flutter reads `model_url` + `sha256_checksum` from `model_registry` (status='active') for OTA updates
 
 ### OTA Model Update Flow:
-1. Admin uploads model to `models` bucket via Dashboard
-2. Admin sets `model_url` (float16) and/or `model_url_float32` in `model_registry`
-3. Admin picks `active_tflite_variant` ('float16' or 'float32')
-4. `sync_model_urls()` trigger auto-routes `file_url` and `sha256_checksum`
-5. Flutter app reads `file_url` → downloads → verifies SHA-256 → saves locally
+1. Admin uploads .pth checkpoint via Dashboard → triggers GitHub Actions model-pipeline
+2. Pipeline converts PTH → ONNX → TFLite, evaluates accuracy, runs quality gate
+3. Pipeline uploads TFLite to `models` bucket and upserts `model_registry` with status='staging'
+4. Admin promotes model to 'active' via Dashboard (trigger enforces max 2 active)
+5. Flutter app reads active models → downloads → verifies SHA-256 → saves locally
 
 ## 9. Database Backup Strategy
 
@@ -138,7 +140,7 @@ This generates:
 
 | Problem | Solution |
 |---------|----------|
-| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 → 006 |
+| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 → 006 → 007 |
 | "function is_admin_role() does not exist" | Run 002_functions_triggers.sql (creates the function referenced by 003_rls_policies.sql) |
 | RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
 | Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |

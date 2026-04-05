@@ -39,7 +39,7 @@ Powdery Mildew.
 |---|---|
 | Camera Capture | Take a photo directly from the app for instant analysis |
 | Gallery Picker | Select an existing image from device storage |
-| Confidence Chart | Visual bar chart showing prediction probabilities for all classes |
+| Probability Chart | Visual bar chart showing prediction probabilities for all classes |
 | Diagnosis History | Browse, search, and review all past predictions |
 | Statistics Dashboard | Aggregated charts of disease frequency and trends |
 | Cloud Sync | Automatic background synchronization to Supabase when online |
@@ -93,7 +93,7 @@ Select the appropriate build for your device:
    - Tap the **Camera** button to take a live photo of a leaf.
    - Tap the **Gallery** button to pick an existing image from your device.
 4. **View results** -- the Result screen displays the top predicted disease (or
-   Healthy) along with a confidence bar chart for all classes.
+   Healthy) along with a probability bar chart for all classes.
 5. **Review history** -- navigate to the History tab to browse previous diagnoses,
    view details, or check aggregated statistics.
 

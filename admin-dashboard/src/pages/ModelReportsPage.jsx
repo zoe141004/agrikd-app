@@ -20,7 +20,7 @@ export default function ModelReportsPage() {
     try {
       let query = supabase
         .from('model_reports')
-        .select('*, predictions(leaf_type, predicted_class_name, confidence)')
+        .select('*, predictions(leaf_type, predicted_class_name)')
         .order('created_at', { ascending: false })
         .limit(200)
 
@@ -123,10 +123,7 @@ export default function ModelReportsPage() {
                     <td>
                       {r.predictions ? (
                         <span>
-                          {cleanLabel(r.predictions.predicted_class_name)}{' '}
-                          <span className={`badge ${r.predictions.confidence >= 0.8 ? 'badge-green' : r.predictions.confidence >= 0.5 ? 'badge-yellow' : 'badge-red'}`}>
-                            {(r.predictions.confidence * 100).toFixed(0)}%
-                          </span>
+                          {cleanLabel(r.predictions.predicted_class_name)}
                         </span>
                       ) : (
                         <span style={{ color: '#94a3b8' }}>#{r.prediction_id || '—'}</span>

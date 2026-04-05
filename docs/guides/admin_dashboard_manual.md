@@ -69,16 +69,18 @@ A paginated table of all prediction records submitted by mobile app users.
 
 ### Models (`/models`)
 
-The model registry and pipeline control center.
+The model registry and pipeline control center with five tabs:
 
-- **View registered models** -- Lists all model versions with format, size,
-  and benchmark metrics (Top-1 accuracy, KL divergence, inference latency).
-- **Upload checkpoints** -- Upload `.pth` student checkpoints to trigger a
-  new conversion run.
-- **OTA variant selection** -- Choose between `float16` and `float32`
-  TFLite variants for over-the-air model delivery to mobile devices.
-- **Trigger pipeline** -- Dispatch a GitHub Actions workflow to run the
-  full training/conversion pipeline from this page.
+- **Registry** -- Lists all model versions with status (staging/active/backup),
+  format, size, and SHA-256 checksums. Admin can promote staging models to
+  active or archive old versions. Max 2 active versions per leaf type.
+- **Compare** -- Side-by-side comparison of benchmark metrics across model
+  versions and formats (PyTorch, ONNX, TFLite float16, TFLite float32).
+- **Upload** -- Upload `.pth` student checkpoints to Supabase Storage.
+- **Pipeline** -- Trigger the GitHub Actions model-pipeline workflow and track
+  progress in real-time via Supabase Realtime (pipeline_runs table).
+- **Benchmarks** -- View detailed benchmark results: accuracy, precision,
+  recall, F1, latency, model size, and FLOPs per format.
 
 ### Users (`/users`)
 

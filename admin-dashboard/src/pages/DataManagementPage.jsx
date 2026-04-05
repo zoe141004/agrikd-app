@@ -22,7 +22,6 @@ export default function DataManagementPage() {
 
   // Dataset upload state — Method A (predictions)
   const [dsLeafType, setDsLeafType] = useState('')
-  const [dsConfThreshold, setDsConfThreshold] = useState(0.8)
   const [dsPredPreview, setDsPredPreview] = useState(null)
   const [dsUploading, setDsUploading] = useState(false)
   const [dsMsg, setDsMsg] = useState(null)
@@ -69,7 +68,6 @@ export default function DataManagementPage() {
         return {
           name: lt,
           total: ls.total || 0,
-          highConf: ls.total ? ((ls.high_confidence_count || 0) / ls.total * 100).toFixed(0) : '0',
         }
       })
     )
@@ -151,9 +149,8 @@ export default function DataManagementPage() {
     if (!dsLeafType) return
     const { data, error } = await supabase
       .from('predictions')
-      .select('predicted_class_name, confidence')
+      .select('predicted_class_name')
       .eq('leaf_type', dsLeafType)
-      .gte('confidence', dsConfThreshold)
     if (error || !data) { setDsPredPreview(null); return }
     const classMap = {}
     data.forEach(r => { classMap[r.predicted_class_name] = (classMap[r.predicted_class_name] || 0) + 1 })
@@ -264,21 +261,15 @@ export default function DataManagementPage() {
           <div className="card">
             <div className="card-header"><div><div className="card-label">Quality Metrics</div><div className="card-title">Data Quality by Leaf Type</div></div></div>
             <table>
-              <thead><tr><th>Leaf Type</th><th>Total Records</th><th>High Confidence (%)</th></tr></thead>
+              <thead><tr><th>Leaf Type</th><th>Total Records</th></tr></thead>
               <tbody>
                 {quality.map(q => (
                   <tr key={q.name}>
                     <td><strong style={{ color: '#121c28' }}>{q.name}</strong></td>
                     <td>{q.total.toLocaleString()}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className="progress-track" style={{ flex: 1 }}><div className="progress-fill" style={{ width: `${q.highConf}%` }} /></div>
-                        <span style={{ fontSize: 12, color: '#64748b', minWidth: 30 }}>{q.highConf}%</span>
-                      </div>
-                    </td>
                   </tr>
                 ))}
-                {quality.length === 0 && <tr><td colSpan={3} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No data yet</td></tr>}
+                {quality.length === 0 && <tr><td colSpan={2} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No data yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -293,7 +284,7 @@ export default function DataManagementPage() {
             <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
             <div className="alert alert-info" style={{ marginBottom: 16 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Export high-confidence predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, then pushed to DVC.</div>
+              <div>Export user predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, then pushed to DVC.</div>
             </div>
             <div className="form-group">
               <label className="form-label">Leaf Type *</label>
@@ -301,13 +292,6 @@ export default function DataManagementPage() {
                 <option value="">Select leaf type…</option>
                 {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
               </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Min. Confidence Threshold</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <input type="range" min="0.5" max="1" step="0.05" value={dsConfThreshold} onChange={e => setDsConfThreshold(parseFloat(e.target.value))} style={{ flex: 1 }} />
-                <span style={{ fontSize: 13, fontWeight: 600, minWidth: 40 }}>{(dsConfThreshold * 100).toFixed(0)}%</span>
-              </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <button className="btn btn-sm" onClick={previewPredictions} disabled={!dsLeafType}>Preview Count</button>
@@ -323,7 +307,7 @@ export default function DataManagementPage() {
               </div>
             )}
             <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total}
-              onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType, confidence_threshold: String(dsConfThreshold) })}>
+              onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType })}>
               {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Export as Dataset'}
             </button>
           </div>

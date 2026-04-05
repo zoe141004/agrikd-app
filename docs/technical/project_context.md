@@ -75,7 +75,7 @@ dashboard, and an Infrastructure-as-Code RLS audit script for the Supabase datab
 | Mobile Framework | Flutter + Dart | 3.41.4 |
 | State Management | Riverpod (flutter_riverpod) | 2.6.1 |
 | ML Inference (Mobile) | tflite_flutter | 0.12.1 |
-| Error Tracking (Mobile) | sentry_flutter | ^8.3.0 |
+| Error Tracking (Mobile) | sentry_flutter | ^9.0.0 |
 | ML Inference (Edge) | TensorRT FP16 | JetPack r8.5.2 |
 | Edge GUI | PyQt5 | System package |
 | Edge REST API | Flask | Rate-limited (30 req/min), 10 MB upload limit |
@@ -110,7 +110,7 @@ agrikd/
 │   │   │   ├── diagnosis/             # Home, Camera, Result screens + TFLite service
 │   │   │   ├── history/               # History list, Detail, Stats screens
 │   │   │   └── settings/              # Settings, Benchmark screens
-│   │   └── providers/                 # Riverpod providers (auth, diagnosis, inference, ...)
+│   │   └── providers/                 # Riverpod providers (auth, diagnosis, inference, benchmark, model_version, ...)
 │   ├── assets/models/                 # Bundled TFLite models (~0.96 MB each)
 │   ├── android/                       # Android platform files
 │   ├── ios/                           # iOS platform files
@@ -126,7 +126,7 @@ agrikd/
 │   └── src/
 │       ├── pages/                     # Dashboard, Users, Models, Predictions,
 │       │                              #   Releases, DataManagement, SystemHealth,
-│       │                              #   Settings, Login
+│       │                              #   Settings, ModelReports, Login
 │       ├── components/                # Layout, ConfirmDialog, CustomTooltip, ErrorBoundary
 │       └── lib/                       # Supabase client, helpers
 │   ├── vite.config.js                 # Security headers (X-Frame-Options, etc.)
@@ -166,7 +166,8 @@ agrikd/
 │   │   ├── 003_functions_triggers.sql
 │   │   ├── 004_indexes.sql
 │   │   ├── 005_storage.sql
-│   │   └── 006_model_reports_and_rpcs.sql
+│   │   ├── 006_model_reports_and_rpcs.sql
+│   │   └── 007_multi_version.sql
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
 ├── .github/workflows/                 # CI/CD (11 workflow files)
@@ -402,7 +403,7 @@ prevent key leakage in published APKs.
 | Table | Key Columns | Purpose |
 |---|---|---|
 | `predictions` | id, leaf_type, predicted_class, confidence, image_path, timestamp | Diagnosis history |
-| `models` | id, leaf_type, version, file_path, sha256, is_active | OTA model registry |
+| `models` | id, leaf_type, version, file_path, sha256, role, is_selected, UNIQUE(leaf_type, version) | OTA model registry (multi-version, max 2 active) |
 | `user_preferences` | key, value | Theme, language, default leaf type |
 | `sync_queue` | id, table_name, record_id, action, synced | Offline-first sync buffer |
 
@@ -417,12 +418,13 @@ prevent key leakage in published APKs.
 | Table | Key Columns | Purpose |
 |---|---|---|
 | `predictions` | id, user_id, device_type, leaf_type, predicted_class, confidence, image_url, created_at | Aggregated predictions from all clients |
-| `model_registry` | id, leaf_type, version, file_url, sha256, created_at | Published model versions for OTA |
+| `model_registry` | id, leaf_type, version, status, model_url, sha256, UNIQUE(leaf_type, version) | Published model versions for OTA (status: staging/active/backup) |
 | `profiles` | id (FK auth.users), display_name, role, created_at | User profile and role management |
 | `audit_log` | id, user_id, action, details, created_at | Audit trail for administrative actions |
-| `model_benchmarks` | id, leaf_type, accuracy, kl_div, size_bytes, created_at | Stored benchmark results |
-| `model_versions` | id, leaf_type, version, changelog, created_at | Model version history |
+| `model_benchmarks` | id, leaf_type, version, format, accuracy, per_class_metrics | Stored benchmark results per format |
+| `model_versions` | id, leaf_type, version, model_url, accuracy, archived_at | Archived model version snapshots |
 | `model_reports` | id, user_id, model_version, leaf_type, prediction_id, reason, created_at | User feedback on wrong predictions |
+| `pipeline_runs` | id, leaf_type, version, status, github_run_id, triggered_by | CI/CD pipeline progress tracking (Realtime) |
 
 Row-Level Security (RLS) policies ensure that regular users can only access their own
 prediction records, while admin-role users have full read access through the dashboard.
@@ -439,7 +441,7 @@ database. It checks seven categories:
 2. **Policies per table** -- Lists and counts all RLS policies.
 3. **is_admin_role() function** -- Verifies existence and `SECURITY DEFINER` attribute.
 4. **handle_new_user() trigger** -- Ensures new auth.users rows create profile records.
-5. **sync_model_urls() trigger** -- Verifies INSERT and UPDATE triggers on model_registry.
+5. **enforce_version_lifecycle() trigger** -- Verifies BEFORE INSERT/UPDATE trigger on model_registry (replaces old sync_model_urls); enforces max 2 active versions per leaf_type.
 6. **Storage bucket policies** -- Checks buckets (models, datasets, prediction-images) and their object policies.
 7. **Index verification** -- Confirms critical indexes exist for query performance.
 

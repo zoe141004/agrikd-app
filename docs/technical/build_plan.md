@@ -832,6 +832,50 @@ LoginScreen → "Quên mật khẩu?" → ForgotPasswordScreen → nhập email 
 
 ---
 
+### Step 11: Multi-Version Model Management + Security Hardening — ✅ HOAN THANH (2026-04-05)
+
+Implement 7 Business Requirements for model version management, hide confidence UI, and security hardening.
+
+**24 files changed, 1182 insertions, 1142 deletions**
+
+**7 REQ (Business Requirements):**
+
+| REQ | Mo ta | Trang thai |
+|-----|-------|-----------|
+| 1 | An confidence khoi UI (App + Web) | ✅ App done, Web pending GAP-1 |
+| 2 | Settings model specs BottomSheet | ✅ 100% |
+| 3 | Multi-version max 2 active + version selector | ✅ DB/DAO done, App UI pending GAP-2 |
+| 4 | Gop Benchmark + Compare (Admin) | ✅ 100% (5 tabs, 4 formats) |
+| 5 | Upload & CI/CD trigger | ✅ 100% |
+| 6 | Validation & tracking (Realtime) | ✅ 100% |
+| 7 | Khong ghi de, staging status lifecycle | ✅ 100% |
+
+**Database changes:**
+- `database/migrations/007_multi_version.sql`: model_registry status lifecycle (staging/active/backup), enforce_version_lifecycle() trigger (TOCTOU-safe with FOR UPDATE locks, pg_trigger_depth guard), pipeline_runs table with Realtime support
+- SQLite v3: models table with UNIQUE(leaf_type, version), is_selected column, role column
+
+**Security fixes (9 findings):**
+- SS-1: Extract storage path from full URL before Supabase download
+- SS-2: Handle both List (JSONB) and String for class_labels parsing
+- CI-1/2: Move workflow inputs to env vars (prevent expression injection)
+- CI-3: Exit when TFLite float16 not found
+- MP-1: Archive logic matches exact leaf_type + version
+- W-SQL-1: ON DELETE SET NULL for triggered_by FK
+- HS-1: Remove dead confidence switch case
+- AS-1: Remove 12 orphaned i18n entries
+
+**New files:**
+- `database/migrations/007_multi_version.sql`
+- `mobile_app/lib/providers/benchmark_provider.dart`
+
+**Verification:**
+- `flutter analyze` — 0 issues
+- `flutter test` — 89/89 passed
+- Admin Dashboard tests — 23/23 passed
+- No secrets committed, no SQL injection, no debug artifacts
+
+---
+
 ## PRODUCTION READINESS ASSESSMENT
 
 ### Da hoan thanh (Production Ready)

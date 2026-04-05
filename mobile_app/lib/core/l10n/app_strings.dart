@@ -289,6 +289,11 @@ class S {
     'spec_latency': 'Latency',
     'spec_size': 'Model Size',
     'spec_params': 'Parameters',
+
+    // Model version selector
+    'model_version_label': 'Model version',
+    'bundled': 'Bundled',
+    'ota': 'OTA',
   };
 
   static const _vi = <String, String>{
@@ -547,5 +552,10 @@ class S {
     'spec_latency': 'Độ trễ',
     'spec_size': 'Kích thước mô hình',
     'spec_params': 'Tham số',
+
+    // Model version selector
+    'model_version_label': 'Phiên bản mô hình',
+    'bundled': 'Tích hợp',
+    'ota': 'OTA',
   };
 }

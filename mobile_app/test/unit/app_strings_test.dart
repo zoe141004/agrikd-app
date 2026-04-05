@@ -60,6 +60,9 @@ void main() {
         'clear',
         'apply',
         'offline_mode',
+        'model_version_label',
+        'bundled',
+        'ota',
       ]) {
         enKeys.add(key);
         S.setLocale('vi');

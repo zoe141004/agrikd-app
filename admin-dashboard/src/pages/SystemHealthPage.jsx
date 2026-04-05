@@ -7,7 +7,6 @@ export default function SystemHealthPage() {
   const [checks, setChecks] = useState({})
   const [dbStats, setDbStats] = useState({ predictions: 0, models: 0, uptime: null })
   const [latencyData, setLatencyData] = useState([])
-  const [recentErrors, setRecentErrors] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
 
@@ -34,10 +33,6 @@ export default function SystemHealthPage() {
       const { data: earliest } = await supabase.from('predictions').select('created_at').order('created_at', { ascending: true }).limit(1)
       const uptime = earliest?.[0]?.created_at ? Math.floor((Date.now() - new Date(earliest[0].created_at).getTime()) / 86400000) : null
       setDbStats({ predictions: count || 0, models: models || 0, uptime })
-
-      // Recent low-confidence (errors proxy)
-      const { data: errRows } = await supabase.from('predictions').select('id, leaf_type, predicted_class_name, confidence, created_at').lt('confidence', 0.3).order('created_at', { ascending: false }).limit(10)
-      setRecentErrors(errRows || [])
     } catch (e) {
       results.database = { ok: false, label: 'Unreachable', latency: null }
     }
@@ -145,33 +140,6 @@ export default function SystemHealthPage() {
             ))}
           </div>
         </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div><div className="card-label">Errors</div><div className="card-title">Low Confidence Predictions (conf &lt; 30%)</div></div>
-        </div>
-        {recentErrors.length > 0 ? (
-          <table>
-            <thead><tr><th>ID</th><th>Leaf Type</th><th>Disease</th><th>Confidence</th><th>Date</th></tr></thead>
-            <tbody>
-              {recentErrors.map(p => (
-                <tr key={p.id}>
-                  <td className="font-mono" style={{ color: '#94a3b8' }}>{String(p.id).slice(0, 8)}...</td>
-                  <td><span className="badge badge-primary">{p.leaf_type}</span></td>
-                  <td>{p.predicted_class_name?.replace(/^[A-Za-z]+___/, '').replace(/_/g, ' ') || '—'}</td>
-                  <td><span className="badge badge-red">{(p.confidence * 100).toFixed(1)}%</span></td>
-                  <td style={{ fontSize: 12, color: '#64748b' }}>{new Date(p.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="alert alert-success">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            No low-confidence predictions found. Model inference quality looks good.
-          </div>
-        )}
       </div>
     </>
   )

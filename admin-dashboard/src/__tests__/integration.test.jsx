@@ -123,7 +123,6 @@ const MOCK_REPORTS = [
     predictions: {
       leaf_type: 'tomato',
       predicted_class_name: 'Tomato___Healthy',
-      confidence: 0.92,
     },
   },
   {
@@ -137,7 +136,6 @@ const MOCK_REPORTS = [
     predictions: {
       leaf_type: 'burmese_grape_leaf',
       predicted_class_name: 'Anthracnose',
-      confidence: 0.74,
     },
   },
 ]
@@ -279,9 +277,6 @@ describe('Group 1: Dashboard RPC Integration', () => {
     // Users with predictions = 25
     expect(screen.getByText('25')).toBeInTheDocument()
 
-    // Avg confidence = (0.87 * 100).toFixed(1) = "87.0" → rendered as "87.0%"
-    expect(screen.getByText('87.0%')).toBeInTheDocument()
-
     // Registered models = 2 (from model_registry count)
     expect(screen.getByText('2')).toBeInTheDocument()
 
@@ -289,7 +284,6 @@ describe('Group 1: Dashboard RPC Integration', () => {
     expect(screen.getByText('Total Predictions')).toBeInTheDocument()
     expect(screen.getByText('Users with Predictions')).toBeInTheDocument()
     expect(screen.getByText('Registered Models')).toBeInTheDocument()
-    expect(screen.getByText('Avg Confidence')).toBeInTheDocument()
 
     // Verify RPCs were called with correct arguments
     expect(mockRpc).toHaveBeenCalledWith('get_dashboard_stats', { p_leaf_type: null })
@@ -325,8 +319,6 @@ describe('Group 1: Dashboard RPC Integration', () => {
     expect(screen.getAllByText('tomato').length).toBeGreaterThanOrEqual(1)
     // cleanLabel('Tomato___Healthy') = 'Healthy'
     expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(1)
-    // confidence badge: (0.92 * 100).toFixed(0) = "92" → "92%"
-    expect(screen.getByText('92%')).toBeInTheDocument()
   })
 
   it('renders leaf type filter dropdown with options', async () => {
@@ -448,11 +440,6 @@ describe('Group 2: Predictions Page', () => {
     // cleanLabel('Anthracnose') → 'Anthracnose'
     expect(screen.getByText('Anthracnose')).toBeInTheDocument()
 
-    // Verify confidence badges: (0.92 * 100).toFixed(1) = "92.0%"
-    expect(screen.getByText('92.0%')).toBeInTheDocument()
-    // (0.74 * 100).toFixed(1) = "74.0%"
-    expect(screen.getByText('74.0%')).toBeInTheDocument()
-
     // Verify pagination info
     expect(screen.getByText(/Showing 1–3 of 3 records/)).toBeInTheDocument()
   })
@@ -465,9 +452,6 @@ describe('Group 2: Predictions Page', () => {
     })
 
     // Verify stat cards
-    expect(screen.getByText('Avg Confidence')).toBeInTheDocument()
-    expect(screen.getByText('High Conf (\u226580%)')).toBeInTheDocument()
-    expect(screen.getByText('Low Conf (<50%)')).toBeInTheDocument()
     expect(screen.getByText('Unique Users')).toBeInTheDocument()
   })
 
@@ -497,7 +481,6 @@ describe('Group 2: Predictions Page', () => {
 
     // Verify filter dropdowns exist
     expect(screen.getByText('All Leaf Types')).toBeInTheDocument()
-    expect(screen.getByText('All Confidence')).toBeInTheDocument()
 
     // Verify export buttons
     expect(screen.getByText('Export CSV')).toBeInTheDocument()
@@ -575,8 +558,6 @@ describe('Group 3: Model Reports Page', () => {
     // Verify prediction details from joined data
     // cleanLabel('Tomato___Healthy') → 'Healthy'
     expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(1)
-    // confidence: (0.92 * 100).toFixed(0) → "92%"
-    expect(screen.getByText('92%')).toBeInTheDocument()
 
     // Verify report count indicator
     expect(screen.getByText('2 reports')).toBeInTheDocument()
