@@ -173,15 +173,34 @@ export default function DataManagementPage() {
   }
 
   // ── CSV Import into predictions table ─────────────────────────────────────
+  const parseCSVLine = (line) => {
+    const values = []
+    let current = '', inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+        else inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) {
+        values.push(current.trim())
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    values.push(current.trim())
+    return values
+  }
+
   const parseCSV = async (file) => {
     const text = await file.text()
     const lines = text.split('\n').filter(l => l.trim())
     if (lines.length < 2) { setCsvMsg({ type: 'error', text: 'CSV has no data rows.' }); return }
     const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
     const rows = lines.slice(1).map(line => {
-      const values = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|^(?=,)|(?<=,)$)/g) || line.split(',')
+      const values = parseCSVLine(line)
       const row = {}
-      headers.forEach((h, i) => { row[h] = (values[i] || '').trim().replace(/^"|"$/g, '') || null })
+      headers.forEach((h, i) => { row[h] = (values[i] || '').replace(/^"|"$/g, '') || null })
       return row
     }).filter(r => Object.values(r).some(v => v))
     setCsvParsed({ headers, rows: rows.slice(0, 10), total: rows.length, all: rows })
@@ -190,6 +209,12 @@ export default function DataManagementPage() {
 
   const importCSV = async () => {
     if (!csvParsed) return
+    const required = ['leaf_type', 'predicted_class_name']
+    const missing = required.filter(r => !csvParsed.headers.includes(r))
+    if (missing.length) {
+      setCsvMsg({ type: 'error', text: `Missing required columns: ${missing.join(', ')}` })
+      return
+    }
     setCsvImporting(true); setCsvProgress(0); setCsvMsg(null)
     const BATCH = 100
     const { all } = csvParsed
@@ -214,14 +239,18 @@ export default function DataManagementPage() {
 
   // ── Export ──────────────────────────────────────────────────────────────
   const exportAll = async (fmt) => {
-    const { data } = await supabase.from('predictions').select('*').order('created_at', { ascending: false }).limit(50000)
-    if (!data?.length) return
-    const name = `agrikd-data-${new Date().toISOString().slice(0, 10)}`
-    if (fmt === 'csv') {
-      const h = Object.keys(data[0])
-      downloadFile([h.join(','), ...data.map(r => h.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n'), `${name}.csv`, 'text/csv')
-    } else {
-      downloadFile(JSON.stringify(data, null, 2), `${name}.json`, 'application/json')
+    try {
+      const { data } = await supabase.from('predictions').select('*').order('created_at', { ascending: false }).limit(50000)
+      if (!data?.length) { setCsvMsg({ type: 'error', text: 'No data to export.' }); return }
+      const name = `agrikd-data-${new Date().toISOString().slice(0, 10)}`
+      if (fmt === 'csv') {
+        const h = Object.keys(data[0])
+        downloadFile([h.join(','), ...data.map(r => h.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n'), `${name}.csv`, 'text/csv')
+      } else {
+        downloadFile(JSON.stringify(data, null, 2), `${name}.json`, 'application/json')
+      }
+    } catch (err) {
+      setCsvMsg({ type: 'error', text: 'Export failed: ' + err.message })
     }
   }
 

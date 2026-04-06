@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–007)
+-- AgriKD — Comprehensive Migration Verification (001–009)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 7 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 9 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -73,6 +73,8 @@ DECLARE
     -- ── Temp vars ──
     _exists BOOLEAN;
     _col_type TEXT;
+    _text_val TEXT;
+    _int_val INT;
 
 BEGIN
     -- Create temp results table
@@ -94,7 +96,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '1. Tables',
+            '01. Tables',
             _tbl,
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'TABLE MISSING' END
@@ -113,7 +115,7 @@ BEGIN
       AND column_name = 'status';
 
     INSERT INTO _verify_results VALUES (
-        '2. Columns',
+        '02. Columns',
         'model_registry.status',
         CASE
             WHEN _col_type = 'text' THEN 'PASS'
@@ -138,7 +140,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '2. Columns',
+        '02. Columns',
         'model_registry.pth_url',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 007' END
@@ -152,7 +154,7 @@ BEGIN
       AND column_name = 'status';
 
     INSERT INTO _verify_results VALUES (
-        '2. Columns',
+        '02. Columns',
         'pipeline_runs.status',
         CASE WHEN _col_type IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _col_type IS NOT NULL THEN 'type=' || _col_type ELSE 'COLUMN MISSING' END
@@ -167,7 +169,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '2. Columns',
+        '02. Columns',
         'pipeline_runs.github_run_id',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING' END
@@ -182,14 +184,14 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '2. Columns',
+        '02. Columns',
         'predictions.local_id',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING' END
     );
 
     -- =====================================================================
-    -- SECTION 3: Functions (002 + 006 + 007)
+    -- SECTION 3: Functions (002 + 006 + 007 + 008)
     -- =====================================================================
     FOREACH _fn IN ARRAY _required_functions LOOP
         SELECT EXISTS (
@@ -199,7 +201,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '3. Functions',
+            '03. Functions',
             _fn || '()',
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'FUNCTION MISSING' END
@@ -214,7 +216,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '3. Functions',
+        '03. Functions',
         'sync_model_urls() [legacy]',
         CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN _exists THEN 'exists (legacy, triggers dropped by 007)'
@@ -222,7 +224,52 @@ BEGIN
     );
 
     -- =====================================================================
-    -- SECTION 4: Triggers (002 + 007)
+    -- SECTION 4: SECURITY DEFINER + SET search_path (009)
+    -- =====================================================================
+
+    -- All SECURITY DEFINER functions must have SET search_path (009)
+    FOR _col_check IN
+        SELECT p.proname,
+               p.prosecdef AS is_secdef,
+               p.proconfig AS config
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'public'
+          AND p.proname IN (
+              'is_admin_role', 'handle_new_user', 'sync_model_urls',
+              'enforce_version_lifecycle',
+              'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options'
+          )
+    LOOP
+        IF _col_check.is_secdef THEN
+            IF _col_check.config IS NOT NULL
+               AND array_to_string(_col_check.config, ',') LIKE '%search_path%' THEN
+                INSERT INTO _verify_results VALUES (
+                    '04. Security (009)',
+                    _col_check.proname || '() SET search_path',
+                    'PASS',
+                    'SECURITY DEFINER + SET search_path'
+                );
+            ELSE
+                INSERT INTO _verify_results VALUES (
+                    '04. Security (009)',
+                    _col_check.proname || '() SET search_path',
+                    'FAIL',
+                    'SECURITY DEFINER but MISSING SET search_path — run 009'
+                );
+            END IF;
+        ELSE
+            INSERT INTO _verify_results VALUES (
+                '04. Security (009)',
+                _col_check.proname || '() SET search_path',
+                'WARN',
+                'not SECURITY DEFINER — search_path not applicable'
+            );
+        END IF;
+    END LOOP;
+
+    -- =====================================================================
+    -- SECTION 5: Triggers (002 + 007)
     -- =====================================================================
 
     -- on_auth_user_created (002)
@@ -235,7 +282,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '4. Triggers',
+        '05. Triggers',
         'on_auth_user_created ON auth.users',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'TRIGGER MISSING' END
@@ -251,7 +298,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '4. Triggers',
+        '05. Triggers',
         'enforce_version_lifecycle_trigger ON model_registry',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'TRIGGER MISSING — run 007' END
@@ -266,7 +313,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '4. Triggers',
+        '05. Triggers',
         'sync_model_urls triggers [should be dropped]',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN NOT _exists THEN 'dropped by 007 (correct)'
@@ -274,7 +321,7 @@ BEGIN
     );
 
     -- =====================================================================
-    -- SECTION 5: RLS Enabled (003 + 007)
+    -- SECTION 6: RLS Enabled (003 + 007)
     -- =====================================================================
     FOR _col_check IN
         SELECT c.relname AS tbl, c.relrowsecurity AS rls
@@ -284,7 +331,7 @@ BEGIN
           AND c.relname = ANY(_required_tables)
     LOOP
         INSERT INTO _verify_results VALUES (
-            '5. RLS Enabled',
+            '06. RLS Enabled',
             _col_check.tbl,
             CASE WHEN _col_check.rls THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _col_check.rls THEN 'RLS ON' ELSE 'RLS OFF — run 003/007' END
@@ -292,7 +339,7 @@ BEGIN
     END LOOP;
 
     -- =====================================================================
-    -- SECTION 6: RLS Policies (003 + 006 + 007)
+    -- SECTION 7: RLS Policies (003 + 006 + 007)
     -- =====================================================================
     FOREACH _pol IN ARRAY _required_policies LOOP
         SELECT EXISTS (
@@ -301,7 +348,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '6. RLS Policies',
+            '07. RLS Policies',
             _pol,
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'POLICY MISSING' END
@@ -309,7 +356,7 @@ BEGIN
     END LOOP;
 
     -- =====================================================================
-    -- SECTION 7: Indexes (004 + 006 + 007)
+    -- SECTION 8: Indexes (004 + 006 + 007)
     -- =====================================================================
     FOREACH _idx IN ARRAY _required_indexes LOOP
         SELECT EXISTS (
@@ -318,7 +365,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '7. Indexes',
+            '08. Indexes',
             _idx,
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'INDEX MISSING' END
@@ -326,7 +373,7 @@ BEGIN
     END LOOP;
 
     -- =====================================================================
-    -- SECTION 8: Constraints (001 + 007)
+    -- SECTION 9: Constraints (001 + 007 + 008 + 009)
     -- =====================================================================
 
     -- model_registry: UNIQUE(leaf_type, version) from 007
@@ -339,7 +386,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '8. Constraints',
+        '09. Constraints',
         'model_registry UNIQUE(leaf_type, version)',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'CONSTRAINT MISSING — run 007' END
@@ -354,7 +401,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '8. Constraints',
+        '09. Constraints',
         'model_registry UNIQUE(leaf_type) [should be dropped]',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN NOT _exists THEN 'dropped by 007 (correct)'
@@ -363,16 +410,15 @@ BEGIN
 
     -- model_registry: status CHECK constraint
     SELECT EXISTS (
-        SELECT 1 FROM information_schema.check_constraints cc
-        JOIN information_schema.constraint_column_usage ccu
-          ON cc.constraint_name = ccu.constraint_name
-        WHERE ccu.table_schema = 'public'
-          AND ccu.table_name = 'model_registry'
-          AND ccu.column_name = 'status'
+        SELECT 1 FROM pg_constraint con
+        JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+        WHERE con.conrelid = 'public.model_registry'::regclass
+          AND con.contype = 'c'
+          AND att.attname = 'status'
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '8. Constraints',
+        '09. Constraints',
         'model_registry.status CHECK (staging/active/backup)',
         CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN _exists THEN 'exists' ELSE 'no CHECK — may use enum instead' END
@@ -387,14 +433,65 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '8. Constraints',
+        '09. Constraints',
         'model_benchmarks UNIQUE(leaf_type, version, format)',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'CONSTRAINT MISSING' END
     );
 
+    -- model_benchmarks: format CHECK constraint (008)
+    SELECT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'public.model_benchmarks'::regclass
+          AND contype = 'c'
+          AND conname = 'model_benchmarks_format_check'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '09. Constraints (008)',
+        'model_benchmarks.format CHECK (pytorch/onnx/tflite_float16)',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'CONSTRAINT MISSING — run 008' END
+    );
+
+    -- Verify no ghost check constraints on model_benchmarks.format
+    SELECT COUNT(*) INTO _int_val
+    FROM pg_constraint con
+    JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+    WHERE con.conrelid = 'public.model_benchmarks'::regclass
+      AND con.contype = 'c'
+      AND att.attname = 'format';
+
+    INSERT INTO _verify_results VALUES (
+        '09. Constraints (008)',
+        'model_benchmarks.format check constraint count',
+        CASE WHEN _int_val = 1 THEN 'PASS'
+             WHEN _int_val = 0 THEN 'FAIL'
+             ELSE 'FAIL' END,
+        CASE WHEN _int_val = 1 THEN 'exactly 1 (correct)'
+             WHEN _int_val = 0 THEN 'none — run 008'
+             ELSE _int_val || ' constraints! Ghost constraints from partial runs — re-run 008' END
+    );
+
+    -- model_registry.updated_at DEFAULT (009)
+    SELECT column_default INTO _text_val
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'model_registry'
+      AND column_name = 'updated_at';
+
+    INSERT INTO _verify_results VALUES (
+        '09. Constraints (009)',
+        'model_registry.updated_at DEFAULT now()',
+        CASE WHEN _text_val IS NOT NULL AND _text_val LIKE '%now()%' THEN 'PASS'
+             ELSE 'FAIL' END,
+        CASE WHEN _text_val IS NOT NULL AND _text_val LIKE '%now()%' THEN 'DEFAULT=' || _text_val
+             WHEN _text_val IS NULL THEN 'no DEFAULT — run 009'
+             ELSE 'DEFAULT=' || _text_val || ' (unexpected)' END
+    );
+
     -- =====================================================================
-    -- SECTION 9: Storage Buckets (005)
+    -- SECTION 10: Storage Buckets (005)
     -- =====================================================================
     FOREACH _bkt IN ARRAY _required_buckets LOOP
         SELECT EXISTS (
@@ -402,7 +499,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '9. Storage Buckets',
+            '10. Storage Buckets',
             _bkt,
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'BUCKET MISSING — run 005' END
@@ -410,15 +507,8 @@ BEGIN
     END LOOP;
 
     -- =====================================================================
-    -- SECTION 10: Storage Policies (005)
+    -- SECTION 11: Storage Policies (005)
     -- =====================================================================
-    FOR _col_check IN
-        SELECT policyname FROM pg_policies WHERE tablename = 'objects' AND schemaname = 'storage'
-    LOOP
-        NULL; -- just to verify we can read them
-    END LOOP;
-
-    -- Check key storage policies
     FOREACH _pol IN ARRAY ARRAY[
         'Public read models', 'Admin upload models',
         'Public read datasets', 'Admin upload datasets',
@@ -430,7 +520,7 @@ BEGIN
         ) INTO _exists;
 
         INSERT INTO _verify_results VALUES (
-            '10. Storage Policies',
+            '11. Storage Policies',
             _pol,
             CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
             CASE WHEN _exists THEN 'exists' ELSE 'POLICY MISSING — run 005' END
@@ -438,7 +528,7 @@ BEGIN
     END LOOP;
 
     -- =====================================================================
-    -- SECTION 11: Enum cleanup check (007)
+    -- SECTION 12: Enum cleanup check (007)
     -- =====================================================================
     SELECT EXISTS (
         SELECT 1 FROM pg_type t
@@ -447,7 +537,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '11. Cleanup',
+        '12. Cleanup',
         'model_status enum type [should be dropped]',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN NOT _exists THEN 'not present (correct — using TEXT)'
@@ -455,7 +545,7 @@ BEGIN
     );
 
     -- =====================================================================
-    -- SECTION 12: Data integrity spot checks
+    -- SECTION 13: Data integrity checks
     -- =====================================================================
 
     -- All model_registry rows should have status set (not NULL)
@@ -464,7 +554,7 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '12. Data Integrity',
+        '13. Data Integrity',
         'model_registry: no NULL status',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN NOT _exists THEN 'all rows have status'
@@ -478,11 +568,40 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '12. Data Integrity',
+        '13. Data Integrity',
         'model_registry: valid status values only',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN NOT _exists THEN 'all staging/active/backup'
              ELSE 'invalid status values found!' END
+    );
+
+    -- model_benchmarks: no invalid format values (008)
+    SELECT EXISTS (
+        SELECT 1 FROM public.model_benchmarks
+        WHERE format NOT IN ('pytorch', 'onnx', 'tflite_float16')
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '13. Data Integrity (008)',
+        'model_benchmarks: valid format values only',
+        CASE WHEN NOT _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN NOT _exists THEN 'all pytorch/onnx/tflite_float16'
+             ELSE 'invalid format values found! Re-run 008' END
+    );
+
+    -- model_benchmarks: row count per format (informational)
+    SELECT string_agg(format || '=' || cnt::TEXT, ', ' ORDER BY format) INTO _text_val
+    FROM (
+        SELECT format, COUNT(*) AS cnt
+        FROM public.model_benchmarks
+        GROUP BY format
+    ) sub;
+
+    INSERT INTO _verify_results VALUES (
+        '13. Data Integrity (008)',
+        'model_benchmarks: format distribution',
+        'PASS',
+        COALESCE(_text_val, 'empty table')
     );
 
     -- profiles table has at least 1 admin
@@ -491,11 +610,28 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '12. Data Integrity',
+        '13. Data Integrity',
         'profiles: at least 1 admin exists',
         CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN _exists THEN 'admin found'
              ELSE 'no admin — set role=admin for your user in profiles table' END
+    );
+
+    -- =====================================================================
+    -- SECTION 14: Realtime publication (008)
+    -- =====================================================================
+    SELECT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND tablename = 'pipeline_runs'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '14. Realtime (008)',
+        'pipeline_runs in supabase_realtime publication',
+        CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _exists THEN 'enabled'
+             ELSE 'not in publication — add manually in Dashboard → Database → Replication' END
     );
 
 END $$;
@@ -523,7 +659,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–009)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;

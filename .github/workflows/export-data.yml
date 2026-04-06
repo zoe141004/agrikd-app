@@ -24,13 +24,16 @@ jobs:
       - name: Export predictions from Supabase
         run: |
           python -c "
-          import requests, json, os
+          import requests, json, os, sys
           url = os.environ['SUPABASE_URL']
           key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
           headers = {'apikey': key, 'Authorization': f'Bearer {key}'}
           offset, all_rows = 0, []
           while True:
-              resp = requests.get(f'{url}/rest/v1/predictions?select=id,leaf_type,predicted_class,confidence,model_version,created_at&order=created_at.desc&offset={offset}&limit=1000', headers=headers)
+              resp = requests.get(f'{url}/rest/v1/predictions?select=id,leaf_type,predicted_class_name,confidence,model_version,created_at&order=created_at.desc&offset={offset}&limit=1000', headers=headers, timeout=30)
+              if resp.status_code != 200:
+                  print(f'API error: {resp.status_code} - {resp.text[:200]}')
+                  sys.exit(1)
               rows = resp.json()
               if not rows: break
               all_rows.extend(rows)

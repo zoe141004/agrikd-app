@@ -67,11 +67,29 @@ class TfliteInferenceService {
   }
 
   /// Load an OTA model from the filesystem (not bundled asset).
-  /// Returns false if loading fails (caller should handle rollback).
+  /// Verifies SHA-256 checksum from DB before loading to detect corruption.
+  /// Returns false if loading or integrity check fails (caller should handle rollback).
   Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
     dispose();
 
     try {
+      // Verify SHA-256 integrity before loading OTA model
+      if (leafType != null) {
+        final modelRecord = await _modelDao.getSelected(leafType);
+        if (modelRecord != null) {
+          final expectedChecksum = modelRecord['sha256_checksum'] as String?;
+          if (expectedChecksum != null && expectedChecksum.isNotEmpty) {
+            final isValid = await ModelIntegrity.verifyFile(
+              filePath,
+              expectedChecksum,
+            );
+            if (!isValid) {
+              return false;
+            }
+          }
+        }
+      }
+
       _interpreter = await _loadFromFileWithDelegateFallback(filePath);
       _currentLeafType = leafType;
       return true;

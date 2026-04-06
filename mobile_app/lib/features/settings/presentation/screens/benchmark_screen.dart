@@ -45,11 +45,18 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
   bool _isDone = false;
   String _status = '';
   final List<_ModelBenchmark> _results = [];
+  TfliteInferenceService? _benchmarkService;
 
   static const _modelSizes = {
     'tomato': '1.00 MB',
     'burmese_grape_leaf': '0.98 MB',
   };
+
+  @override
+  void dispose() {
+    _benchmarkService?.dispose();
+    super.dispose();
+  }
 
   Future<void> _runBenchmark() async {
     setState(() {
@@ -58,7 +65,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       _results.clear();
     });
 
+    _benchmarkService?.dispose();
     final service = TfliteInferenceService();
+    _benchmarkService = service;
     final dummyInput = _createDummyInput();
 
     try {
@@ -129,6 +138,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       });
     } finally {
       service.dispose();
+      _benchmarkService = null;
     }
   }
 

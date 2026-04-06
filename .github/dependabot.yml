@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # npm (admin dashboard)
+  - package-ecosystem: "npm"
+    directory: "/admin-dashboard"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # pip (MLOps pipeline)
+  - package-ecosystem: "pip"
+    directory: "/mlops_pipeline"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"

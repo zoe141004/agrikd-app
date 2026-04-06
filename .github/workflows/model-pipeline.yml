@@ -62,13 +62,13 @@ jobs:
 
       - name: Pull DVC test data
         run: |
-          DATA_DIR="data/${{ inputs.leaf_type }}"
+          DATA_DIR="data/${LEAF_TYPE}"
           if [ -d "$DATA_DIR" ] && [ "$(find "$DATA_DIR" -type f | wc -l)" -gt 10 ]; then
             echo "[CACHE HIT] Test data already present: $(find "$DATA_DIR" -type f | wc -l) files"
           else
             echo "[CACHE MISS] Pulling test data via DVC..."
             dvc remote modify gdrive gdrive_use_service_account true
-            DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+            DVC_FILE="data_${LEAF_TYPE}.dvc"
             if [ ! -f "$DVC_FILE" ]; then
               echo "[ERROR] DVC file not found: $DVC_FILE"
               ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
@@ -89,9 +89,10 @@ jobs:
               sleep 10
             done
           fi
-          echo "Test data: $(find data/${{ inputs.leaf_type }} -type f | wc -l) files"
+          echo "Test data: $(find "data/${LEAF_TYPE}" -type f | wc -l) files"
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Download .pth checkpoint
         run: |
@@ -167,15 +168,21 @@ jobs:
 
       - name: 'Convert PTH → ONNX'
         id: convert_onnx
-        run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: python mlops_pipeline/scripts/convert_pth_to_onnx.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: 'Convert ONNX → TFLite'
         id: convert_tflite
-        run: python mlops_pipeline/scripts/convert_onnx_to_tflite.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: python mlops_pipeline/scripts/convert_onnx_to_tflite.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: 'Cross-format validation'
         id: validation
-        run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: python mlops_pipeline/scripts/validate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
         continue-on-error: true
 
       - name: 'Log validation result'
@@ -199,13 +206,15 @@ jobs:
       - name: 'Full evaluation on real test data'
         id: evaluate
         run: |
-          DATA_DIR="data/${{ inputs.leaf_type }}"
+          DATA_DIR="data/${LEAF_TYPE}"
           if [ ! -d "$DATA_DIR" ]; then
             echo "[ERROR] Test data not found at $DATA_DIR"
             exit 1
           fi
           echo "Test data: $(ls "$DATA_DIR" | wc -l) class folders"
-          python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+          python mlops_pipeline/scripts/evaluate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Quality Gate
         id: quality_gate
@@ -304,17 +313,19 @@ jobs:
       - name: Cleanup intermediate files (keep only .pth + .tflite float16)
         if: always()
         run: |
-          BASE="models/${{ inputs.leaf_type }}"
+          BASE="models/${LEAF_TYPE}"
           echo "Cleaning up ONNX and TFLite float32 (metrics already extracted)..."
-          rm -f "${BASE}/${{ inputs.leaf_type }}_student.onnx"
-          rm -f "${BASE}/${{ inputs.leaf_type }}_student_float32.tflite"
+          rm -f "${BASE}/${LEAF_TYPE}_student.onnx"
+          rm -f "${BASE}/${LEAF_TYPE}_student_float32.tflite"
           echo "[OK] Cleaned intermediate files. Remaining:"
           ls -la "${BASE}/" || true
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Compute SHA-256 of TFLite float16 model
         id: sha256
         run: |
-          TFLITE_PATH="models/${{ inputs.leaf_type }}/${{ inputs.leaf_type }}_student_float16.tflite"
+          TFLITE_PATH="models/${LEAF_TYPE}/${LEAF_TYPE}_student_float16.tflite"
           if [ -f "$TFLITE_PATH" ]; then
             HASH=$(sha256sum "$TFLITE_PATH" | awk '{print $1}')
             SIZE_MB=$(python3 -c "import os; print(f'{os.path.getsize(\"$TFLITE_PATH\") / 1048576:.3f}')")
@@ -327,6 +338,8 @@ jobs:
             echo "size_mb_float16=" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Upload results to Supabase
         env:

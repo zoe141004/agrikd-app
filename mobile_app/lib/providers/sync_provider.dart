@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show min;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,6 +45,8 @@ class SyncNotifier extends StateNotifier<SyncState>
   final Ref _ref;
   Timer? _debounce;
   bool _disposed = false;
+  int _consecutiveFailures = 0;
+  static const _maxBackoffSeconds = 60;
 
   bool get disposed => _disposed;
 
@@ -90,7 +93,9 @@ class SyncNotifier extends StateNotifier<SyncState>
       _ref
           .read(settingsProvider.notifier)
           .setValue('last_synced_at', now.toIso8601String());
+      _consecutiveFailures = 0;
     } catch (e) {
+      _consecutiveFailures++;
       state = SyncState(
         status: SyncStatus.error,
         errorMessage: S.get('sync_failed'),
@@ -120,7 +125,8 @@ class SyncNotifier extends StateNotifier<SyncState>
     }
   }
 
-  /// Debounced sync: waits 2 seconds after last trigger to batch requests.
+  /// Debounced sync with exponential backoff on consecutive failures.
+  /// Base delay: 2s. After N failures: min(2^N * 2, 60) seconds.
   /// Respects the auto_sync setting — skips if disabled.
   void triggerSync() {
     final settings = _ref.read(settingsProvider);
@@ -128,7 +134,10 @@ class SyncNotifier extends StateNotifier<SyncState>
     if (!autoSync) return;
 
     _debounce?.cancel();
-    _debounce = Timer(const Duration(seconds: 2), () {
+    final backoffSeconds = _consecutiveFailures == 0
+        ? 2
+        : min(2 * (1 << _consecutiveFailures), _maxBackoffSeconds);
+    _debounce = Timer(Duration(seconds: backoffSeconds), () {
       syncNow();
     });
   }

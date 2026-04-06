@@ -11,8 +11,12 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError(error.message)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) setError(error.message)
+    } catch (err) {
+      setError(err.message || 'Network error')
+    }
     setLoading(false)
   }
 

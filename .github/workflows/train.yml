@@ -47,12 +47,14 @@ jobs:
 
       - name: Run training pipeline
         run: |
-          if [ "${{ inputs.leaf_type }}" = "all" ]; then
+          if [ "$LEAF_TYPE" = "all" ]; then
             python mlops_pipeline/scripts/run_pipeline.py --config mlops_pipeline/configs/tomato.json
             python mlops_pipeline/scripts/run_pipeline.py --config mlops_pipeline/configs/burmese_grape_leaf.json
           else
-            python mlops_pipeline/scripts/run_pipeline.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+            python mlops_pipeline/scripts/run_pipeline.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
           fi
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Upload trained models
         if: always()

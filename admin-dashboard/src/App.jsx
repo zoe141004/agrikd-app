@@ -24,6 +24,8 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (!session) setLoading(false)
+    }).catch(() => {
+      setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
@@ -51,6 +53,8 @@ export default function App() {
           setProfile(data)
           setAccessDenied(false)
         }
+        setLoading(false)
+      }).catch(() => {
         setLoading(false)
       })
   }, [session])

@@ -23,8 +23,8 @@ jobs:
       - name: DVC Pull
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
-          if [ -n "${{ inputs.leaf_type }}" ]; then
-            DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+          if [ -n "$LEAF_TYPE" ]; then
+            DVC_FILE="data_${LEAF_TYPE}.dvc"
             if [ ! -f "$DVC_FILE" ]; then
               echo "[ERROR] DVC file not found: $DVC_FILE"
               ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
@@ -58,6 +58,7 @@ jobs:
           fi
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Report dataset info
         run: |

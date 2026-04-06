@@ -17,6 +17,27 @@ env:
   FLUTTER_VERSION: '3.41.4'
 
 jobs:
+  # ── Stage 0: Dependency Audit ──
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit npm dependencies
+        working-directory: admin-dashboard
+        run: npm audit --audit-level=high || echo "::warning::npm audit found vulnerabilities"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Audit pip dependencies
+        working-directory: mlops_pipeline
+        run: |
+          pip install pip-audit --quiet
+          pip-audit -r requirements.txt --desc || echo "::warning::pip-audit found vulnerabilities"
+
   # ── Stage 1: Lint & Static Analysis ──
   lint:
     name: Lint & Format

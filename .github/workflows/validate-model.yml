@@ -29,7 +29,7 @@ jobs:
       - name: Pull DVC data
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
-          DVC_FILE="data_${{ inputs.leaf_type }}.dvc"
+          DVC_FILE="data_${LEAF_TYPE}.dvc"
           for attempt in 1 2 3; do
             if dvc pull "$DVC_FILE"; then break; fi
             [ "$attempt" -eq 3 ] && exit 1
@@ -37,12 +37,17 @@ jobs:
           done
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Run validation
-        run: python mlops_pipeline/scripts/validate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: python mlops_pipeline/scripts/validate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Run evaluation
-        run: python mlops_pipeline/scripts/evaluate_models.py --config mlops_pipeline/configs/${{ inputs.leaf_type }}.json
+        run: python mlops_pipeline/scripts/evaluate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+        env:
+          LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Upload results
         if: always()

@@ -75,7 +75,7 @@ export default function DashboardPage() {
     if (dailyRows) {
       const dayCounts = {}
       dailyRows.forEach(r => {
-        const day = r.created_at.slice(0, 10)
+        const day = (r.created_at || '').slice(0, 10)
         dayCounts[day] = (dayCounts[day] || 0) + 1
       })
       setDailyData(Object.entries(dayCounts).map(([date, count]) => ({ date: date.slice(5), count })))

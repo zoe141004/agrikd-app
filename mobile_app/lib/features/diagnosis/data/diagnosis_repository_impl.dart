@@ -21,6 +21,10 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
   /// Tracks the model version currently loaded for inference.
   String _loadedModelVersion = '1.0.0';
 
+  /// Class labels for the currently loaded model (from OTA DB record or bundled constants).
+  List<String>? _loadedClassLabels;
+  int? _loadedNumClasses;
+
   DiagnosisRepositoryImpl({
     required TfliteInferenceService inferenceService,
     required PredictionDao predictionDao,
@@ -43,6 +47,7 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
       );
       if (loaded) {
         _loadedModelVersion = active['version'] as String;
+        _setClassLabelsFromRecord(active, leafType);
         return;
       }
 
@@ -58,6 +63,7 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
         );
         if (fbLoaded) {
           _loadedModelVersion = fallback['version'] as String;
+          _setClassLabelsFromRecord(fallback, leafType);
           return;
         }
       }
@@ -66,6 +72,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     // 2. Fallback to bundled asset (ultimate fallback)
     final modelInfo = ModelConstants.getModel(leafType);
     await _inferenceService.loadModel(modelInfo.assetPath, leafType: leafType);
+    _loadedClassLabels = modelInfo.classLabels;
+    _loadedNumClasses = modelInfo.numClasses;
 
     // Use bundled model version from DB if available, else default
     if (active != null && (active['is_bundled'] as int) == 1) {
@@ -73,6 +81,26 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     } else {
       _loadedModelVersion = '1.0.0';
     }
+  }
+
+  /// Extract class labels from a DB model record, falling back to ModelConstants.
+  void _setClassLabelsFromRecord(Map<String, dynamic> record, String leafType) {
+    final labelsRaw = record['class_labels'];
+    if (labelsRaw != null && labelsRaw is String && labelsRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(labelsRaw);
+        if (decoded is List) {
+          _loadedClassLabels = decoded.cast<String>();
+          _loadedNumClasses =
+              record['num_classes'] as int? ?? _loadedClassLabels!.length;
+          return;
+        }
+      } catch (_) {}
+    }
+    // Fallback to bundled constants
+    final modelInfo = ModelConstants.getModel(leafType);
+    _loadedClassLabels = modelInfo.classLabels;
+    _loadedNumClasses = modelInfo.numClasses;
   }
 
   @override
@@ -118,7 +146,9 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
     // 6. Run inference (must stay on main thread — native TFLite pointer)
     final modelInfo = ModelConstants.getModel(leafType);
-    final result = _inferenceService.runInference(input, modelInfo.numClasses);
+    final numClasses = _loadedNumClasses ?? modelInfo.numClasses;
+    final classLabels = _loadedClassLabels ?? modelInfo.classLabels;
+    final result = _inferenceService.runInference(input, numClasses);
 
     // 7. Build prediction
     final prediction = Prediction(
@@ -126,7 +156,9 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
       leafType: leafType,
       modelVersion: _loadedModelVersion,
       predictedClassIndex: result.classIndex,
-      predictedClassName: modelInfo.classLabels[result.classIndex],
+      predictedClassName: result.classIndex < classLabels.length
+          ? classLabels[result.classIndex]
+          : 'Unknown (${result.classIndex})',
       confidence: result.confidence,
       allConfidences: result.allProbabilities,
       inferenceTimeMs: result.inferenceTimeMs,

@@ -399,8 +399,12 @@ export default function SettingsPage() {
 
   async function loadAuditLogs() {
     setAuditLoading(true)
-    const { data } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50)
-    setAuditLogs(data || [])
+    try {
+      const { data } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50)
+      setAuditLogs(data || [])
+    } catch (err) {
+      console.warn('Failed to load audit logs:', err.message)
+    }
     setAuditLoading(false)
   }
 }

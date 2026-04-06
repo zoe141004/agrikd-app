@@ -49,22 +49,31 @@ jobs:
           url = (
               f"{supabase_url}/rest/v1/model_registry"
               f"?leaf_type=eq.{leaf_type}"
+              f"&status=eq.active"
+              f"&order=updated_at.desc"
+              f"&limit=1"
               f"&select=id,version,model_url,model_url_float32,file_url,"
               f"sha256_checksum,sha256_float32,accuracy_top1,active_tflite_variant"
           )
           req = urllib.request.Request(url, headers={
               "apikey": service_key,
               "Authorization": f"Bearer {service_key}",
-              "Accept": "application/vnd.pgrst.object+json",
+              "Accept": "application/json",
           })
 
           try:
               with urllib.request.urlopen(req) as resp:
-                  data = json.loads(resp.read().decode("utf-8"))
+                  rows = json.loads(resp.read().decode("utf-8"))
           except urllib.error.HTTPError as e:
               body = e.read().decode("utf-8")
               print(f"::error::Failed to query model_registry: {e.code} - {body}")
               sys.exit(1)
+
+          if not rows:
+              print(f"::error::No active model found for '{leaf_type}'. Cannot rollback.")
+              sys.exit(1)
+
+          data = rows[0]
 
           print("Current active model:")
           print(f"  Version:  {data['version']}")
@@ -152,7 +161,7 @@ jobs:
 
           supabase_url = os.environ["SUPABASE_URL"]
           service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-          leaf_type = os.environ["LEAF_TYPE"]
+          current_id = os.environ["CURRENT_ID"]
 
           payload = {
               "version": os.environ["PREV_VERSION"],
@@ -168,7 +177,7 @@ jobs:
               except ValueError:
                   pass
 
-          url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{leaf_type}"
+          url = f"{supabase_url}/rest/v1/model_registry?id=eq.{current_id}"
           data = json.dumps(payload).encode("utf-8")
           req = urllib.request.Request(url, data=data, method="PATCH", headers={
               "apikey": service_key,
@@ -179,7 +188,7 @@ jobs:
 
           try:
               with urllib.request.urlopen(req) as resp:
-                  print(f"model_registry updated: {leaf_type} -> v{os.environ['PREV_VERSION']}")
+                  print(f"model_registry updated: id={current_id} -> v{os.environ['PREV_VERSION']}")
           except urllib.error.HTTPError as e:
               body = e.read().decode("utf-8")
               print(f"::error::Failed to update model_registry: {e.code} - {body}")
@@ -188,7 +197,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          LEAF_TYPE: ${{ inputs.leaf_type }}
+          CURRENT_ID: ${{ steps.current.outputs.id }}
           PREV_VERSION: ${{ steps.previous.outputs.version }}
           PREV_URL: ${{ steps.previous.outputs.model_url }}
           PREV_SHA: ${{ steps.previous.outputs.sha256 }}

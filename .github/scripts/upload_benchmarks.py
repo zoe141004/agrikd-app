@@ -2,8 +2,9 @@
 Upload pipeline results to Supabase after model-pipeline.yml completes.
 
 1. Upload .pth + .tflite float16 to Supabase Storage (ONNX/float32 not uploaded)
-2. Parse benchmark_report.md and write metrics for ALL 4 formats to model_benchmarks
+2. Parse benchmark_report.md and write metrics for 3 formats (pytorch, onnx, tflite_float16) to model_benchmarks
 3. Update model_registry with model_url, pth_url, sha256, accuracy (status stays 'staging')
+4. Auto-activate model if fewer than 2 active versions exist for this leaf_type
 
 Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION,
           TFLITE_FLOAT16_SHA256, PIPELINE_RUN_ID (optional)
@@ -116,7 +117,6 @@ def parse_benchmark_report(report_path):
             "onnx": "onnx",
             "tflite": "tflite_float16",  # backward compat
             "tflite (float16)": "tflite_float16",
-            "tflite (float32)": "tflite_float32",
         }
         fmt_key = fmt_map.get(fmt_name.lower())
         if not fmt_key:
@@ -151,7 +151,6 @@ def parse_benchmark_report(report_path):
                 "pytorch": "pytorch", "onnx": "onnx",
                 "tflite": "tflite_float16",
                 "tflite (float16)": "tflite_float16",
-                "tflite (float32)": "tflite_float32",
             }
             fmt_key = fmt_map.get(fmt_name.lower())
             for r in results:
@@ -167,7 +166,6 @@ def parse_benchmark_report(report_path):
         "pytorch": "pytorch", "onnx": "onnx",
         "tflite": "tflite_float16",
         "tflite (float16)": "tflite_float16",
-        "tflite (float32)": "tflite_float32",
     }
     for fmt_name, headers_str, rows_str in class_sections:
         fmt_lower = fmt_map.get(fmt_name.strip().lower(), fmt_name.strip().lower())
@@ -354,6 +352,55 @@ def main():
             print(f"  [OK] model_registry accuracy_top1 = {tflite_result['accuracy']}%")
         else:
             print(f"  [WARN] Could not update accuracy: {resp}")
+
+        # ── Regression check: compare against current active model ─────────
+        active_url = (
+            f"{supabase_url}/rest/v1/model_registry"
+            f"?leaf_type=eq.{encoded_leaf}&status=eq.active&version=neq.{encoded_ver}"
+            f"&select=version,accuracy_top1&order=accuracy_top1.desc&limit=1"
+        )
+        ok_reg, resp_reg = supabase_request(
+            active_url, {**api_headers, "Prefer": "return=representation"}, method="GET"
+        )
+        if ok_reg:
+            try:
+                active_rows = json.loads(resp_reg)
+            except (json.JSONDecodeError, TypeError):
+                active_rows = []
+            if active_rows and active_rows[0].get("accuracy_top1") is not None:
+                prev_acc = active_rows[0]["accuracy_top1"]
+                new_acc = tflite_result["accuracy"]
+                diff = new_acc - prev_acc
+                prev_ver = active_rows[0]["version"]
+                if diff < 0:
+                    print(f"  [WARN] REGRESSION: v{version} accuracy ({new_acc:.1f}%) is {abs(diff):.1f}% lower than active v{prev_ver} ({prev_acc:.1f}%)")
+                elif diff > 0:
+                    print(f"  [OK] IMPROVEMENT: v{version} accuracy ({new_acc:.1f}%) is +{diff:.1f}% over active v{prev_ver} ({prev_acc:.1f}%)")
+                else:
+                    print(f"  [OK] v{version} accuracy ({new_acc:.1f}%) matches active v{prev_ver}")
+
+    # Auto-activate if fewer than 2 active versions exist for this leaf_type
+    encoded_leaf = urllib.parse.quote(leaf_type, safe="")
+    encoded_ver = urllib.parse.quote(version, safe="")
+    count_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&status=eq.active&select=id"
+    ok, resp = supabase_request(count_url, {**api_headers, "Prefer": "return=representation"}, method="GET")
+    if ok:
+        try:
+            active_models = json.loads(resp)
+        except (json.JSONDecodeError, TypeError):
+            active_models = []
+        if len(active_models) < 2:
+            act_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
+            ok_act, _ = supabase_request(
+                act_url, {**api_headers, "Prefer": "return=minimal"},
+                {"status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}, "PATCH"
+            )
+            if ok_act:
+                print(f"  [OK] Auto-activated: only {len(active_models)} active model(s) for {leaf_type}, promoted v{version} to active")
+            else:
+                print(f"  [WARN] Auto-activate failed for {leaf_type} v{version}")
+        else:
+            print(f"  [INFO] {len(active_models)} active models for {leaf_type} — new model stays staging (admin must activate manually)")
 
     # Update pipeline status to 'completed' (with warning if partial failures)
     if fail_count > 0:

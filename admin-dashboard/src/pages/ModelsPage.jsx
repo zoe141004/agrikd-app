@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubConfig, logAudit } from '../lib/helpers'
+import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
@@ -41,17 +41,25 @@ export default function ModelsPage() {
   const [versions, setVersions] = useState([])
   const [expandedVersions, setExpandedVersions] = useState(null)
 
-  // Pipeline tracking (Supabase Realtime)
+  // Pipeline tracking (Supabase Realtime + GitHub API polling fallback)
   const [pipelineStatus, setPipelineStatus] = useState(null)
   const [pipelineRuns, setPipelineRuns] = useState([])
   const [pipelineDismissed, setPipelineDismissed] = useState(false)
   const realtimeChannelRef = useRef(null)
+  const ghPollRef = useRef(null)
 
-  // Cleanup realtime on unmount
+  // Leaf type options (from predictions RPC + model_registry)
+  const [leafTypeOptions, setLeafTypeOptions] = useState([])
+
+  // Cleanup realtime + polling on unmount
   useEffect(() => () => {
     if (realtimeChannelRef.current) {
       supabase.removeChannel(realtimeChannelRef.current)
       realtimeChannelRef.current = null
+    }
+    if (ghPollRef.current) {
+      clearInterval(ghPollRef.current)
+      ghPollRef.current = null
     }
   }, [])
 
@@ -60,15 +68,20 @@ export default function ModelsPage() {
   const loadModels = async () => {
     setLoading(true)
     try {
-      const [{ data, error: err }, { data: benchData }, { data: verData }] = await Promise.all([
+      const [{ data, error: err }, { data: benchData }, { data: verData }, { data: rpcLeafTypes }] = await Promise.all([
         supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }).order('updated_at', { ascending: false }),
         supabase.from('model_benchmarks').select('*').order('created_at', { ascending: false }),
         supabase.from('model_versions').select('*').order('archived_at', { ascending: false }),
+        supabase.rpc('get_leaf_type_options'),
       ])
       if (err) throw new Error(err.message)
       setModels(data || [])
       setBenchmarks(benchData || [])
       setVersions(verData || [])
+      // Merge leaf types from predictions RPC + model_registry
+      const registryLeafTypes = [...new Set((data || []).map(m => m.leaf_type))]
+      const rpcLeafs = (rpcLeafTypes || []).map(r => r.leaf_type)
+      setLeafTypeOptions([...new Set([...rpcLeafs, ...registryLeafTypes])].sort())
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
@@ -89,13 +102,56 @@ export default function ModelsPage() {
           setPipelineStatus('failed')
         }
       }
-    } catch { /* pipeline_runs table may not exist yet */ }
+    } catch (err) {
+      console.warn('pipeline_runs load failed:', err.message)
+    }
+  }
+
+  // GitHub API polling fallback for pipeline tracking
+  const startGitHubPolling = () => {
+    if (ghPollRef.current) clearInterval(ghPollRef.current)
+    ghPollRef.current = setInterval(async () => {
+      try {
+        const data = await getGitHubWorkflowRuns('model-pipeline.yml')
+        if (!data?.workflow_runs?.length) return
+        const latest = data.workflow_runs[0]
+        // Only consider recent runs (within last 30 minutes)
+        const runAge = Date.now() - new Date(latest.created_at).getTime()
+        if (runAge > 30 * 60 * 1000) return
+
+        let mappedStatus = null
+        if (latest.status === 'queued') mappedStatus = 'pending'
+        else if (latest.status === 'in_progress') mappedStatus = 'converting'
+        else if (latest.status === 'completed' && latest.conclusion === 'success') mappedStatus = 'completed'
+        else if (latest.status === 'completed' && latest.conclusion === 'failure') mappedStatus = 'failed'
+
+        if (mappedStatus) {
+          setPipelineStatus(mappedStatus)
+          setPipelineDismissed(false)
+          // Update pipeline runs list with GitHub data
+          setPipelineRuns(prev => {
+            const existsWithUrl = prev.some(r => r.github_run_url === latest.html_url)
+            if (!existsWithUrl && prev.length > 0) {
+              return prev.map((r, i) => i === 0 ? { ...r, github_run_url: latest.html_url, github_run_id: latest.id } : r)
+            }
+            return prev
+          })
+          if (['completed', 'failed'].includes(mappedStatus)) {
+            clearInterval(ghPollRef.current)
+            ghPollRef.current = null
+            loadModels()
+          }
+        }
+      } catch { /* GitHub API may not be configured */ }
+    }, 15000)
   }
 
   const subscribeToPipelineRun = (runId) => {
     if (realtimeChannelRef.current) {
       supabase.removeChannel(realtimeChannelRef.current)
     }
+    // Start GitHub API polling as fallback (in case Realtime is not enabled)
+    startGitHubPolling()
     const channel = supabase
       .channel(`pipeline-${runId}`)
       .on('postgres_changes', {
@@ -110,10 +166,16 @@ export default function ModelsPage() {
         if (['completed', 'failed'].includes(newStatus)) {
           supabase.removeChannel(channel)
           realtimeChannelRef.current = null
+          // Stop GitHub polling since Realtime is working
+          if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
           loadModels()
         }
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
+        }
+      })
     realtimeChannelRef.current = channel
   }
 
@@ -209,18 +271,38 @@ export default function ModelsPage() {
   }
 
   const deleteModel = async (m) => {
+    const sameLeafModels = models.filter(m2 => m2.leaf_type === m.leaf_type)
+    const activeCount = sameLeafModels.filter(m2 => (m2.status || 'staging') === 'active').length
+    const isActive = (m.status || 'staging') === 'active'
+
+    // Guard: prevent deleting the last active model
+    if (isActive && activeCount <= 1) {
+      alert(`Cannot delete the last active model for "${m.leaf_type}". Deactivate first or activate another version.`)
+      return
+    }
+
+    const isLastModel = sameLeafModels.length <= 1
+    const message = isLastModel
+      ? `This is the LAST model for "${m.leaf_type}". Deleting it means no models will be available for OTA. The leaf type will still be available for new uploads.\n\nPermanently delete "${m.display_name || m.leaf_type}" v${m.version}?`
+      : `Permanently delete "${m.display_name || m.leaf_type}" v${m.version}? This will remove the model file from storage, benchmarks, and the registry entry. This cannot be undone.`
+
     setConfirmAction({
-      title: 'Delete Model',
-      message: `Permanently delete "${m.display_name || m.leaf_type}" v${m.version}? This will remove the model file from storage and the registry entry. This cannot be undone.`,
+      title: 'Delete Model Version',
+      message,
       danger: true,
-      confirmLabel: 'Delete Permanently',
+      confirmLabel: isLastModel ? 'Delete Last Model' : 'Delete Permanently',
       onConfirm: async () => {
         setConfirmAction(null)
         try {
+          // 1. Delete storage file
           if (m.model_url?.includes('supabase.co/storage')) {
             const match = m.model_url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
             if (match) await supabase.storage.from('models').remove([decodeURIComponent(match[1])])
           }
+          // 2. Cascade delete benchmarks and version archive
+          await supabase.from('model_benchmarks').delete().eq('leaf_type', m.leaf_type).eq('version', m.version)
+          await supabase.from('model_versions').delete().eq('leaf_type', m.leaf_type).eq('version', m.version)
+          // 3. Delete registry entry
           const { error } = await supabase.from('model_registry').delete().eq('id', m.id)
           if (error) throw new Error(error.message)
           loadModels()
@@ -301,18 +383,25 @@ export default function ModelsPage() {
           let runId = null
           try {
             const { data: { user } } = await supabase.auth.getUser()
-            const { data: run } = await supabase.from('pipeline_runs').insert({
+            const { data: run, error: runErr } = await supabase.from('pipeline_runs').insert({
               leaf_type, version, status: 'pending', triggered_by: user?.id
             }).select().single()
+            if (runErr) {
+              console.warn('pipeline_runs insert failed:', runErr.message)
+              pipelineMsg += ' (Pipeline tracking limited — pipeline_runs table may need setup)'
+            }
             runId = run?.id
-          } catch { /* pipeline_runs may not exist yet */ }
+          } catch (prErr) {
+            console.warn('pipeline_runs insert error:', prErr.message)
+          }
 
           await triggerGitHubWorkflow('model-pipeline.yml', {
             leaf_type, version, model_url: publicUrl,
             ...(runId ? { pipeline_run_id: runId } : {})
           })
-          pipelineMsg = ' Full pipeline triggered — track progress in the Validate tab.'
+          pipelineMsg += ' Full pipeline triggered — track progress in the Validate tab.'
           if (runId) subscribeToPipelineRun(runId)
+          else startGitHubPolling()
           setPipelineStatus('pending')
           setPipelineDismissed(false)
           logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version, workflow: 'model-pipeline.yml' })
@@ -355,11 +444,14 @@ export default function ModelsPage() {
       let runId = null
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        const { data: run } = await supabase.from('pipeline_runs').insert({
+        const { data: run, error: runErr } = await supabase.from('pipeline_runs').insert({
           leaf_type: valTarget, version: targetModel.version, status: 'pending', triggered_by: user?.id
         }).select().single()
+        if (runErr) console.warn('pipeline_runs insert failed:', runErr.message)
         runId = run?.id
-      } catch { /* pipeline_runs may not exist yet */ }
+      } catch (prErr) {
+        console.warn('pipeline_runs insert error:', prErr.message)
+      }
 
       await triggerGitHubWorkflow('model-pipeline.yml', {
         leaf_type: valTarget, version: targetModel.version,
@@ -368,6 +460,7 @@ export default function ModelsPage() {
       })
       setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}" v${targetModel.version}. Track progress in the status banner.` })
       if (runId) subscribeToPipelineRun(runId)
+      else startGitHubPolling()
       setPipelineStatus('pending')
       setPipelineDismissed(false)
       loadPipelineRuns()
@@ -639,11 +732,10 @@ export default function ModelsPage() {
             )
 
             const tflite16 = modelBench.find(b => b.format === 'tflite_float16')
-            const tflite32 = modelBench.find(b => b.format === 'tflite_float32')
             const pytorch = modelBench.find(b => b.format === 'pytorch')
             const onnx = modelBench.find(b => b.format === 'onnx')
-            const formats = [pytorch, onnx, tflite16, tflite32].filter(Boolean)
-            const activeTflite = tflite16 || tflite32
+            const formats = [pytorch, onnx, tflite16].filter(Boolean)
+            const activeTflite = tflite16
 
             return (
               <div className="card" style={{ marginBottom: 20 }}>
@@ -689,7 +781,7 @@ export default function ModelsPage() {
                       <tbody>
                         {formats.map(b => (
                           <tr key={b.format}>
-                            <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tflite_float32' ? 'TFLite (f32)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
+                            <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
                             <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(4)}%</span> : '—'}</td>
                             <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
@@ -789,9 +881,9 @@ export default function ModelsPage() {
                       }
                     }}>
                       <option value="">Select existing leaf type…</option>
-                      {[...new Set(models.map(m => m.leaf_type))].map(lt => {
+                      {leafTypeOptions.map(lt => {
                         const m = models.find(x => x.leaf_type === lt)
-                        return <option key={lt} value={lt}>{m?.display_name || lt} ({lt})</option>
+                        return <option key={lt} value={lt}>{m?.display_name || lt.replace(/_/g, ' ')} ({lt})</option>
                       })}
                     </select>
                   )
@@ -903,9 +995,9 @@ export default function ModelsPage() {
               <label className="form-label">Dataset</label>
               <select className="form-input" value={valTarget} onChange={e => { setValTarget(e.target.value); setValVersion('') }}>
                 <option value="">Select dataset…</option>
-                {[...new Set(models.map(m => m.leaf_type))].map(lt => {
+                {leafTypeOptions.map(lt => {
                   const m = models.find(x => x.leaf_type === lt)
-                  return <option key={lt} value={lt}>{m?.display_name || lt} ({lt})</option>
+                  return <option key={lt} value={lt}>{m?.display_name || lt.replace(/_/g, ' ')} ({lt})</option>
                 })}
               </select>
             </div>

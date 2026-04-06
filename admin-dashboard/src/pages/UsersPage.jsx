@@ -24,7 +24,7 @@ export default function UsersPage() {
         setUseProfiles(true); setUsers(data)
       } else {
         setUseProfiles(false)
-        const { data: predData } = await supabase.from('predictions').select('user_id, created_at').order('created_at', { ascending: false })
+        const { data: predData } = await supabase.from('predictions').select('user_id, created_at').order('created_at', { ascending: false }).limit(5000)
         if (predData) {
           const map = {}
           predData.forEach(p => {

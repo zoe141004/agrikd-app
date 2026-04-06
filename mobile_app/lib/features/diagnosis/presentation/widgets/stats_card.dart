@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/providers/database_provider.dart';
+import 'package:app/providers/diagnosis_provider.dart';
 
 class StatsCard extends ConsumerStatefulWidget {
   const StatsCard({super.key});
@@ -30,6 +31,13 @@ class _StatsCardState extends ConsumerState<StatsCard> {
 
   @override
   Widget build(BuildContext context) {
+    // Refresh stats whenever a new diagnosis completes
+    ref.listen<DiagnosisState>(diagnosisProvider, (prev, next) {
+      if (next.status == DiagnosisStatus.success) {
+        _loadStats();
+      }
+    });
+
     if (_stats == null || (_stats!['total'] as int) == 0) {
       return const SizedBox.shrink();
     }

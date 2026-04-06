@@ -102,9 +102,16 @@ Future<void> _initWebDb() async {
 Future<void> _seedBundledModels() async {
   final modelDao = ModelDao();
 
-  // Fast path: skip if models already seeded (avoids ~2MB rootBundle + SHA-256)
+  // Fast path: skip if all bundled models already seeded (check by leaf_type, not just count)
   final existing = await modelDao.getAll();
-  if (existing.length >= ModelConstants.models.length) return;
+  final existingKeys = existing
+      .where((m) => (m['is_bundled'] as int) == 1)
+      .map((m) => '${m['leaf_type']}@${m['version']}')
+      .toSet();
+  final bundledKeys = ModelConstants.models.entries
+      .map((e) => '${e.value.leafType}@1.0.0')
+      .toSet();
+  if (bundledKeys.difference(existingKeys).isEmpty) return;
 
   final models = <Map<String, dynamic>>[];
 

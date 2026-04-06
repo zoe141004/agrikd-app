@@ -12,9 +12,9 @@ export default function SystemHealthPage() {
 
   useEffect(() => { runHealthChecks() }, [])
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 120 seconds
   useEffect(() => {
-    const id = setInterval(runHealthChecks, 30000)
+    const id = setInterval(runHealthChecks, 120000)
     return () => clearInterval(id)
   }, [])
 
@@ -49,9 +49,9 @@ export default function SystemHealthPage() {
       results.storage = { ok: !error, label: error ? 'Error' : `${(data || []).length} buckets` }
     } catch { results.storage = { ok: false, label: 'Unavailable' } }
 
-    // Real latency measurements (6 sequential pings)
+    // Real latency measurements (3 sequential pings)
     const latencyResults = []
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 3; i++) {
       const t1 = Date.now()
       await supabase.from('predictions').select('*', { count: 'exact', head: true })
       latencyResults.push({ time: `#${i + 1}`, ms: Date.now() - t1 })

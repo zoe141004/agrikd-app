@@ -19,7 +19,7 @@ export function downloadFile(content, filename, type) {
     download: filename,
   })
   a.click()
-  URL.revokeObjectURL(a.href)
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000)
 }
 
 export function formatDateTime(dateStr) {
@@ -106,13 +106,17 @@ export async function ensureBucket(supabase, bucket) {
 // ── Rate limiting ─────────────────────────────────────────────────────────
 
 export function checkRateLimit(key, cooldownMs = 30000) {
-  const last = parseInt(localStorage.getItem(`rate_${key}`) || '0')
-  const now = Date.now()
-  if (now - last < cooldownMs) {
-    const remaining = Math.ceil((cooldownMs - (now - last)) / 1000)
-    throw new Error(`Please wait ${remaining}s before triggering "${key}" again.`)
+  try {
+    const last = parseInt(localStorage.getItem(`rate_${key}`) || '0')
+    const now = Date.now()
+    if (now - last < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (now - last)) / 1000)
+      throw new Error(`Please wait ${remaining}s before triggering "${key}" again.`)
+    }
+    localStorage.setItem(`rate_${key}`, String(now))
+  } catch (err) {
+    if (err.message.includes('Please wait')) throw err
   }
-  localStorage.setItem(`rate_${key}`, String(now))
 }
 
 // ── SHA-256 checksum ──────────────────────────────────────────────────────
