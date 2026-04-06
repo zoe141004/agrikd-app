@@ -121,8 +121,7 @@ BEGIN
         FROM public.model_registry
         WHERE leaf_type = NEW.leaf_type
           AND status = 'active'
-          AND id IS DISTINCT FROM NEW.id
-        FOR UPDATE;
+          AND id IS DISTINCT FROM NEW.id;
 
         IF active_count >= 2 THEN
             -- Demote the oldest active version to 'backup'
