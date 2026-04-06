@@ -311,7 +311,7 @@ export default function ModelsPage() {
     }
     setConfirmAction({
       title: 'Activate Model',
-      message: `Activate "${m.display_name || m.leaf_type}" v${m.version}? If there are already 2 active versions for this dataset, the oldest will be demoted to backup.`,
+      message: `Activate "${m.display_name || m.leaf_type}" v${m.version}? If there are already 2 active versions for this dataset, the lowest version will be demoted to backup.`,
       danger: false,
       confirmLabel: 'Activate',
       onConfirm: async () => {
@@ -325,9 +325,9 @@ export default function ModelsPage() {
             accuracy: am.accuracy_top1, size_mb: null,
           }, { onConflict: 'leaf_type,version' })
         }
-        // Demote oldest active models to backup if already >=2 active
+        // Demote lowest-version active models to backup if already >=2 active
         if (activeModels.length >= 2) {
-          const sorted = [...activeModels].sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at))
+          const sorted = [...activeModels].sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
           for (let i = 0; i < sorted.length - 1; i++) {
             await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', sorted[i].id)
           }

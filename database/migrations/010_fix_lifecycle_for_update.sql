@@ -1,13 +1,12 @@
--- Migration 010: Fix enforce_version_lifecycle FOR UPDATE aggregate error
--- Problem: SELECT COUNT(*) ... FOR UPDATE is invalid in PostgreSQL
--- (FOR UPDATE cannot be used with aggregate functions)
--- This caused "FOR UPDATE is not allowed with aggregate functions" on model activation.
+-- Migration 010: Fix enforce_version_lifecycle
+-- 1. Remove FOR UPDATE from COUNT(*) aggregate (PostgreSQL disallows it)
+-- 2. Demote by lowest version instead of oldest updated_at
 
 CREATE OR REPLACE FUNCTION public.enforce_version_lifecycle()
 RETURNS TRIGGER AS $$
 DECLARE
     active_count INT;
-    oldest_active_id UUID;
+    lowest_version_id UUID;
 BEGIN
     -- Guard against recursive trigger calls
     IF pg_trigger_depth() > 1 THEN RETURN NEW; END IF;
@@ -28,19 +27,19 @@ BEGIN
           AND id IS DISTINCT FROM NEW.id;
 
         IF active_count >= 2 THEN
-            -- Demote the oldest active version to 'backup'
-            SELECT id INTO oldest_active_id
+            -- Demote the lowest version to 'backup'
+            SELECT id INTO lowest_version_id
             FROM public.model_registry
             WHERE leaf_type = NEW.leaf_type
               AND status = 'active'
               AND id IS DISTINCT FROM NEW.id
-            ORDER BY updated_at ASC
+            ORDER BY version ASC
             LIMIT 1
             FOR UPDATE;
 
             UPDATE public.model_registry
             SET status = 'backup', updated_at = now()
-            WHERE id = oldest_active_id;
+            WHERE id = lowest_version_id;
         END IF;
     END IF;
 
