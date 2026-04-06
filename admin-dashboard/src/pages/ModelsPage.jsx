@@ -410,6 +410,11 @@ export default function ModelsPage() {
     if (!leaf_type || !version) { setUploadMsg({ type: 'error', text: 'Leaf type and version are required.' }); return }
 
     setUploading(true); setUploadProgress(10); setUploadMsg(null)
+
+    // Clear any active polling/realtime from previous upload to avoid connection conflicts
+    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
+    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+
     try {
       // 1. Archive current model if exists (match exact leaf_type + version being uploaded)
       const existing = models.find(m => m.leaf_type === leaf_type && m.version === version)
@@ -524,6 +529,11 @@ export default function ModelsPage() {
   const runValidation = async () => {
     if (!valTarget) { setValMsg({ type: 'error', text: 'Select a dataset first.' }); return }
     setValRunning(true); setValMsg(null)
+
+    // Clear any active polling/realtime from previous run
+    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
+    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+
     try {
       const { ghToken } = getGitHubConfig()
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations.')
