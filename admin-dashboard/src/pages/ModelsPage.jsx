@@ -243,19 +243,31 @@ export default function ModelsPage() {
 
   const saveModel = async () => {
     setSaving(true)
-    const { error } = await supabase.from('model_registry').update({
-      display_name: form.display_name,
-      version: form.version,
-      model_url: form.model_url,
-      description: form.description,
-      status: form.status,
-      accuracy_top1: form.accuracy_top1 || null,
-      sha256_checksum: form.sha256_checksum || 'pending',
-      updated_at: new Date().toISOString(),
-    }).eq('id', editModal.id)
+    try {
+      // If version changed, cascade rename to benchmarks & version archives
+      const versionChanged = form.version !== editModal.version
+      if (versionChanged) {
+        await supabase.from('model_benchmarks').update({ version: form.version })
+          .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
+        await supabase.from('model_versions').update({ version: form.version })
+          .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
+      }
+      const { error } = await supabase.from('model_registry').update({
+        display_name: form.display_name,
+        version: form.version,
+        model_url: form.model_url,
+        description: form.description,
+        status: form.status,
+        accuracy_top1: form.accuracy_top1 || null,
+        sha256_checksum: form.sha256_checksum || 'pending',
+        updated_at: new Date().toISOString(),
+      }).eq('id', editModal.id)
+      if (error) throw new Error(error.message)
+      setEditModal(null); loadModels(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version })
+    } catch (err) {
+      alert('Save failed: ' + err.message)
+    }
     setSaving(false)
-    if (!error) { setEditModal(null); loadModels(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version }) }
-    else alert('Save failed: ' + error.message)
   }
 
   const quickValidate = async (m) => {
@@ -312,6 +324,13 @@ export default function ModelsPage() {
             model_url: am.model_url, sha256_checksum: am.sha256_checksum,
             accuracy: am.accuracy_top1, size_mb: null,
           }, { onConflict: 'leaf_type,version' })
+        }
+        // Demote oldest active models to backup if already >=2 active
+        if (activeModels.length >= 2) {
+          const sorted = [...activeModels].sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at))
+          for (let i = 0; i < sorted.length - 1; i++) {
+            await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', sorted[i].id)
+          }
         }
         const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
@@ -405,6 +424,11 @@ export default function ModelsPage() {
           size_mb: null,
         }, { onConflict: 'leaf_type,version' })
       }
+      setUploadProgress(12)
+
+      // 1b. Clear stale benchmarks for this leaf_type+version (prevent UNIQUE conflict)
+      await supabase.from('model_benchmarks').delete()
+        .eq('leaf_type', leaf_type).eq('version', version)
       setUploadProgress(15)
 
       // 2. Upload .pth checkpoint to Supabase Storage
@@ -550,11 +574,14 @@ export default function ModelsPage() {
   const getVersionsForLeaf = (leafType) =>
     versions.filter(v => v.leaf_type === leafType)
 
-  // Available leaf types and versions from benchmark data
-  const benchLeafTypes = [...new Set(benchmarks.map(b => b.leaf_type))].sort()
+  // Available leaf types and versions from benchmark data (filtered to registry-matching only)
+  const registryKeys = new Set(models.map(m => `${m.leaf_type}|${m.version}`))
+  const registryBenchmarks = benchmarks.filter(b => registryKeys.has(`${b.leaf_type}|${b.version}`))
+  const orphanedBenchmarkCount = benchmarks.length - registryBenchmarks.length
+  const benchLeafTypes = [...new Set(registryBenchmarks.map(b => b.leaf_type))].sort()
   const activeBenchLeaf = benchLeaf || benchLeafTypes[0] || ''
   const activeBenchVersions = activeBenchLeaf
-    ? [...new Set(benchmarks.filter(b => b.leaf_type === activeBenchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    ? [...new Set(registryBenchmarks.filter(b => b.leaf_type === activeBenchLeaf).map(b => b.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     : []
   const resolvedBenchVersion = benchVersion || activeBenchVersions[0] || ''
 
@@ -562,6 +589,24 @@ export default function ModelsPage() {
   const valVersionsForLeaf = valTarget
     ? [...new Set(models.filter(m => m.leaf_type === valTarget).map(m => m.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     : []
+
+  const purgeOrphanedBenchmarks = async () => {
+    const orphaned = benchmarks.filter(b => !registryKeys.has(`${b.leaf_type}|${b.version}`))
+    if (!orphaned.length) return
+    setConfirmAction({
+      title: 'Purge Orphaned Benchmarks',
+      message: `Delete ${orphaned.length} benchmark records for model versions that no longer exist in registry? This cannot be undone.`,
+      danger: true,
+      confirmLabel: `Delete ${orphaned.length} records`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        for (const b of orphaned) {
+          await supabase.from('model_benchmarks').delete().eq('id', b.id)
+        }
+        loadModels()
+      }
+    })
+  }
 
   const pipelineRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(pipelineStatus)
 
@@ -789,6 +834,11 @@ export default function ModelsPage() {
               </div>
               {activeBenchVersions.length > 1 && (
                 <span style={{ fontSize: 11, color: '#94a3b8' }}>{activeBenchVersions.length} versions available — compare by switching versions</span>
+              )}
+              {orphanedBenchmarkCount > 0 && (
+                <button className="btn btn-sm btn-danger" style={{ marginLeft: 'auto' }} onClick={purgeOrphanedBenchmarks}>
+                  Purge {orphanedBenchmarkCount} orphaned
+                </button>
               )}
             </div>
           </div>
