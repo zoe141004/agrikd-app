@@ -23,13 +23,21 @@ export default function ReleasesPage() {
   useEffect(() => { if (configured) loadData(); else setLoading(false) }, [])
 
   const ghFetch = async (path) => {
-    const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}${path}`, {
-      headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' },
-    })
+    const url = `https://api.github.com/repos/${ghOwner}/${ghRepo}${path}`
+    let res
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' },
+      })
+    } catch (err) {
+      throw new Error(`Network error fetching ${path} — check your internet connection and that "${ghOwner}/${ghRepo}" is correct. (${err.message})`)
+    }
     if (!res.ok) {
-      if (res.status === 404) throw new Error('Repository not found (404). Verify owner/repo name in Settings → Integrations. If private, ensure your token has the "repo" scope.')
-      if (res.status === 401 || res.status === 403) throw new Error(`Authentication failed (${res.status}). Check your Personal Access Token in Settings → Integrations.`)
-      throw new Error(`GitHub API error: ${res.status}`)
+      const body = await res.json().catch(() => ({}))
+      if (res.status === 404) throw new Error(`Repository "${ghOwner}/${ghRepo}" not found (404). Verify owner/repo in Settings. If private, ensure your token has "repo" scope. ${body.message || ''}`)
+      if (res.status === 401) throw new Error(`Authentication failed (401). Your token may be expired or invalid. ${body.message || ''}`)
+      if (res.status === 403) throw new Error(`Forbidden (403) for ${path}. ${body.message || 'Check token permissions.'}`)
+      throw new Error(`GitHub API error ${res.status}: ${body.message || 'Unknown error'}`)
     }
     return res.json()
   }
@@ -52,7 +60,10 @@ export default function ReleasesPage() {
       if (rResult.status === 'fulfilled') setReleases(rResult.value || [])
       else errors.releases = rResult.reason?.message || 'Failed to load releases'
       setSectionErrors(errors)
-      if (Object.keys(errors).length === 3) setError('All GitHub API calls failed. Check your token and permissions in Settings.')
+      if (Object.keys(errors).length === 3) {
+        const firstErr = errors.commits || errors.pulls || errors.releases
+        setError(`All GitHub API calls failed. ${firstErr}`)
+      }
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
