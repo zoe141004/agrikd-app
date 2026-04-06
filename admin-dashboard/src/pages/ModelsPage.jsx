@@ -5,6 +5,28 @@ import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
 
+// Fallback dataset metadata for auto-fill when no model_registry entry exists
+const KNOWN_DATASETS = {
+  tomato: {
+    display_name: 'Tomato Disease',
+    num_classes: 10,
+    class_labels: [
+      'Tomato___Bacterial_spot', 'Tomato___Early_blight', 'Tomato___Late_blight',
+      'Tomato___Leaf_Mold', 'Tomato___Septoria_leaf_spot',
+      'Tomato___Spider_mites Two-spotted_spider_mite', 'Tomato___Target_Spot',
+      'Tomato___Tomato_Yellow_Leaf_Curl_Virus', 'Tomato___Tomato_mosaic_virus', 'Tomato___healthy',
+    ],
+  },
+  burmese_grape_leaf: {
+    display_name: 'Burmese Grape Leaf',
+    num_classes: 5,
+    class_labels: [
+      'Anthracnose_Brown_Spot', 'Healthy', 'Insect_Damage',
+      'Leaf_Spot_Yellow', 'Powdery_Mildew',
+    ],
+  },
+}
+
 export default function ModelsPage() {
   const [tab, setTab] = useState('Registry')
   const [models, setModels] = useState([])
@@ -89,10 +111,29 @@ export default function ModelsPage() {
   const loadPipelineRuns = async () => {
     try {
       const { data } = await supabase.from('pipeline_runs').select('*').order('started_at', { ascending: false }).limit(10)
-      setPipelineRuns(data || [])
+      const runs = data || []
+
+      // Auto-cleanup stale runs: if a non-terminal run is >30 min old, mark it failed
+      const STALE_MS = 30 * 60 * 1000
+      for (const run of runs) {
+        if (['pending', 'converting', 'evaluating', 'uploading'].includes(run.status)) {
+          const age = Date.now() - new Date(run.started_at).getTime()
+          if (age > STALE_MS) {
+            await supabase.from('pipeline_runs').update({
+              status: 'failed',
+              error_message: 'Stale: no update for >30 minutes',
+              completed_at: new Date().toISOString(),
+            }).eq('id', run.id)
+            run.status = 'failed'
+            run.error_message = 'Stale: no update for >30 minutes'
+          }
+        }
+      }
+
+      setPipelineRuns(runs)
       // Derive banner status from latest run
-      if (data?.length) {
-        const latest = data[0]
+      if (runs.length) {
+        const latest = runs[0]
         if (['pending', 'converting', 'evaluating', 'uploading'].includes(latest.status)) {
           setPipelineStatus(latest.status)
           setPipelineDismissed(false)
@@ -105,6 +146,21 @@ export default function ModelsPage() {
     } catch (err) {
       console.warn('pipeline_runs load failed:', err.message)
     }
+  }
+
+  const cancelPipeline = async () => {
+    const latestRunning = pipelineRuns.find(r => ['pending', 'converting', 'evaluating', 'uploading'].includes(r.status))
+    if (!latestRunning) return
+    await supabase.from('pipeline_runs').update({
+      status: 'failed',
+      error_message: 'Manually cancelled by admin',
+      completed_at: new Date().toISOString(),
+    }).eq('id', latestRunning.id)
+    setPipelineStatus('failed')
+    setPipelineRuns(prev => prev.map(r => r.id === latestRunning.id ? { ...r, status: 'failed', error_message: 'Manually cancelled by admin' } : r))
+    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
+    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+    logAudit(supabase, 'pipeline_cancelled', 'pipeline_run', latestRunning.id, { leaf_type: latestRunning.leaf_type, version: latestRunning.version })
   }
 
   // GitHub API polling fallback for pipeline tracking
@@ -248,6 +304,15 @@ export default function ModelsPage() {
       confirmLabel: 'Activate',
       onConfirm: async () => {
         setConfirmAction(null)
+        // Archive current active models for this leaf_type before activation
+        const activeModels = models.filter(am => am.leaf_type === m.leaf_type && am.status === 'active' && am.id !== m.id)
+        for (const am of activeModels) {
+          await supabase.from('model_versions').upsert({
+            leaf_type: am.leaf_type, version: am.version, display_name: am.display_name,
+            model_url: am.model_url, sha256_checksum: am.sha256_checksum,
+            accuracy: am.accuracy_top1, size_mb: null,
+          }, { onConflict: 'leaf_type,version' })
+        }
         const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else alert(error.message)
@@ -263,6 +328,12 @@ export default function ModelsPage() {
       confirmLabel: 'Deactivate',
       onConfirm: async () => {
         setConfirmAction(null)
+        // Archive the model being deactivated into model_versions
+        await supabase.from('model_versions').upsert({
+          leaf_type: m.leaf_type, version: m.version, display_name: m.display_name,
+          model_url: m.model_url, sha256_checksum: m.sha256_checksum,
+          accuracy: m.accuracy_top1, size_mb: null,
+        }, { onConflict: 'leaf_type,version' })
         const { error } = await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); logAudit(supabase, 'model_deactivated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else alert(error.message)
@@ -549,9 +620,14 @@ export default function ModelsPage() {
                 </strong>
                 {isRunning && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Convert PTH → ONNX → TFLite → Validate → Evaluate → Upload results</div>}
                 {isSuccess && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Benchmark results are now available in the Benchmarks tab.</div>}
+                {isFailed && pipelineRuns[0]?.error_message && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>{pipelineRuns[0].error_message}</div>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {pipelineRuns[0]?.github_run_url && (
+                <a href={pipelineRuns[0].github_run_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm" style={{ fontSize: 11 }}>View on GitHub</a>
+              )}
+              {isRunning && <button className="btn btn-sm btn-danger" onClick={cancelPipeline} style={{ fontSize: 11 }}>Cancel Pipeline</button>}
               {!isRunning && <button onClick={() => setPipelineDismissed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color, fontSize: 16, padding: '0 4px', lineHeight: 1 }}>&times;</button>}
             </div>
           </div>
@@ -775,7 +851,7 @@ export default function ModelsPage() {
                       <thead>
                         <tr>
                           <th>Format</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th>
-                          <th>Latency</th><th>P99</th><th>FPS</th><th>Size</th><th>Memory</th><th>KL Div</th>
+                          <th>Latency</th><th>FPS</th><th>Size</th><th>Memory</th><th>KL Div</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -787,7 +863,6 @@ export default function ModelsPage() {
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
                             <td>{b.f1_macro != null ? b.f1_macro.toFixed(4) : '—'}</td>
                             <td>{b.latency_mean_ms != null ? `${b.latency_mean_ms.toFixed(1)} ms` : '—'}</td>
-                            <td>{b.latency_p99_ms != null ? `${b.latency_p99_ms.toFixed(1)} ms` : '—'}</td>
                             <td>{b.fps != null ? b.fps.toFixed(0) : '—'}</td>
                             <td>{b.size_mb != null ? `${b.size_mb.toFixed(2)} MB` : '—'}</td>
                             <td>{b.memory_mb != null ? `${b.memory_mb.toFixed(1)} MB` : '—'}</td>
@@ -868,16 +943,25 @@ export default function ModelsPage() {
                   : (
                     <select className="form-input" value={uploadForm.leaf_type} onChange={e => {
                       const lt = e.target.value
-                      const existing = models.find(m => m.leaf_type === lt)
+                      // Find latest model for this leaf type (sorted by updated_at descending in loadModels)
+                      const existingModels = models.filter(m => m.leaf_type === lt)
+                      const existing = existingModels[0]
                       if (existing) {
                         const labels = Array.isArray(existing.class_labels) ? existing.class_labels.join('\n') : ''
-                        const curVer = existing.version || '1.0.0'
+                        // Compute next version from the highest existing version
+                        const allVersions = existingModels.map(m => m.version).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+                        const curVer = allVersions[0] || '1.0.0'
                         const parts = curVer.split('.')
                         parts[1] = String(parseInt(parts[1] || '0') + 1)
                         const nextVer = parts.join('.')
                         setUploadForm(f => ({ ...f, leaf_type: lt, display_name: existing.display_name || '', num_classes: String(existing.num_classes || ''), class_labels_raw: labels, version: nextVer }))
                       } else {
-                        setUploadForm(f => ({ ...f, leaf_type: lt }))
+                        const known = KNOWN_DATASETS[lt]
+                        if (known) {
+                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: known.display_name, num_classes: String(known.num_classes), class_labels_raw: known.class_labels.join('\n'), version: '1.0.0' }))
+                        } else {
+                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: '', num_classes: '', class_labels_raw: '', version: '1.0.0' }))
+                        }
                       }
                     }}>
                       <option value="">Select existing leaf type…</option>

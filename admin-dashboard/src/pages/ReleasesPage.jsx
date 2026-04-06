@@ -11,6 +11,7 @@ export default function ReleasesPage() {
   const [releases, setReleases] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [sectionErrors, setSectionErrors] = useState({})
   const [confirmAction, setConfirmAction] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
   const [versionTag, setVersionTag] = useState('')
@@ -25,22 +26,33 @@ export default function ReleasesPage() {
     const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}${path}`, {
       headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' },
     })
-    if (!res.ok) throw new Error(`GitHub API error: ${res.status}`)
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Repository not found (404). Verify owner/repo name in Settings → Integrations. If private, ensure your token has the "repo" scope.')
+      if (res.status === 401 || res.status === 403) throw new Error(`Authentication failed (${res.status}). Check your Personal Access Token in Settings → Integrations.`)
+      throw new Error(`GitHub API error: ${res.status}`)
+    }
     return res.json()
   }
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
+    setSectionErrors({})
     try {
-      const [c, p, r] = await Promise.all([
+      const [cResult, pResult, rResult] = await Promise.allSettled([
         ghFetch('/commits?per_page=15'),
         ghFetch('/pulls?state=open&per_page=10'),
         ghFetch('/releases?per_page=10'),
       ])
-      setCommits(c || [])
-      setPrs(p || [])
-      setReleases(r || [])
+      const errors = {}
+      if (cResult.status === 'fulfilled') setCommits(cResult.value || [])
+      else errors.commits = cResult.reason?.message || 'Failed to load commits'
+      if (pResult.status === 'fulfilled') setPrs(pResult.value || [])
+      else errors.pulls = pResult.reason?.message || 'Failed to load pull requests. Your token may need the "pull_requests" permission.'
+      if (rResult.status === 'fulfilled') setReleases(rResult.value || [])
+      else errors.releases = rResult.reason?.message || 'Failed to load releases'
+      setSectionErrors(errors)
+      if (Object.keys(errors).length === 3) setError('All GitHub API calls failed. Check your token and permissions in Settings.')
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
@@ -146,6 +158,7 @@ export default function ReleasesPage() {
       {/* ── Commits Tab ── */}
       {tab === 'Commits' && (
         <div className="card">
+          {sectionErrors.commits && <div className="alert alert-warn" style={{ marginBottom: 12 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div>{sectionErrors.commits}</div></div>}
           <div className="card-header"><div><div className="card-label">History</div><div className="card-title">Recent Commits</div></div></div>
           <div className="table-wrapper">
             <table>
@@ -169,6 +182,7 @@ export default function ReleasesPage() {
       {/* ── Pull Requests Tab ── */}
       {tab === 'Pull Requests' && (
         <div className="card">
+          {sectionErrors.pulls && <div className="alert alert-warn" style={{ marginBottom: 12 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div>{sectionErrors.pulls}</div></div>}
           <div className="card-header"><div><div className="card-label">Open</div><div className="card-title">Pull Requests ({prs.length})</div></div></div>
           {prs.length > 0 ? (
             <div className="table-wrapper">
@@ -199,6 +213,7 @@ export default function ReleasesPage() {
       {/* ── Releases Tab ── */}
       {tab === 'Releases' && (
         <>
+          {sectionErrors.releases && <div className="alert alert-warn" style={{ marginBottom: 12 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div>{sectionErrors.releases}</div></div>}
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header"><div><div className="card-label">Create</div><div className="card-title">New Release</div></div></div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>

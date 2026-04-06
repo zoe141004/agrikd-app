@@ -107,7 +107,17 @@ def main():
             continue
 
         try:
-            urllib.request.urlretrieve(image_url, filepath)
+            # Authenticated download: private buckets need apikey + Bearer token
+            # Convert public URLs to authenticated path for private buckets
+            dl_url = image_url.replace('/object/public/', '/object/authenticated/')
+            dl_headers = {
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+            }
+            dl_req = urllib.request.Request(dl_url, headers=dl_headers)
+            with urllib.request.urlopen(dl_req) as resp:
+                with open(filepath, 'wb') as out_f:
+                    out_f.write(resp.read())
             downloaded += 1
         except Exception as e:
             print(f"    [SKIP] Failed to download {p['id']}: {e}")

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { downloadFile, formatBytes, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
-const DTABS = ['Overview', 'Upload Dataset', 'Import CSV', 'DVC Sync', 'Export', 'Storage Files']
+const DTABS = ['Overview', 'Training Data', 'Prediction Data', 'Storage Files']
 
 export default function DataManagementPage() {
   const [dtab, setDtab] = useState('Overview')
@@ -38,6 +38,7 @@ export default function DataManagementPage() {
   const [csvProgress, setCsvProgress] = useState(0)
   const [csvMsg, setCsvMsg] = useState(null)
   const csvRef = useRef()
+  const [showImportCsv, setShowImportCsv] = useState(false)
 
   // Storage Files state
   const [storedFiles, setStoredFiles] = useState([])
@@ -85,8 +86,8 @@ export default function DataManagementPage() {
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations to add your token.')
       const inputs = leafType ? { leaf_type: leafType } : {}
       const suffix = leafType ? ` (${leafType})` : ' (all)'
-      setDvcLog(l => [...l, `[${ts()}] Triggering DVC ${op}${suffix} via GitHub Actions…`])
       const workflow = op === 'push' ? 'dvc-push.yml' : 'dvc-pull.yml'
+      setDvcLog(l => [...l, `[${ts()}] Triggering DVC ${op}${suffix} via GitHub Actions…`])
       await triggerGitHubWorkflow(workflow, inputs)
       setDvcLog(l => [...l, `[${ts()}] Workflow dispatched. Checking status…`])
       await new Promise(r => setTimeout(r, 3000))
@@ -95,7 +96,11 @@ export default function DataManagementPage() {
       const latest = runs?.workflow_runs?.[0]
       if (latest) setDvcLog(l => [...l, `[${ts()}] Latest run: #${latest.run_number} — ${latest.status}. View: ${latest.html_url}`])
     } catch (err) {
-      setDvcLog(l => [...l, `[${ts()}] Error: ${err.message}`])
+      let msg = err.message
+      if (err instanceof TypeError && msg.includes('fetch')) {
+        msg = `Network error — ensure the workflow file exists in your GitHub repo's .github/workflows/ directory and your browser can reach api.github.com. Also check that your PAT has "actions" and "workflow" permissions.`
+      }
+      setDvcLog(l => [...l, `[${ts()}] Error: ${msg}`])
     } finally {
       setDvcRunning(false)
     }
@@ -227,7 +232,7 @@ export default function DataManagementPage() {
         imported += batch.length
         setCsvProgress(Math.round(imported / all.length * 100))
       }
-      setCsvMsg({ type: 'success', text: `✓ Imported ${imported.toLocaleString()} records successfully.` })
+      setCsvMsg({ type: 'success', text: `Imported ${imported.toLocaleString()} records successfully.` })
       setCsvParsed(null); setCsvFile(null); if (csvRef.current) csvRef.current.value = ''
       loadData()
     } catch (err) {
@@ -260,7 +265,7 @@ export default function DataManagementPage() {
     <>
       <div className="page-header">
         <h1 className="page-title">Data & DVC</h1>
-        <p className="page-subtitle">Dataset management, quality metrics, cloud sync (DVC), and import/export</p>
+        <p className="page-subtitle">Training datasets (DVC), user prediction data, and storage management</p>
       </div>
 
       {/* Tab nav */}
@@ -275,9 +280,11 @@ export default function DataManagementPage() {
       {/* ── Overview Tab ── */}
       {dtab === 'Overview' && (
         <>
+          {/* Prediction Data Summary */}
           <div className="stats-grid" style={{ marginBottom: 16 }}>
             {[
-              { label: 'Total Records', value: stats.total.toLocaleString(), accent: '#16a34a' },
+              { label: 'Total Predictions', value: stats.total.toLocaleString(), accent: '#16a34a' },
+              { label: 'DVC Datasets', value: dvcDatasets.length > 0 ? String(dvcDatasets.length) : '—', accent: '#0284c7' },
             ].map(s => (
               <div key={s.label} className="stat-card" style={{ padding: '14px 16px' }}>
                 <div className="stat-card-accent" style={{ background: s.accent }} />
@@ -287,194 +294,200 @@ export default function DataManagementPage() {
             ))}
           </div>
 
-          <div className="card">
-            <div className="card-header"><div><div className="card-label">Quality Metrics</div><div className="card-title">Data Quality by Leaf Type</div></div></div>
-            <table>
-              <thead><tr><th>Leaf Type</th><th>Total Records</th></tr></thead>
-              <tbody>
-                {quality.map(q => (
-                  <tr key={q.name}>
-                    <td><strong style={{ color: '#121c28' }}>{q.name}</strong></td>
-                    <td>{q.total.toLocaleString()}</td>
-                  </tr>
-                ))}
-                {quality.length === 0 && <tr><td colSpan={2} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No data yet</td></tr>}
-              </tbody>
-            </table>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            {/* User Predictions by Leaf Type */}
+            <div className="card">
+              <div className="card-header"><div><div className="card-label">User Predictions</div><div className="card-title">Records by Leaf Type</div></div></div>
+              <table>
+                <thead><tr><th>Leaf Type</th><th>Total Records</th></tr></thead>
+                <tbody>
+                  {quality.map(q => (
+                    <tr key={q.name}>
+                      <td><strong style={{ color: '#121c28' }}>{q.name}</strong></td>
+                      <td>{q.total.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {quality.length === 0 && <tr><td colSpan={2} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No prediction data yet</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            {/* DVC Training Datasets */}
+            <div className="card">
+              <div className="card-header">
+                <div><div className="card-label">Training Data (DVC)</div><div className="card-title">Tracked Datasets</div></div>
+                <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
+                  {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
+                </button>
+              </div>
+              {dvcDatasets.length > 0 ? (
+                <table>
+                  <thead><tr><th>Dataset</th><th>Files</th><th>Size</th></tr></thead>
+                  <tbody>
+                    {dvcDatasets.map(ds => (
+                      <tr key={ds.name}>
+                        <td><span className="badge badge-primary">{ds.name}</span></td>
+                        <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
+                        <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="empty-state"><p>Click "Refresh" to load DVC tracking info from your GitHub repo.</p></div>
+              )}
+            </div>
           </div>
         </>
       )}
 
-      {/* ── Upload Dataset Tab ── */}
-      {dtab === 'Upload Dataset' && (
-        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          {/* Method A: From Predictions */}
-          <div className="card" style={{ flex: 1, minWidth: 340 }}>
-            <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
-            <div className="alert alert-info" style={{ marginBottom: 16 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Export user predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, then pushed to DVC.</div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Leaf Type *</label>
-              <select className="form-input" value={dsLeafType} onChange={e => { setDsLeafType(e.target.value); setDsPredPreview(null) }}>
-                <option value="">Select leaf type…</option>
-                {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <button className="btn btn-sm" onClick={previewPredictions} disabled={!dsLeafType}>Preview Count</button>
-            </div>
-            {dsPredPreview && (
-              <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: 13 }}>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images:</div>
-                {Object.entries(dsPredPreview.classes).map(([cls, n]) => (
-                  <div key={cls} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                    <span>{cls}</span><span style={{ color: '#64748b' }}>{n}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total}
-              onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType })}>
-              {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Export as Dataset'}
-            </button>
-          </div>
-
-          {/* Method B: Google Drive ZIP */}
-          <div className="card" style={{ flex: 1, minWidth: 340 }}>
-            <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">Upload ZIP via Google Drive</div></div></div>
-            <div className="alert alert-info" style={{ marginBottom: 16 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Upload a ZIP file to Google Drive, paste the share link below. The pipeline will download, extract, validate structure, generate config, and push to DVC.<br/><br/>
-              <strong>ZIP structure:</strong> <code>dataset_name/class_name/images.*</code></div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Google Drive Share URL *</label>
-              <input className="form-input" placeholder="https://drive.google.com/file/d/..." value={dsGdriveUrl} onChange={e => setDsGdriveUrl(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Leaf Type ID *</label>
-              <input className="form-input" placeholder="e.g. mango, cassava_leaf" value={dsGdriveLeaf} onChange={e => setDsGdriveLeaf(e.target.value)} />
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Lowercase, underscores. Used for config and DVC tracking.</div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Display Name</label>
-              <input className="form-input" placeholder="e.g. Mango Leaf Disease" value={dsGdriveName} onChange={e => setDsGdriveName(e.target.value)} />
-            </div>
-            <button className="btn btn-primary" disabled={dsUploading || !dsGdriveUrl || !dsGdriveLeaf}
-              onClick={() => triggerDatasetUpload('gdrive', { leaf_type: dsGdriveLeaf, gdrive_url: dsGdriveUrl, display_name: dsGdriveName || dsGdriveLeaf })}>
-              {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Start Upload Pipeline'}
-            </button>
-          </div>
-
-          {/* Shared status message */}
-          {dsMsg && (
-            <div style={{ width: '100%' }}>
-              <div className={`alert ${dsMsg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <div>{dsMsg.text}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Import CSV Tab ── */}
-      {dtab === 'Import CSV' && (
-        <div style={{ maxWidth: 700 }}>
-          <div className="card">
-            <div className="card-header"><div><div className="card-label">Database</div><div className="card-title">Import Predictions from CSV</div></div></div>
+      {/* ── Training Data Tab ── */}
+      {dtab === 'Training Data' && (
+        <div>
+          {!getGitHubConfig().ghToken && (
             <div className="alert alert-warn" style={{ marginBottom: 16 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-              <div>CSV must have headers matching <code>predictions</code> table columns. Required: <code>leaf_type</code>, <code>predicted_class_name</code>, <code>confidence</code>. Optional: <code>user_id, notes, model_version, created_at</code>.</div>
+              <div>GitHub not configured. Go to <strong>Settings &rarr; Integrations</strong> to add your token before using DVC sync.</div>
             </div>
-            <div className="form-group">
-              <label className="form-label">CSV File</label>
-              <input ref={csvRef} type="file" accept=".csv,text/csv" className="form-input" style={{ padding: '7px 10px' }} onChange={e => { setCsvFile(e.target.files[0]); setCsvParsed(null); setCsvMsg(null); if (e.target.files[0]) parseCSV(e.target.files[0]) }} />
-            </div>
+          )}
 
-            {csvParsed && (
-              <div style={{ marginBottom: 16 }}>
-                <div className="alert alert-success" style={{ marginBottom: 10 }}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <div>Parsed <strong>{csvParsed.total.toLocaleString()}</strong> rows. Columns: {csvParsed.headers.join(', ')}</div>
-                </div>
-                <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8 }}>
-                  <table>
-                    <thead><tr>{csvParsed.headers.map(h => <th key={h}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {csvParsed.rows.map((r, i) => <tr key={i}>{csvParsed.headers.map(h => <td key={h} style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{r[h] ?? ''}</td>)}</tr>)}
-                    </tbody>
-                  </table>
-                  {csvParsed.total > 10 && <div style={{ padding: '6px 12px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid rgba(0,0,0,0.06)' }}>Showing first 10 of {csvParsed.total.toLocaleString()} rows</div>}
+          {/* DVC Pull & Push */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+            {/* DVC Pull Card */}
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    DVC Pull
+                  </div>
+                  <div className="card-title">Download Data from Remote</div>
                 </div>
               </div>
-            )}
-
-            {csvImporting && (
-              <div style={{ marginBottom: 12 }}>
-                <div className="progress-track"><div className="progress-fill" style={{ width: `${csvProgress}%` }} /></div>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Importing… {csvProgress}%</div>
-              </div>
-            )}
-            {csvMsg && (
-              <div className={`alert ${csvMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 12 }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                {csvMsg.text}
-              </div>
-            )}
-            {csvParsed && !csvImporting && (
-              <button className="btn btn-primary" onClick={importCSV}>
-                Import {csvParsed.total.toLocaleString()} Records into Database
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── DVC Sync Tab ── */}
-      {dtab === 'DVC Sync' && (
-        <div>
-          <div className="dvc-panel">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h3>DVC — Data Version Control via GitHub Actions</h3>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
+                Pull tracked datasets from your DVC remote (Google Drive). Select a specific leaf type or pull all datasets at once.
+              </p>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button className="btn btn-sm btn-primary" onClick={() => runDvc('push')} disabled={dvcRunning}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                  Push All
-                </button>
                 <select
                   value={dvcPullLeaf}
                   onChange={e => setDvcPullLeaf(e.target.value)}
-                  style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12 }}
+                  className="form-input"
+                  style={{ flex: 1 }}
                 >
                   <option value="">All datasets</option>
                   {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
                 </select>
-                <button className="btn btn-sm" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.15)' }} onClick={() => runDvc('pull', dvcPullLeaf)} disabled={dvcRunning}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                  Pull
-                </button>
-                <button className="btn btn-sm" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.15)' }} onClick={refreshDvcRuns}>
-                  Refresh
+                <button className="btn btn-primary" onClick={() => runDvc('pull', dvcPullLeaf)} disabled={dvcRunning || !getGitHubConfig().ghToken}>
+                  {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Pulling…</> : 'Pull'}
                 </button>
               </div>
             </div>
-            {!getGitHubConfig().ghToken && (
-              <div style={{ background: 'rgba(202,138,4,0.15)', border: '1px solid rgba(202,138,4,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#fde68a', marginBottom: 10 }}>
-                GitHub not configured. Go to <strong>Settings - Integrations</strong> to add your token.
+
+            {/* DVC Push Card */}
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    DVC Push
+                  </div>
+                  <div className="card-title">Upload Data to Remote</div>
+                </div>
               </div>
-            )}
-            {dvcLog.length > 0 && (
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
+                Push all tracked datasets to DVC remote storage. This uploads any new or changed files from local data directories to Google Drive.
+              </p>
+              <button className="btn btn-primary" onClick={() => runDvc('push')} disabled={dvcRunning || !getGitHubConfig().ghToken}>
+                {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Pushing…</> : 'Push All'}
+              </button>
+            </div>
+          </div>
+
+          {/* Log output */}
+          {dvcLog.length > 0 && (
+            <div className="dvc-panel" style={{ marginBottom: 20 }}>
+              <h3 style={{ marginBottom: 10 }}>Operation Log</h3>
               <div className="dvc-log">
                 {dvcLog.map((line, i) => <div key={i}>{line}</div>)}
+              </div>
+            </div>
+          )}
+
+          {/* Upload Dataset — Method A & B */}
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+            {/* Method A: From Predictions */}
+            <div className="card" style={{ flex: 1, minWidth: 340 }}>
+              <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
+              <div className="alert alert-info" style={{ marginBottom: 16 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <div>Export user predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, then pushed to DVC.</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Leaf Type *</label>
+                <select className="form-input" value={dsLeafType} onChange={e => { setDsLeafType(e.target.value); setDsPredPreview(null) }}>
+                  <option value="">Select leaf type…</option>
+                  {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button className="btn btn-sm" onClick={previewPredictions} disabled={!dsLeafType}>Preview Count</button>
+              </div>
+              {dsPredPreview && (
+                <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images:</div>
+                  {Object.entries(dsPredPreview.classes).map(([cls, n]) => (
+                    <div key={cls} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                      <span>{cls}</span><span style={{ color: '#64748b' }}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total}
+                onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType })}>
+                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Export as Dataset'}
+              </button>
+            </div>
+
+            {/* Method B: Google Drive ZIP */}
+            <div className="card" style={{ flex: 1, minWidth: 340 }}>
+              <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">Upload ZIP via Google Drive</div></div></div>
+              <div className="alert alert-info" style={{ marginBottom: 16 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <div>Upload a ZIP file to Google Drive, paste the share link below. The pipeline will download, extract, validate structure, generate config, and push to DVC.<br/><br/>
+                <strong>ZIP structure:</strong> <code>dataset_name/class_name/images.*</code></div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Google Drive Share URL *</label>
+                <input className="form-input" placeholder="https://drive.google.com/file/d/..." value={dsGdriveUrl} onChange={e => setDsGdriveUrl(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Leaf Type ID *</label>
+                <input className="form-input" placeholder="e.g. mango, cassava_leaf" value={dsGdriveLeaf} onChange={e => setDsGdriveLeaf(e.target.value)} />
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Lowercase, underscores. Used for config and DVC tracking.</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Display Name</label>
+                <input className="form-input" placeholder="e.g. Mango Leaf Disease" value={dsGdriveName} onChange={e => setDsGdriveName(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" disabled={dsUploading || !dsGdriveUrl || !dsGdriveLeaf}
+                onClick={() => triggerDatasetUpload('gdrive', { leaf_type: dsGdriveLeaf, gdrive_url: dsGdriveUrl, display_name: dsGdriveName || dsGdriveLeaf })}>
+                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Start Upload Pipeline'}
+              </button>
+            </div>
+
+            {/* Shared status message */}
+            {dsMsg && (
+              <div style={{ width: '100%' }}>
+                <div className={`alert ${dsMsg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <div>{dsMsg.text}</div>
+                </div>
               </div>
             )}
           </div>
 
           {/* DVC Tracked Datasets */}
-          <div className="card">
+          <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div><div className="card-label">DVC Remote</div><div className="card-title">Tracked Datasets</div></div>
               <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
@@ -501,9 +514,13 @@ export default function DataManagementPage() {
             )}
           </div>
 
+          {/* Workflow Runs */}
           {dvcRuns && (
             <div className="card">
-              <div className="card-header"><div><div className="card-label">Recent</div><div className="card-title">DVC Workflow Runs</div></div></div>
+              <div className="card-header">
+                <div><div className="card-label">Recent</div><div className="card-title">DVC Workflow Runs</div></div>
+                <button className="btn btn-sm" onClick={refreshDvcRuns}>Refresh</button>
+              </div>
               {dvcRuns.workflow_runs?.map(run => (
                 <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
                   <div>
@@ -521,20 +538,101 @@ export default function DataManagementPage() {
         </div>
       )}
 
-      {/* ── Export Tab ── */}
-      {dtab === 'Export' && (
-        <div className="card" style={{ maxWidth: 500 }}>
-          <div className="card-header"><div><div className="card-label">Export</div><div className="card-title">Download Dataset</div></div></div>
-          <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Export up to 50,000 most recent prediction records from the database.</p>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => exportAll('csv')}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-              Export CSV
-            </button>
-            <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={() => exportAll('json')}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-              Export JSON
-            </button>
+      {/* ── Prediction Data Tab ── */}
+      {dtab === 'Prediction Data' && (
+        <div>
+          {/* Per-leaf stats */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-header"><div><div className="card-label">User Predictions</div><div className="card-title">Prediction Records by Leaf Type</div></div></div>
+            <table>
+              <thead><tr><th>Leaf Type</th><th>Total Records</th></tr></thead>
+              <tbody>
+                {quality.map(q => (
+                  <tr key={q.name}>
+                    <td><strong style={{ color: '#121c28' }}>{q.name}</strong></td>
+                    <td>{q.total.toLocaleString()}</td>
+                  </tr>
+                ))}
+                {quality.length === 0 && <tr><td colSpan={2} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No prediction data yet</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Export */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-header"><div><div className="card-label">Export</div><div className="card-title">Download Prediction Data</div></div></div>
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Export up to 50,000 most recent prediction records from the database.</p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={() => exportAll('csv')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                Export CSV
+              </button>
+              <button className="btn" style={{ justifyContent: 'center' }} onClick={() => exportAll('json')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                Export JSON
+              </button>
+            </div>
+          </div>
+
+          {/* Import CSV — Collapsible */}
+          <div className="card">
+            <div className="card-header" onClick={() => setShowImportCsv(v => !v)} style={{ cursor: 'pointer' }}>
+              <div>
+                <div className="card-label">Advanced</div>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Import Predictions from CSV
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: showImportCsv ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}><path d="M6 9l6 6 6-6"/></svg>
+                </div>
+              </div>
+            </div>
+            {showImportCsv && (
+              <div style={{ padding: '0 16px 16px' }}>
+                <div className="alert alert-info" style={{ marginBottom: 16 }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                  <div>Bulk import prediction records into the database. Useful for historical data migration. Does <strong>not</strong> upload image files. Required columns: <code>leaf_type</code>, <code>predicted_class_name</code>. Optional: <code>confidence, user_id, notes, model_version, created_at</code>.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">CSV File</label>
+                  <input ref={csvRef} type="file" accept=".csv,text/csv" className="form-input" style={{ padding: '7px 10px' }} onChange={e => { setCsvFile(e.target.files[0]); setCsvParsed(null); setCsvMsg(null); if (e.target.files[0]) parseCSV(e.target.files[0]) }} />
+                </div>
+
+                {csvParsed && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="alert alert-success" style={{ marginBottom: 10 }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                      <div>Parsed <strong>{csvParsed.total.toLocaleString()}</strong> rows. Columns: {csvParsed.headers.join(', ')}</div>
+                    </div>
+                    <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8 }}>
+                      <table>
+                        <thead><tr>{csvParsed.headers.map(h => <th key={h}>{h}</th>)}</tr></thead>
+                        <tbody>
+                          {csvParsed.rows.map((r, i) => <tr key={i}>{csvParsed.headers.map(h => <td key={h} style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{r[h] ?? ''}</td>)}</tr>)}
+                        </tbody>
+                      </table>
+                      {csvParsed.total > 10 && <div style={{ padding: '6px 12px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid rgba(0,0,0,0.06)' }}>Showing first 10 of {csvParsed.total.toLocaleString()} rows</div>}
+                    </div>
+                  </div>
+                )}
+
+                {csvImporting && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="progress-track"><div className="progress-fill" style={{ width: `${csvProgress}%` }} /></div>
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Importing… {csvProgress}%</div>
+                  </div>
+                )}
+                {csvMsg && (
+                  <div className={`alert ${csvMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 12 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    {csvMsg.text}
+                  </div>
+                )}
+                {csvParsed && !csvImporting && (
+                  <button className="btn btn-primary" onClick={importCSV}>
+                    Import {csvParsed.total.toLocaleString()} Records into Database
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -542,33 +640,6 @@ export default function DataManagementPage() {
       {/* ── Storage Files Tab ── */}
       {dtab === 'Storage Files' && (
         <div>
-          {/* DVC Tracked Datasets */}
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header">
-              <div><div className="card-label">DVC Remote</div><div className="card-title">DVC Tracked Datasets (Google Drive)</div></div>
-              <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
-                {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
-              </button>
-            </div>
-            {dvcDatasets.length > 0 ? (
-              <table>
-                <thead><tr><th>Dataset</th><th>DVC File</th><th>Files</th><th>Total Size</th></tr></thead>
-                <tbody>
-                  {dvcDatasets.map(ds => (
-                    <tr key={ds.name}>
-                      <td><span className="badge badge-primary">{ds.name}</span></td>
-                      <td style={{ fontSize: 12 }}><code>{ds.file}</code></td>
-                      <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
-                      <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="empty-state"><p>Click "Refresh" to load DVC tracking info from your GitHub repo.</p></div>
-            )}
-          </div>
-
           {/* Supabase Storage Files */}
           <div className="card">
             <div className="card-header">
@@ -602,7 +673,7 @@ export default function DataManagementPage() {
                 </table>
               </div>
             ) : (
-              <div className="empty-state"><p>No files in Supabase Storage datasets bucket.</p></div>
+              <div className="empty-state"><p>No files in Supabase Storage datasets bucket. Click "Refresh" to load.</p></div>
             )}
           </div>
         </div>

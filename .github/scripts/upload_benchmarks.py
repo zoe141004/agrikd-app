@@ -129,7 +129,7 @@ def parse_benchmark_report(report_path):
             "latency_mean_ms": safe_float(row_dict.get("ms/img")),
             "fps": safe_float(row_dict.get("FPS")),
             "memory_mb": safe_float(row_dict.get("Runtime Mem (MB)")),
-            "accuracy": safe_float(row_dict.get("Top-1 %")),
+            "accuracy": safe_float(row_dict.get("Accuracy (%)") or row_dict.get("Top-1 %")),
             "kl_divergence": safe_float(row_dict.get("KL Div")),
         })
 
@@ -382,13 +382,30 @@ def main():
     # Auto-activate if fewer than 2 active versions exist for this leaf_type
     encoded_leaf = urllib.parse.quote(leaf_type, safe="")
     encoded_ver = urllib.parse.quote(version, safe="")
-    count_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&status=eq.active&select=id"
+    count_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&status=eq.active&select=id,leaf_type,version,display_name,model_url,sha256_checksum,accuracy_top1"
     ok, resp = supabase_request(count_url, {**api_headers, "Prefer": "return=representation"}, method="GET")
     if ok:
         try:
             active_models = json.loads(resp)
         except (json.JSONDecodeError, TypeError):
             active_models = []
+
+        # Archive current active models into model_versions before any activation
+        for am in active_models:
+            archive_payload = {
+                "leaf_type": am.get("leaf_type"),
+                "version": am.get("version"),
+                "display_name": am.get("display_name"),
+                "model_url": am.get("model_url"),
+                "sha256_checksum": am.get("sha256_checksum"),
+                "accuracy": am.get("accuracy_top1"),
+            }
+            archive_url = f"{supabase_url}/rest/v1/model_versions"
+            archive_headers = {**api_headers, "Prefer": "return=minimal,resolution=merge-duplicates"}
+            ok_ar, _ = supabase_request(archive_url, archive_headers, archive_payload, "POST")
+            if ok_ar:
+                print(f"  [OK] Archived active model {am.get('leaf_type')} v{am.get('version')} to model_versions")
+
         if len(active_models) < 2:
             act_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
             ok_act, _ = supabase_request(

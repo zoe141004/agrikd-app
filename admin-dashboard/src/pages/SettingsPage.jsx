@@ -206,7 +206,7 @@ export default function SettingsPage() {
             <div className="form-group">
               <label className="form-label">Personal Access Token (PAT)</label>
               <input className="form-input" type="password" value={ghForm.ghToken} onChange={e => setGhForm(f => ({ ...f, ghToken: e.target.value }))} placeholder="ghp_xxxxxxxxxxxx" />
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>Needs <code>repo</code> + <code>workflow</code> scopes. Never committed to code.</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>Classic PAT: <code>repo</code> + <code>workflow</code>. Fine-grained: <code>actions</code>, <code>contents</code>, <code>metadata</code>, <code>pull_requests</code>. Never committed to code.</div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" onClick={saveGitHub}>{ghSaved ? '✓ Saved' : 'Save Config'}</button>
@@ -277,9 +277,7 @@ export default function SettingsPage() {
             {[
               { workflow: 'dvc-push.yml', label: 'DVC Push', desc: 'Sync prediction data to DVC remote (S3/GDrive)', color: '#16a34a' },
               { workflow: 'dvc-pull.yml', label: 'DVC Pull', desc: 'Pull latest tracked data from DVC remote', color: '#0284c7' },
-              { workflow: 'validate-model.yml', label: 'Validate All Models', desc: 'Run full inference validation pipeline on all leaf types', color: '#7c3aed' },
               { workflow: 'deploy.yml', label: 'Redeploy App', desc: 'Trigger Vercel production deployment via GitHub push', color: '#ca8a04' },
-              { workflow: 'train.yml', label: 'Trigger Training', desc: 'Start model retraining pipeline (if configured)', color: '#dc2626' },
               { workflow: 'export-data.yml', label: 'Export to DVC', desc: 'Export prediction DB snapshot and push to DVC', color: '#065f46' },
             ].map(w => (
               <div key={w.workflow} style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 2px 8px rgba(18,28,40,0.06)', borderTop: `3px solid ${w.color}` }}>
@@ -291,6 +289,11 @@ export default function SettingsPage() {
                 </button>
               </div>
             ))}
+          </div>
+
+          <div className="alert alert-info" style={{ marginTop: 16 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <div><strong>Validate Model</strong> and <strong>Training</strong> workflows require leaf_type input and are triggered from the <strong>Models</strong> page instead.</div>
           </div>
 
           <div className="card" style={{ marginTop: 20 }}>
