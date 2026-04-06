@@ -4,7 +4,7 @@
 numpy>=1.21
 onnx==1.17.0
 onnxruntime>=1.16
-onnx2tf==1.28.8
+onnx2tf==2.4.0
 tf-keras
 ai-edge-litert
 psutil
