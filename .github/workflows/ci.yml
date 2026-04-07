@@ -28,7 +28,7 @@ jobs:
         working-directory: admin-dashboard
         run: npm audit --audit-level=high || echo "::warning::npm audit found vulnerabilities"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
