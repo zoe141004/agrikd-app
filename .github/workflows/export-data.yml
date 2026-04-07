@@ -1,6 +1,12 @@
 name: Export Data to DVC
 on:
   workflow_dispatch:
+    inputs:
+      dvc_operation_id:
+        description: 'DVC operation ID for status tracking (from dvc_operations table)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -20,6 +26,18 @@ jobs:
 
       - name: Install dependencies
         run: pip install dvc dvc-gdrive requests
+
+      - name: Report status — exporting
+        if: inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"exporting\",\"github_run_id\":${{ github.run_id }},\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+        env:
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
 
       - name: Export predictions from Supabase
         run: |
@@ -60,3 +78,29 @@ jobs:
           git add data/exports/*.dvc data/exports/.gitignore
           git diff --cached --quiet || git commit -m "chore: update exported predictions snapshot"
           git push
+
+      - name: Report status — completed
+        if: inputs.dvc_operation_id != ''
+        run: |
+          SIZE=$(stat -c%s data/exports/predictions_snapshot.json 2>/dev/null || echo "0")
+          ROWS=$(python3 -c "import json; print(len(json.load(open('data/exports/predictions_snapshot.json'))))" 2>/dev/null || echo "0")
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"file_count\":1,\"total_size\":$SIZE,\"rows_exported\":$ROWS}}"
+        env:
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
+      - name: Report status — failed
+        if: failure() && inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Export data failed — check GitHub Actions logs\"}"
+        env:
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}

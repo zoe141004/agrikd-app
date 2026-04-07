@@ -6,6 +6,11 @@ on:
         description: 'Specific leaf type to pull (leave empty for all)'
         required: false
         type: string
+      dvc_operation_id:
+        description: 'DVC operation ID for status tracking (from dvc_operations table)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   dvc-pull:
@@ -19,6 +24,20 @@ jobs:
 
       - name: Install DVC
         run: pip install dvc dvc-gdrive
+
+      - name: Report status — pulling
+        if: inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"pulling\",\"github_run_id\":${{ github.run_id }},\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
 
       - name: DVC Pull
         run: |
@@ -75,3 +94,44 @@ jobs:
               echo "| $name | $classes | $files | $size |" >> $GITHUB_STEP_SUMMARY
             fi
           done
+
+      - name: Report status — completed
+        if: inputs.dvc_operation_id != ''
+        run: |
+          # Collect metadata from pulled datasets
+          METADATA="{}"
+          TOTAL_FILES=0
+          TOTAL_SIZE=0
+          for dir in data/*/; do
+            if [ -d "$dir" ]; then
+              name=$(basename "$dir")
+              files=$(find "$dir" -type f | wc -l)
+              size=$(du -sb "$dir" | cut -f1)
+              TOTAL_FILES=$((TOTAL_FILES + files))
+              TOTAL_SIZE=$((TOTAL_SIZE + size))
+            fi
+          done
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"file_count\":$TOTAL_FILES,\"total_size\":$TOTAL_SIZE}}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
+      - name: Report status — failed
+        if: failure() && inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"DVC pull failed — check GitHub Actions logs\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}

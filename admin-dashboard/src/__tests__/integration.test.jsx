@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 // Each from() call returns a thenable chain that resolves to the configured value.
 function createChainable(resolveValue) {
   const chain = {}
-  const methods = ['select', 'eq', 'gte', 'lte', 'order', 'range', 'limit', 'single', 'head']
+  const methods = ['select', 'eq', 'gte', 'lte', 'order', 'range', 'limit', 'single', 'head', 'insert', 'update', 'delete', 'neq', 'in', 'gt', 'lt', 'filter']
   methods.forEach((m) => {
     chain[m] = vi.fn(() => chain)
   })
@@ -24,6 +24,12 @@ const mockOnAuthStateChange = vi.fn(() => ({
   data: { subscription: { unsubscribe: vi.fn() } },
 }))
 
+const mockChannel = vi.fn(() => ({
+  on: vi.fn().mockReturnThis(),
+  subscribe: vi.fn().mockReturnThis(),
+}))
+const mockRemoveChannel = vi.fn()
+
 vi.mock('../lib/supabase', () => ({
   supabase: {
     auth: {
@@ -35,10 +41,14 @@ vi.mock('../lib/supabase', () => ({
     },
     from: (...args) => mockFrom(...args),
     rpc: (...args) => mockRpc(...args),
+    channel: (...args) => mockChannel(...args),
+    removeChannel: (...args) => mockRemoveChannel(...args),
     storage: {
       from: () => ({
         upload: vi.fn(() => Promise.resolve({ data: null, error: null })),
         getPublicUrl: vi.fn(() => ({ data: { publicUrl: '' } })),
+        list: vi.fn(() => Promise.resolve({ data: [], error: null })),
+        remove: vi.fn(() => Promise.resolve({ error: null })),
       }),
       createBucket: vi.fn(() => Promise.resolve({ error: null })),
     },
@@ -67,6 +77,7 @@ import DashboardPage from '../pages/DashboardPage'
 import PredictionsPage from '../pages/PredictionsPage'
 import ModelReportsPage from '../pages/ModelReportsPage'
 import ModelsPage from '../pages/ModelsPage'
+import DataManagementPage from '../pages/DataManagementPage'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function renderPage(Component) {
@@ -747,5 +758,189 @@ describe('Group 4: Models Page — Benchmarks & Registry', () => {
         screen.getByText('Failed to fetch models'),
       ).toBeInTheDocument()
     })
+  })
+})
+
+describe('Group 5: Data Management Page — DVC Operations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mockRpc.mockImplementation((fnName) => {
+      switch (fnName) {
+        case 'get_dashboard_stats':
+          return Promise.resolve({
+            data: { total: 200, unique_users: 10, avg_confidence: 0.85 },
+          })
+        case 'get_leaf_type_options':
+          return Promise.resolve({
+            data: [{ leaf_type: 'tomato' }, { leaf_type: 'burmese_grape_leaf' }],
+          })
+        default:
+          return Promise.resolve({ data: null })
+      }
+    })
+
+    mockFrom.mockImplementation((tableName) => {
+      switch (tableName) {
+        case 'dvc_operations':
+          return createChainable({
+            data: [
+              {
+                id: 'op-001',
+                leaf_type: 'tomato',
+                operation: 'stage',
+                source: 'predictions',
+                status: 'staged',
+                metadata: { file_count: 100, total_size: 5000000, classes: { Healthy: 50, 'Early_Blight': 50 } },
+                github_run_id: 12345,
+                github_run_url: 'https://github.com/test/repo/actions/runs/12345',
+                error_message: null,
+                started_at: '2026-04-07T10:00:00Z',
+                completed_at: '2026-04-07T10:05:00Z',
+              },
+              {
+                id: 'op-002',
+                leaf_type: 'burmese_grape_leaf',
+                operation: 'pull',
+                source: 'dvc_remote',
+                status: 'completed',
+                metadata: {},
+                github_run_id: 12346,
+                github_run_url: null,
+                error_message: null,
+                started_at: '2026-04-06T08:00:00Z',
+                completed_at: '2026-04-06T08:10:00Z',
+              },
+            ],
+            error: null,
+          })
+        case 'predictions':
+          return createChainable({ data: [], count: 0 })
+        default:
+          return createChainable({ data: null, error: null })
+      }
+    })
+  })
+
+  it('renders page header and tab buttons', async () => {
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Data & DVC')).toBeInTheDocument()
+    })
+
+    // Verify all tab buttons
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('Stage Data')).toBeInTheDocument()
+    expect(screen.getByText('DVC Operations')).toBeInTheDocument()
+    expect(screen.getByText('Prediction Data')).toBeInTheDocument()
+    expect(screen.getByText('Storage Files')).toBeInTheDocument()
+  })
+
+  it('shows overview stats from RPC and dvc_operations', async () => {
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Predictions')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('DVC Datasets')).toBeInTheDocument()
+    expect(screen.getByText('Operations')).toBeInTheDocument()
+
+    // Total predictions = 200 (may appear multiple times in quality table)
+    expect(screen.getAllByText('200').length).toBeGreaterThanOrEqual(1)
+
+    // Operations count = 2
+    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
+
+    // Verify dvc_operations table was queried
+    expect(mockFrom).toHaveBeenCalledWith('dvc_operations')
+  })
+
+  it('shows recent operations in overview tab', async () => {
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent DVC Operations')).toBeInTheDocument()
+    })
+
+    // Verify operation badges
+    expect(screen.getByText('stage')).toBeInTheDocument()
+    expect(screen.getByText('pull')).toBeInTheDocument()
+
+    // Verify leaf types
+    expect(screen.getAllByText('tomato').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('burmese_grape_leaf').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows staged ops badge on Stage Data tab', async () => {
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Data & DVC')).toBeInTheDocument()
+    })
+
+    // Wait for dvc_operations to load — op-001 has status=staged
+    await waitFor(() => {
+      // The Stage Data tab should show a badge with count of staged ops (1)
+      expect(screen.getByText('1')).toBeInTheDocument()
+    })
+  })
+
+  it('switches to DVC Operations tab and shows action cards', async () => {
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Data & DVC')).toBeInTheDocument()
+    })
+
+    // Click DVC Operations tab
+    fireEvent.click(screen.getByText('DVC Operations'))
+
+    // Should show action cards for Pull, Push All, Export Data
+    await waitFor(() => {
+      expect(screen.getByText('Pull')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Push All')).toBeInTheDocument()
+    expect(screen.getByText('Export Data')).toBeInTheDocument()
+  })
+
+  it('handles error when RPC fails', async () => {
+    mockRpc.mockImplementation(() =>
+      Promise.reject(new Error('Connection failed')),
+    )
+    mockFrom.mockImplementation(() =>
+      createChainable({ data: [], error: null }),
+    )
+
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Connection failed')).toBeInTheDocument()
+    })
+
+    // Page header should still render
+    expect(screen.getByText('Data & DVC')).toBeInTheDocument()
+  })
+
+  it('shows empty state when no dvc_operations exist', async () => {
+    mockFrom.mockImplementation((tableName) => {
+      if (tableName === 'dvc_operations') {
+        return createChainable({ data: [], error: null })
+      }
+      return createChainable({ data: null, error: null })
+    })
+
+    renderPage(DataManagementPage)
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Predictions')).toBeInTheDocument()
+    })
+
+    // Operations count should be 0 (may appear in multiple stat cards)
+    expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(1)
+
+    // Recent Operations card should not appear when dvcOps is empty
+    expect(screen.queryByText('Recent DVC Operations')).not.toBeInTheDocument()
   })
 })

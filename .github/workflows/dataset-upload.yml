@@ -28,6 +28,21 @@ on:
         required: false
         type: string
         default: '0.8'
+      dvc_operation_id:
+        description: 'DVC operation ID for status tracking (from dvc_operations table)'
+        required: false
+        type: string
+        default: ''
+      stage_only:
+        description: 'If true, only stage data to Supabase Storage (no DVC push)'
+        required: false
+        type: string
+        default: 'false'
+      staging_path:
+        description: 'Supabase Storage path of staged data (for push phase after staging)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -45,6 +60,22 @@ jobs:
       - name: Install dependencies
         run: pip install dvc dvc-gdrive gdown kaggle
 
+      # ── Report status: staging ──────────────────────────────────────────
+      - name: Report status — staging
+        if: inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"staging\",\"github_run_id\":${{ github.run_id }},\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
+      # ── Download from source ────────────────────────────────────────────
       - name: Download from Google Drive
         if: inputs.source == 'gdrive'
         run: |
@@ -82,7 +113,6 @@ jobs:
         if: inputs.source == 'kaggle'
         run: |
           echo "=== Downloading dataset from Kaggle ==="
-          # Extract dataset slug from URL (e.g. https://www.kaggle.com/datasets/user/dataset-name → user/dataset-name)
           SLUG=$(echo "$KAGGLE_URL" | sed 's|.*/datasets/||' | sed 's|/$||')
           if [ -z "$SLUG" ]; then
             echo "[ERROR] Cannot extract dataset slug from URL: $KAGGLE_URL"
@@ -98,6 +128,7 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
 
+      # ── Prepare dataset ─────────────────────────────────────────────────
       - name: Prepare dataset (Google Drive)
         if: inputs.source == 'gdrive'
         run: |
@@ -115,24 +146,18 @@ jobs:
           echo "=== Preparing Kaggle dataset ==="
           DATA_DIR="data/${LEAF_TYPE}"
           mkdir -p "$DATA_DIR"
-          # Move downloaded content into data directory
-          # Kaggle datasets may have a top-level folder or flat structure
           DOWNLOAD_DIR="/tmp/dataset_download"
-          # Check if single subdirectory exists (common pattern)
           SUBDIRS=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
           FILES=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l)
           if [ "$SUBDIRS" -eq 1 ] && [ "$FILES" -eq 0 ]; then
-            # Single subdirectory — use its contents
             SINGLE_DIR=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d)
             cp -r "$SINGLE_DIR"/* "$DATA_DIR/" 2>/dev/null || true
           else
-            # Flat or multi-folder — copy everything
             cp -r "$DOWNLOAD_DIR"/* "$DATA_DIR/" 2>/dev/null || true
           fi
           echo "Contents of $DATA_DIR:"
           ls -la "$DATA_DIR/"
 
-          # Generate config if not exists
           CONFIG="mlops_pipeline/configs/${LEAF_TYPE}.json"
           if [ ! -f "$CONFIG" ]; then
             echo "Generating config for ${LEAF_TYPE}..."
@@ -159,6 +184,7 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
           DISPLAY_NAME: ${{ inputs.display_name || inputs.leaf_type }}
 
+      # ── Verify ──────────────────────────────────────────────────────────
       - name: Verify dataset structure
         run: |
           DATA_DIR="data/${LEAF_TYPE}"
@@ -197,7 +223,37 @@ jobs:
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
+      # ── Stage to Supabase Storage (stage_only=true) ─────────────────────
+      - name: Stage dataset to Supabase Storage
+        if: inputs.stage_only == 'true'
+        run: |
+          python .github/scripts/stage_dataset_to_storage.py \
+            --data-dir "data/${LEAF_TYPE}" \
+            --leaf-type "$LEAF_TYPE" \
+            --dvc-operation-id "$DVC_OP_ID"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
+      # ── DVC add and push (stage_only=false) ─────────────────────────────
+      - name: Report status — pushing
+        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"pushing"}'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
       - name: DVC add and push
+        if: inputs.stage_only != 'true'
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
           DATA_DIR="data/${LEAF_TYPE}"
@@ -226,6 +282,7 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Commit DVC tracking files
+        if: inputs.stage_only != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -247,7 +304,47 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
           SOURCE: ${{ inputs.source }}
 
+      # ── Report status: completed ────────────────────────────────────────
+      - name: Report status — completed
+        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != ''
+        run: |
+          DATA_DIR="data/${LEAF_TYPE}"
+          TOTAL=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
+          SIZE=$(du -sb "$DATA_DIR" | cut -f1)
+          DVC_FILE="data_${LEAF_TYPE}.dvc"
+          DVC_MD5=""
+          if [ -f "$DVC_FILE" ]; then
+            DVC_MD5=$(grep -oP 'md5:\s*\K\S+' "$DVC_FILE" || true)
+          fi
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"file_count\":$TOTAL,\"total_size\":$SIZE,\"dvc_file\":\"$DVC_FILE\",\"dvc_md5\":\"$DVC_MD5\"}}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+          LEAF_TYPE: ${{ inputs.leaf_type }}
+
+      # ── Report status: failed ───────────────────────────────────────────
+      - name: Report status — failed
+        if: failure() && inputs.dvc_operation_id != ''
+        run: |
+          curl -sf -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Dataset upload failed — check GitHub Actions logs\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+
       - name: Summary
+        if: inputs.stage_only != 'true'
         run: |
           DATA_DIR="data/${LEAF_TYPE}"
           total=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
