@@ -59,6 +59,10 @@ export default function ModelsPage() {
   const [benchLeaf, setBenchLeaf] = useState('')
   const [benchVersion, setBenchVersion] = useState('')
 
+  // Registry / OTA filter
+  const [regLeaf, setRegLeaf] = useState('')
+  const [regVersion, setRegVersion] = useState('')
+
   // Version history
   const [versions, setVersions] = useState([])
   const [expandedVersions, setExpandedVersions] = useState(null)
@@ -620,12 +624,20 @@ export default function ModelsPage() {
 
   const pipelineRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(pipelineStatus)
 
-  // Group models by leaf_type for OTA display
-  const modelsByLeaf = models.reduce((acc, m) => {
-    if (!acc[m.leaf_type]) acc[m.leaf_type] = []
-    acc[m.leaf_type].push(m)
-    return acc
-  }, {})
+  // Registry / OTA — derived filter values
+  const regLeafTypes = [...new Set(models.map(m => m.leaf_type))].sort()
+  const activeRegLeaf = regLeaf || regLeafTypes[0] || ''
+  const regVersions = activeRegLeaf
+    ? [...new Set(models.filter(m => m.leaf_type === activeRegLeaf).map(m => m.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    : []
+  const filteredModels = models
+    .filter(m => m.leaf_type === activeRegLeaf && (!regVersion || m.version === regVersion))
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+
+  // Group filtered models by leaf_type for OTA display, sorted by version desc
+  const otaModels = models
+    .filter(m => m.leaf_type === activeRegLeaf)
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /><span>Loading models…</span></div>
 
@@ -692,9 +704,33 @@ export default function ModelsPage() {
       {/* ── Registry Tab ── */}
       {tab === 'Registry' && (
         <>
+          {/* Filter bar */}
+          <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Dataset</label>
+                <select className="form-input" style={{ width: 200, padding: '6px 10px', fontSize: 13 }} value={activeRegLeaf} onChange={e => { setRegLeaf(e.target.value); setRegVersion('') }}>
+                  {regLeafTypes.map(lt => (
+                    <option key={lt} value={lt}>{models.find(m => m.leaf_type === lt)?.display_name || lt.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Version</label>
+                <select className="form-input" style={{ width: 140, padding: '6px 10px', fontSize: 13 }} value={regVersion} onChange={e => setRegVersion(e.target.value)}>
+                  <option value="">All versions ({regVersions.length})</option>
+                  {regVersions.map(v => (
+                    <option key={v} value={v}>v{v}</option>
+                  ))}
+                </select>
+              </div>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>{filteredModels.length} model{filteredModels.length !== 1 ? 's' : ''} shown</span>
+            </div>
+          </div>
+
           <div className="card">
             <div className="card-header">
-              <div><div className="card-label">Registry</div><div className="card-title">All Models ({models.length})</div></div>
+              <div><div className="card-label">Registry</div><div className="card-title">{models.find(m => m.leaf_type === activeRegLeaf)?.display_name || activeRegLeaf.replace(/_/g, ' ')} — Models ({filteredModels.length})</div></div>
             </div>
             <div className="table-wrapper">
               <table>
@@ -704,7 +740,7 @@ export default function ModelsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {models.map(m => {
+                  {filteredModels.map(m => {
                     const status = m.status || 'staging'
                     const statusColor = status === 'active' ? 'badge-green' : status === 'backup' ? 'badge-gray' : 'badge-yellow'
                     const statusDot = status === 'active' ? 'green' : status === 'backup' ? 'gray' : 'yellow'
@@ -812,7 +848,7 @@ export default function ModelsPage() {
                       )}
                     </Fragment>
                   )})}
-                  {models.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 32 }}>No models registered yet. Upload your first model.</td></tr>}
+                  {filteredModels.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 32 }}>{models.length === 0 ? 'No models registered yet. Upload your first model.' : 'No models match the selected filter.'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -1227,29 +1263,38 @@ export default function ModelsPage() {
             App verifies SHA-256 → loads new model
           </div>
 
-          {/* Deployment status table — grouped by leaf_type */}
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Deployment Status</div>
+          {/* Filter bar */}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', whiteSpace: 'nowrap' }}>Dataset</label>
+              <select className="form-input" style={{ width: 200, padding: '6px 10px', fontSize: 13 }} value={activeRegLeaf} onChange={e => { setRegLeaf(e.target.value); setRegVersion('') }}>
+                {regLeafTypes.map(lt => (
+                  <option key={lt} value={lt}>{models.find(m => m.leaf_type === lt)?.display_name || lt.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </div>
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>{otaModels.length} version{otaModels.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          {/* Deployment status table */}
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Deployment Status — {models.find(m => m.leaf_type === activeRegLeaf)?.display_name || activeRegLeaf.replace(/_/g, ' ')}</div>
           <table>
             <thead>
-              <tr><th>Leaf Type</th><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {Object.entries(modelsByLeaf).map(([leafType, leafModels]) =>
-                leafModels.map((m, idx) => {
-                  const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
-                  const hasUrl = !!m.model_url
-                  const hasHash = !!m.sha256_checksum && m.sha256_checksum !== 'pending'
-                  const status = m.status || 'staging'
-                  const statusColor = status === 'active' ? 'badge-green' : status === 'backup' ? 'badge-gray' : 'badge-yellow'
-                  return (
-                    <tr key={m.id} style={{ borderTop: idx === 0 ? '2px solid rgba(0,0,0,0.1)' : undefined }}>
-                      {idx === 0 ? (
-                        <td rowSpan={leafModels.length} style={{ verticalAlign: 'middle', borderRight: '2px solid rgba(0,0,0,0.06)', fontWeight: 700 }}>{leafType}</td>
-                      ) : null}
-                      <td><span className="badge badge-primary">v{m.version}</span></td>
-                      <td>{hasUrl ? <span className="badge badge-green" style={{ fontSize: 10 }}>Uploaded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
-                      <td>{hasHash ? <span className="badge badge-green" style={{ fontSize: 10 }}>Recorded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
-                      <td>{hasBench ? <span className="badge badge-green" style={{ fontSize: 10 }}>Complete</span> : <span className="badge badge-yellow" style={{ fontSize: 10 }}>Pending</span>}</td>
+              {otaModels.map(m => {
+                const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
+                const hasUrl = !!m.model_url
+                const hasHash = !!m.sha256_checksum && m.sha256_checksum !== 'pending'
+                const status = m.status || 'staging'
+                const statusColor = status === 'active' ? 'badge-green' : status === 'backup' ? 'badge-gray' : 'badge-yellow'
+                return (
+                  <tr key={m.id}>
+                    <td><span className="badge badge-primary">v{m.version}</span></td>
+                    <td>{hasUrl ? <span className="badge badge-green" style={{ fontSize: 10 }}>Uploaded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
+                    <td>{hasHash ? <span className="badge badge-green" style={{ fontSize: 10 }}>Recorded</span> : <span className="badge badge-red" style={{ fontSize: 10 }}>Missing</span>}</td>
+                    <td>{hasBench ? <span className="badge badge-green" style={{ fontSize: 10 }}>Complete</span> : <span className="badge badge-yellow" style={{ fontSize: 10 }}>Pending</span>}</td>
                       <td><span className={`badge ${statusColor}`}>{status.charAt(0).toUpperCase() + status.slice(1)}</span></td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -1264,8 +1309,8 @@ export default function ModelsPage() {
                       </td>
                     </tr>
                   )
-                })
-              )}
+                })}
+              {otaModels.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No models for this dataset.</td></tr>}
             </tbody>
           </table>
 
