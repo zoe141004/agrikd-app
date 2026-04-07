@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { downloadFile, formatBytes, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
-const DTABS = ['Overview', 'Training Data', 'Prediction Data', 'Storage Files']
+const DTABS = ['Overview', 'DVC Pull', 'DVC Push', 'Prediction Data', 'Storage Files']
 
 export default function DataManagementPage() {
   const [dtab, setDtab] = useState('Overview')
@@ -15,21 +15,35 @@ export default function DataManagementPage() {
   // DVC state
   const [dvcLog, setDvcLog] = useState([])
   const [dvcRunning, setDvcRunning] = useState(false)
-  const [dvcRuns, setDvcRuns] = useState(null)
   const [dvcPullLeaf, setDvcPullLeaf] = useState('')
   const [dvcDatasets, setDvcDatasets] = useState([])
   const [dvcDatasetsLoading, setDvcDatasetsLoading] = useState(false)
+
+  // Pipeline tracking (GitHub polling)
+  const dvcPollRef = useRef(null)
+  const [dvcPipelineStatus, setDvcPipelineStatus] = useState(null) // null | 'queued' | 'in_progress' | 'completed' | 'failed'
+  const [dvcPipelineRun, setDvcPipelineRun] = useState(null) // latest workflow run object
+  const [dvcWorkflowRuns, setDvcWorkflowRuns] = useState([]) // recent runs list
 
   // Dataset upload state — Method A (predictions)
   const [dsLeafType, setDsLeafType] = useState('')
   const [dsPredPreview, setDsPredPreview] = useState(null)
   const [dsUploading, setDsUploading] = useState(false)
   const [dsMsg, setDsMsg] = useState(null)
+  const [dsConfidence, setDsConfidence] = useState('0.8')
 
-  // Dataset upload state — Method B (Google Drive ZIP)
+  // Dataset upload state — Method B (Google Drive / Kaggle)
+  const [dsExternalSource, setDsExternalSource] = useState('gdrive')
   const [dsGdriveUrl, setDsGdriveUrl] = useState('')
-  const [dsGdriveName, setDsGdriveName] = useState('')
-  const [dsGdriveLeaf, setDsGdriveLeaf] = useState('')
+  const [dsKaggleUrl, setDsKaggleUrl] = useState('')
+  const [dsExternalName, setDsExternalName] = useState('')
+  const [dsExternalLeaf, setDsExternalLeaf] = useState('')
+
+  // Push pipeline tracking
+  const pushPollRef = useRef(null)
+  const [pushPipelineStatus, setPushPipelineStatus] = useState(null)
+  const [pushPipelineRun, setPushPipelineRun] = useState(null)
+  const [pushWorkflowRuns, setPushWorkflowRuns] = useState([])
 
   // CSV import state
   const [csvFile, setCsvFile] = useState(null)
@@ -43,10 +57,24 @@ export default function DataManagementPage() {
   // Storage Files state
   const [storedFiles, setStoredFiles] = useState([])
   const [storageLoading, setStorageLoading] = useState(false)
+  const [storageBucket, setStorageBucket] = useState('datasets')
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => { loadData() }, [])
+
+  // Auto-load storage files when switching to Storage Files tab
+  useEffect(() => {
+    if (dtab === 'Storage Files' && storedFiles.length === 0) loadStorageFiles()
+  }, [dtab])
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (dvcPollRef.current) clearInterval(dvcPollRef.current)
+      if (pushPollRef.current) clearInterval(pushPollRef.current)
+    }
+  }, [])
 
   const loadData = async () => {
     setLoading(true)
@@ -73,13 +101,69 @@ export default function DataManagementPage() {
       })
     )
     setQuality(qualityResults)
+
+    // Auto-load DVC datasets
+    fetchDvcDatasets()
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
 
+  // ── GitHub polling for DVC workflows ──────────────────────────────────────
+  const startDvcPolling = (workflow) => {
+    if (dvcPollRef.current) clearInterval(dvcPollRef.current)
+    dvcPollRef.current = setInterval(async () => {
+      try {
+        const data = await getGitHubWorkflowRuns(workflow)
+        if (!data?.workflow_runs?.length) return
+        const latest = data.workflow_runs[0]
+        const runAge = Date.now() - new Date(latest.created_at).getTime()
+        if (runAge > 30 * 60 * 1000) return
+
+        setDvcPipelineRun(latest)
+        setDvcWorkflowRuns(data.workflow_runs.slice(0, 5))
+
+        if (latest.status === 'completed') {
+          setDvcPipelineStatus(latest.conclusion === 'success' ? 'completed' : 'failed')
+          clearInterval(dvcPollRef.current)
+          dvcPollRef.current = null
+          fetchDvcDatasets()
+        } else {
+          setDvcPipelineStatus(latest.status === 'queued' ? 'queued' : 'in_progress')
+        }
+      } catch { /* GitHub API may not be configured */ }
+    }, 15000)
+  }
+
+  const startPushPolling = () => {
+    if (pushPollRef.current) clearInterval(pushPollRef.current)
+    pushPollRef.current = setInterval(async () => {
+      try {
+        const data = await getGitHubWorkflowRuns('dataset-upload.yml')
+        if (!data?.workflow_runs?.length) return
+        const latest = data.workflow_runs[0]
+        const runAge = Date.now() - new Date(latest.created_at).getTime()
+        if (runAge > 30 * 60 * 1000) return
+
+        setPushPipelineRun(latest)
+        setPushWorkflowRuns(data.workflow_runs.slice(0, 5))
+
+        if (latest.status === 'completed') {
+          setPushPipelineStatus(latest.conclusion === 'success' ? 'completed' : 'failed')
+          clearInterval(pushPollRef.current)
+          pushPollRef.current = null
+          fetchDvcDatasets()
+        } else {
+          setPushPipelineStatus(latest.status === 'queued' ? 'queued' : 'in_progress')
+        }
+      } catch { /* GitHub API may not be configured */ }
+    }, 15000)
+  }
+
   // ── DVC via GitHub Actions ────────────────────────────────────────────────
   const runDvc = async (op, leafType = '') => {
-    setDvcRunning(true); setDvcLog([])
+    // Clear stale polling
+    if (dvcPollRef.current) { clearInterval(dvcPollRef.current); dvcPollRef.current = null }
+    setDvcRunning(true); setDvcLog([]); setDvcPipelineStatus(null); setDvcPipelineRun(null)
     const ts = () => new Date().toLocaleTimeString()
     const { ghToken } = getGitHubConfig()
     try {
@@ -89,12 +173,10 @@ export default function DataManagementPage() {
       const workflow = op === 'push' ? 'dvc-push.yml' : 'dvc-pull.yml'
       setDvcLog(l => [...l, `[${ts()}] Triggering DVC ${op}${suffix} via GitHub Actions…`])
       await triggerGitHubWorkflow(workflow, inputs)
-      setDvcLog(l => [...l, `[${ts()}] Workflow dispatched. Checking status…`])
-      await new Promise(r => setTimeout(r, 3000))
-      const runs = await getGitHubWorkflowRuns(workflow)
-      setDvcRuns(runs)
-      const latest = runs?.workflow_runs?.[0]
-      if (latest) setDvcLog(l => [...l, `[${ts()}] Latest run: #${latest.run_number} — ${latest.status}. View: ${latest.html_url}`])
+      setDvcLog(l => [...l, `[${ts()}] Workflow dispatched. Polling for status…`])
+      setDvcPipelineStatus('queued')
+      // Start polling for pipeline progress
+      startDvcPolling(workflow)
     } catch (err) {
       let msg = err.message
       if (err instanceof TypeError && msg.includes('fetch')) {
@@ -103,13 +185,6 @@ export default function DataManagementPage() {
       setDvcLog(l => [...l, `[${ts()}] Error: ${msg}`])
     } finally {
       setDvcRunning(false)
-    }
-  }
-
-  const refreshDvcRuns = async () => {
-    for (const wf of ['dvc-push.yml', 'dvc-pull.yml']) {
-      const r = await getGitHubWorkflowRuns(wf)
-      if (r?.workflow_runs?.length) { setDvcRuns(r); break }
     }
   }
 
@@ -152,10 +227,15 @@ export default function DataManagementPage() {
   // ── Preview predictions for dataset export ──────────────────────────────
   const previewPredictions = async () => {
     if (!dsLeafType) return
-    const { data, error } = await supabase
+    let query = supabase
       .from('predictions')
-      .select('predicted_class_name')
+      .select('predicted_class_name, confidence')
       .eq('leaf_type', dsLeafType)
+    const threshold = parseFloat(dsConfidence)
+    if (!isNaN(threshold) && threshold > 0) {
+      query = query.gte('confidence', threshold)
+    }
+    const { data, error } = await query
     if (error || !data) { setDsPredPreview(null); return }
     const classMap = {}
     data.forEach(r => { classMap[r.predicted_class_name] = (classMap[r.predicted_class_name] || 0) + 1 })
@@ -164,12 +244,16 @@ export default function DataManagementPage() {
 
   // ── Trigger dataset upload workflow ──────────────────────────────────────
   const triggerDatasetUpload = async (source, inputs) => {
-    setDsUploading(true); setDsMsg(null)
+    // Clear stale push polling
+    if (pushPollRef.current) { clearInterval(pushPollRef.current); pushPollRef.current = null }
+    setDsUploading(true); setDsMsg(null); setPushPipelineStatus(null); setPushPipelineRun(null)
     try {
       const { ghToken } = getGitHubConfig()
       if (!ghToken) throw new Error('GitHub not configured. Go to Settings → Integrations.')
       await triggerGitHubWorkflow('dataset-upload.yml', { source, ...inputs })
-      setDsMsg({ type: 'success', text: `Dataset upload workflow dispatched (source: ${source}). Check GitHub Actions for progress.` })
+      setDsMsg({ type: 'success', text: `Dataset upload workflow dispatched (source: ${source}). Tracking progress…` })
+      setPushPipelineStatus('queued')
+      startPushPolling()
     } catch (err) {
       setDsMsg({ type: 'error', text: err.message })
     } finally {
@@ -259,6 +343,88 @@ export default function DataManagementPage() {
     }
   }
 
+  // ── Pipeline status banner component ──────────────────────────────────────
+  const PipelineBanner = ({ status, run, onDismiss }) => {
+    if (!status) return null
+    const isActive = status === 'queued' || status === 'in_progress'
+    const isSuccess = status === 'completed'
+    const isFailed = status === 'failed'
+    return (
+      <div className={`alert ${isSuccess ? 'alert-success' : isFailed ? 'alert-error' : 'alert-info'}`} style={{ marginBottom: 16 }}>
+        {isActive && <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />}
+        {!isActive && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{isSuccess ? <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/> : <><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></>}</svg>}
+        <div style={{ flex: 1 }}>
+          <strong>{isActive ? 'Pipeline running…' : isSuccess ? 'Pipeline completed' : 'Pipeline failed'}</strong>
+          {run && (
+            <span style={{ marginLeft: 8, fontSize: 12, color: '#64748b' }}>
+              Run #{run.run_number} — <a href={run.html_url} target="_blank" rel="noopener noreferrer" style={{ color: '#0284c7' }}>View on GitHub</a>
+            </span>
+          )}
+        </div>
+        {!isActive && onDismiss && (
+          <button onClick={onDismiss} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#94a3b8', padding: '0 4px' }}>×</button>
+        )}
+      </div>
+    )
+  }
+
+  // ── Workflow runs list component ──────────────────────────────────────────
+  const WorkflowRunsList = ({ runs, onRefresh, title }) => {
+    if (!runs?.length) return null
+    return (
+      <div className="card">
+        <div className="card-header">
+          <div><div className="card-label">Recent</div><div className="card-title">{title || 'Workflow Runs'}</div></div>
+          {onRefresh && <button className="btn btn-sm" onClick={onRefresh}>Refresh</button>}
+        </div>
+        {runs.map(run => (
+          <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
+            <div>
+              <span className={`status-dot ${run.conclusion === 'success' ? 'green' : run.status === 'in_progress' ? 'yellow' : run.conclusion === 'failure' ? 'red' : 'gray'}`} style={{ marginRight: 8 }} />
+              <a href={run.html_url} target="_blank" rel="noopener noreferrer" style={{ color: '#121c28', textDecoration: 'none', fontWeight: 500 }}>Run #{run.run_number} — {run.name}</a>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span className={`badge ${run.conclusion === 'success' ? 'badge-green' : run.status === 'in_progress' ? 'badge-yellow' : run.conclusion === 'failure' ? 'badge-red' : 'badge-gray'}`}>{run.status === 'in_progress' ? 'Running' : run.conclusion || run.status}</span>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(run.created_at).toLocaleString()}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // ── DVC Datasets table component ──────────────────────────────────────────
+  const DvcDatasetsTable = ({ compact }) => (
+    <div className="card" style={compact ? {} : { marginBottom: 20 }}>
+      <div className="card-header">
+        <div><div className="card-label">DVC Remote</div><div className="card-title">Tracked Datasets</div></div>
+        <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
+          {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
+        </button>
+      </div>
+      {dvcDatasets.length > 0 ? (
+        <table>
+          <thead><tr><th>Dataset</th><th>DVC File</th><th>Files</th><th>Size</th><th>MD5</th></tr></thead>
+          <tbody>
+            {dvcDatasets.map(ds => (
+              <tr key={ds.name}>
+                <td><strong style={{ color: '#121c28' }}>{ds.name}</strong></td>
+                <td style={{ fontSize: 12 }}><code>{ds.file}</code></td>
+                <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
+                <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
+                <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 12) + '…' : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading DVC datasets…' : 'No DVC datasets found. Click "Refresh" to reload.'}</p></div>
+      )}
+    </div>
+  )
+
+  const ghNotConfigured = !getGitHubConfig().ghToken
+
   if (loading) return <div className="loading-spinner"><div className="spinner" /><span>Loading data…</span></div>
 
   return (
@@ -280,11 +446,11 @@ export default function DataManagementPage() {
       {/* ── Overview Tab ── */}
       {dtab === 'Overview' && (
         <>
-          {/* Prediction Data Summary */}
+          {/* Stat cards */}
           <div className="stats-grid" style={{ marginBottom: 16 }}>
             {[
               { label: 'Total Predictions', value: stats.total.toLocaleString(), accent: '#16a34a' },
-              { label: 'DVC Datasets', value: dvcDatasets.length > 0 ? String(dvcDatasets.length) : '—', accent: '#0284c7' },
+              { label: 'DVC Datasets', value: dvcDatasetsLoading ? '…' : String(dvcDatasets.length), accent: '#0284c7' },
             ].map(s => (
               <div key={s.label} className="stat-card" style={{ padding: '14px 16px' }}>
                 <div className="stat-card-accent" style={{ background: s.accent }} />
@@ -334,71 +500,52 @@ export default function DataManagementPage() {
                   </tbody>
                 </table>
               ) : (
-                <div className="empty-state"><p>Click "Refresh" to load DVC tracking info from your GitHub repo.</p></div>
+                <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No DVC datasets found.'}</p></div>
               )}
             </div>
           </div>
         </>
       )}
 
-      {/* ── Training Data Tab ── */}
-      {dtab === 'Training Data' && (
+      {/* ── DVC Pull Tab ── */}
+      {dtab === 'DVC Pull' && (
         <div>
-          {!getGitHubConfig().ghToken && (
+          {ghNotConfigured && (
             <div className="alert alert-warn" style={{ marginBottom: 16 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
               <div>GitHub not configured. Go to <strong>Settings &rarr; Integrations</strong> to add your token before using DVC sync.</div>
             </div>
           )}
 
-          {/* DVC Pull & Push */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
-            {/* DVC Pull Card */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                    DVC Pull
-                  </div>
-                  <div className="card-title">Download Data from Remote</div>
+          {/* Pipeline status */}
+          <PipelineBanner status={dvcPipelineStatus} run={dvcPipelineRun} onDismiss={() => setDvcPipelineStatus(null)} />
+
+          {/* Pull Card */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-header">
+              <div>
+                <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  DVC Pull
                 </div>
-              </div>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
-                Pull tracked datasets from your DVC remote (Google Drive). Select a specific leaf type or pull all datasets at once.
-              </p>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <select
-                  value={dvcPullLeaf}
-                  onChange={e => setDvcPullLeaf(e.target.value)}
-                  className="form-input"
-                  style={{ flex: 1 }}
-                >
-                  <option value="">All datasets</option>
-                  {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
-                </select>
-                <button className="btn btn-primary" onClick={() => runDvc('pull', dvcPullLeaf)} disabled={dvcRunning || !getGitHubConfig().ghToken}>
-                  {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Pulling…</> : 'Pull'}
-                </button>
+                <div className="card-title">Download Training Data from Remote</div>
               </div>
             </div>
-
-            {/* DVC Push Card */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                    DVC Push
-                  </div>
-                  <div className="card-title">Upload Data to Remote</div>
-                </div>
-              </div>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
-                Push all tracked datasets to DVC remote storage. This uploads any new or changed files from local data directories to Google Drive.
-              </p>
-              <button className="btn btn-primary" onClick={() => runDvc('push')} disabled={dvcRunning || !getGitHubConfig().ghToken}>
-                {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Pushing…</> : 'Push All'}
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
+              Pull tracked datasets from your DVC remote (Google Drive). Select a specific leaf type or pull all datasets at once. Pipeline progress is tracked automatically.
+            </p>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select
+                value={dvcPullLeaf}
+                onChange={e => setDvcPullLeaf(e.target.value)}
+                className="form-input"
+                style={{ flex: 1 }}
+              >
+                <option value="">All datasets</option>
+                {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
+              </select>
+              <button className="btn btn-primary" onClick={() => runDvc('pull', dvcPullLeaf)} disabled={dvcRunning || ghNotConfigured || dvcPipelineStatus === 'in_progress' || dvcPipelineStatus === 'queued'}>
+                {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Dispatching…</> : 'Pull'}
               </button>
             </div>
           </div>
@@ -413,14 +560,49 @@ export default function DataManagementPage() {
             </div>
           )}
 
-          {/* Upload Dataset — Method A & B */}
+          {/* DVC Tracked Datasets */}
+          <DvcDatasetsTable />
+
+          {/* Workflow Runs */}
+          <WorkflowRunsList
+            runs={dvcWorkflowRuns}
+            title="DVC Pull Runs"
+            onRefresh={async () => {
+              const data = await getGitHubWorkflowRuns('dvc-pull.yml')
+              if (data?.workflow_runs) setDvcWorkflowRuns(data.workflow_runs.slice(0, 5))
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── DVC Push Tab ── */}
+      {dtab === 'DVC Push' && (
+        <div>
+          {ghNotConfigured && (
+            <div className="alert alert-warn" style={{ marginBottom: 16 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <div>GitHub not configured. Go to <strong>Settings &rarr; Integrations</strong> to add your token before pushing datasets.</div>
+            </div>
+          )}
+
+          {/* Push pipeline status */}
+          <PipelineBanner status={pushPipelineStatus} run={pushPipelineRun} onDismiss={() => setPushPipelineStatus(null)} />
+
+          {/* Shared status message */}
+          {dsMsg && (
+            <div className={`alert ${dsMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 16 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <div>{dsMsg.text}</div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
             {/* Method A: From Predictions */}
             <div className="card" style={{ flex: 1, minWidth: 340 }}>
               <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Export user predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, then pushed to DVC.</div>
+                <div>Export user predictions as a labeled dataset. Images are downloaded and organized into <code>data/{'{leaf_type}'}/{'{class}'}/</code> structure, filtered by confidence threshold, then pushed to DVC.</div>
               </div>
               <div className="form-group">
                 <label className="form-label">Leaf Type *</label>
@@ -429,12 +611,17 @@ export default function DataManagementPage() {
                   {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
                 </select>
               </div>
+              <div className="form-group">
+                <label className="form-label">Min Confidence Threshold</label>
+                <input className="form-input" type="number" min="0" max="1" step="0.05" value={dsConfidence} onChange={e => { setDsConfidence(e.target.value); setDsPredPreview(null) }} />
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Only predictions with confidence &ge; this value will be exported (default 0.8).</div>
+              </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <button className="btn btn-sm" onClick={previewPredictions} disabled={!dsLeafType}>Preview Count</button>
               </div>
               {dsPredPreview && (
                 <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: 13 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images:</div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images (confidence &ge; {dsConfidence}):</div>
                   {Object.entries(dsPredPreview.classes).map(([cls, n]) => (
                     <div key={cls} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
                       <span>{cls}</span><span style={{ color: '#64748b' }}>{n}</span>
@@ -442,99 +629,100 @@ export default function DataManagementPage() {
                   ))}
                 </div>
               )}
-              <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total}
-                onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType })}>
+              <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total || ghNotConfigured}
+                onClick={() => triggerDatasetUpload('predictions', { leaf_type: dsLeafType, confidence_threshold: dsConfidence })}>
                 {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Export as Dataset'}
               </button>
             </div>
 
-            {/* Method B: Google Drive ZIP */}
+            {/* Method B: External Source (Google Drive / Kaggle) */}
             <div className="card" style={{ flex: 1, minWidth: 340 }}>
-              <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">Upload ZIP via Google Drive</div></div></div>
+              <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">Upload from External Source</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Upload a ZIP file to Google Drive, paste the share link below. The pipeline will download, extract, validate structure, generate config, and push to DVC.<br/><br/>
-                <strong>ZIP structure:</strong> <code>dataset_name/class_name/images.*</code></div>
+                <div>Upload a dataset from an external source. The pipeline will download, extract, validate structure, generate config, and push to DVC.<br/><br/>
+                <strong>Expected structure:</strong> <code>dataset_name/class_name/images.*</code></div>
               </div>
+
+              {/* Source selector */}
               <div className="form-group">
-                <label className="form-label">Google Drive Share URL *</label>
-                <input className="form-input" placeholder="https://drive.google.com/file/d/..." value={dsGdriveUrl} onChange={e => setDsGdriveUrl(e.target.value)} />
+                <label className="form-label">Source</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[{ value: 'gdrive', label: 'Google Drive' }, { value: 'kaggle', label: 'Kaggle' }].map(opt => (
+                    <button key={opt.value} className={`btn btn-sm ${dsExternalSource === opt.value ? 'btn-primary' : ''}`}
+                      onClick={() => setDsExternalSource(opt.value)}
+                      style={{ flex: 1 }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {dsExternalSource === 'gdrive' && (
+                <div className="form-group">
+                  <label className="form-label">Google Drive Share URL *</label>
+                  <input className="form-input" placeholder="https://drive.google.com/file/d/..." value={dsGdriveUrl} onChange={e => setDsGdriveUrl(e.target.value)} />
+                </div>
+              )}
+              {dsExternalSource === 'kaggle' && (
+                <div className="form-group">
+                  <label className="form-label">Kaggle Dataset URL *</label>
+                  <input className="form-input" placeholder="https://www.kaggle.com/datasets/user/dataset-name" value={dsKaggleUrl} onChange={e => setDsKaggleUrl(e.target.value)} />
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Requires KAGGLE_USERNAME and KAGGLE_KEY secrets in GitHub.</div>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Leaf Type ID *</label>
-                <input className="form-input" placeholder="e.g. mango, cassava_leaf" value={dsGdriveLeaf} onChange={e => setDsGdriveLeaf(e.target.value)} />
+                <input className="form-input" placeholder="e.g. mango, cassava_leaf" value={dsExternalLeaf} onChange={e => setDsExternalLeaf(e.target.value)} />
                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Lowercase, underscores. Used for config and DVC tracking.</div>
               </div>
               <div className="form-group">
                 <label className="form-label">Display Name</label>
-                <input className="form-input" placeholder="e.g. Mango Leaf Disease" value={dsGdriveName} onChange={e => setDsGdriveName(e.target.value)} />
+                <input className="form-input" placeholder="e.g. Mango Leaf Disease" value={dsExternalName} onChange={e => setDsExternalName(e.target.value)} />
               </div>
-              <button className="btn btn-primary" disabled={dsUploading || !dsGdriveUrl || !dsGdriveLeaf}
-                onClick={() => triggerDatasetUpload('gdrive', { leaf_type: dsGdriveLeaf, gdrive_url: dsGdriveUrl, display_name: dsGdriveName || dsGdriveLeaf })}>
+              <button className="btn btn-primary"
+                disabled={dsUploading || !dsExternalLeaf || ghNotConfigured ||
+                  (dsExternalSource === 'gdrive' && !dsGdriveUrl) ||
+                  (dsExternalSource === 'kaggle' && !dsKaggleUrl)}
+                onClick={() => {
+                  const inputs = { leaf_type: dsExternalLeaf, display_name: dsExternalName || dsExternalLeaf }
+                  if (dsExternalSource === 'gdrive') inputs.gdrive_url = dsGdriveUrl
+                  if (dsExternalSource === 'kaggle') inputs.kaggle_url = dsKaggleUrl
+                  triggerDatasetUpload(dsExternalSource, inputs)
+                }}>
                 {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Triggering…</> : 'Start Upload Pipeline'}
               </button>
             </div>
-
-            {/* Shared status message */}
-            {dsMsg && (
-              <div style={{ width: '100%' }}>
-                <div className={`alert ${dsMsg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <div>{dsMsg.text}</div>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* DVC Tracked Datasets */}
+          {/* DVC Push All (simple push) */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
-              <div><div className="card-label">DVC Remote</div><div className="card-title">Tracked Datasets</div></div>
-              <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
-                {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Load from GitHub'}
-              </button>
+              <div>
+                <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                  DVC Push All
+                </div>
+                <div className="card-title">Sync All Local Data to Remote</div>
+              </div>
             </div>
-            {dvcDatasets.length > 0 ? (
-              <table>
-                <thead><tr><th>Dataset</th><th>DVC File</th><th>Files</th><th>Size</th><th>MD5</th></tr></thead>
-                <tbody>
-                  {dvcDatasets.map(ds => (
-                    <tr key={ds.name}>
-                      <td><strong style={{ color: '#121c28' }}>{ds.name}</strong></td>
-                      <td style={{ fontSize: 12 }}><code>{ds.file}</code></td>
-                      <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
-                      <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
-                      <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 12) + '…' : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="empty-state"><p>Click "Load from GitHub" to fetch DVC tracking info from your repo.</p></div>
-            )}
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 1.6 }}>
+              Push all locally tracked datasets to DVC remote (Google Drive). Use this after manually updating data directories.
+            </p>
+            <button className="btn btn-primary" onClick={() => runDvc('push')} disabled={dvcRunning || ghNotConfigured || dvcPipelineStatus === 'in_progress' || dvcPipelineStatus === 'queued'}>
+              {dvcRunning ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Pushing…</> : 'Push All'}
+            </button>
           </div>
 
           {/* Workflow Runs */}
-          {dvcRuns && (
-            <div className="card">
-              <div className="card-header">
-                <div><div className="card-label">Recent</div><div className="card-title">DVC Workflow Runs</div></div>
-                <button className="btn btn-sm" onClick={refreshDvcRuns}>Refresh</button>
-              </div>
-              {dvcRuns.workflow_runs?.map(run => (
-                <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
-                  <div>
-                    <span className={`status-dot ${run.conclusion === 'success' ? 'green' : run.status === 'in_progress' ? 'yellow' : 'red'}`} style={{ marginRight: 8 }} />
-                    <a href={run.html_url} target="_blank" rel="noopener noreferrer" style={{ color: '#121c28', textDecoration: 'none', fontWeight: 500 }}>Run #{run.run_number} — {run.name}</a>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span className={`badge ${run.conclusion === 'success' ? 'badge-green' : run.status === 'in_progress' ? 'badge-yellow' : 'badge-red'}`}>{run.status === 'in_progress' ? 'Running' : run.conclusion || run.status}</span>
-                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(run.created_at).toLocaleString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <WorkflowRunsList
+            runs={pushWorkflowRuns}
+            title="Dataset Upload Runs"
+            onRefresh={async () => {
+              const data = await getGitHubWorkflowRuns('dataset-upload.yml')
+              if (data?.workflow_runs) setPushWorkflowRuns(data.workflow_runs.slice(0, 5))
+            }}
+          />
         </div>
       )}
 
@@ -640,11 +828,20 @@ export default function DataManagementPage() {
       {/* ── Storage Files Tab ── */}
       {dtab === 'Storage Files' && (
         <div>
-          {/* Supabase Storage Files */}
+          {/* Bucket selector */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            {['datasets', 'models', 'prediction-images'].map(b => (
+              <button key={b} className={`btn btn-sm ${storageBucket === b ? 'btn-primary' : ''}`}
+                onClick={() => { setStorageBucket(b); setStoredFiles([]); setTimeout(() => loadStorageFiles(b), 0) }}>
+                {b}
+              </button>
+            ))}
+          </div>
+
           <div className="card">
             <div className="card-header">
-              <div><div className="card-label">Supabase Storage</div><div className="card-title">Uploaded Files</div></div>
-              <button className="btn btn-sm btn-primary" onClick={loadStorageFiles} disabled={storageLoading}>
+              <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in "{storageBucket}" bucket</div></div>
+              <button className="btn btn-sm btn-primary" onClick={() => loadStorageFiles()} disabled={storageLoading}>
                 {storageLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
               </button>
             </div>
@@ -663,7 +860,7 @@ export default function DataManagementPage() {
                         <td style={{ fontSize: 12, color: '#94a3b8' }}>{f.created_at ? new Date(f.created_at).toLocaleDateString() : '—'}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 5 }}>
-                            <a href={supabase.storage.from('datasets').getPublicUrl(f.path).data.publicUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Download</a>
+                            <a href={supabase.storage.from(storageBucket).getPublicUrl(f.path).data.publicUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Download</a>
                             <button className="btn btn-sm btn-danger" onClick={() => deleteStorageFile(f)}>Delete</button>
                           </div>
                         </td>
@@ -673,7 +870,7 @@ export default function DataManagementPage() {
                 </table>
               </div>
             ) : (
-              <div className="empty-state"><p>No files in Supabase Storage datasets bucket. Click "Refresh" to load.</p></div>
+              <div className="empty-state"><p>No files found in "{storageBucket}" bucket.</p></div>
             )}
           </div>
         </div>
@@ -683,17 +880,18 @@ export default function DataManagementPage() {
     </>
   )
 
-  async function loadStorageFiles() {
+  async function loadStorageFiles(bucket) {
+    const b = bucket || storageBucket
     setStorageLoading(true)
     try {
-      const { data: folders } = await supabase.storage.from('datasets').list('', { limit: 100 })
+      const { data: folders } = await supabase.storage.from(b).list('', { limit: 100 })
       const allFiles = []
       for (const folder of (folders || [])) {
         if (folder.id) {
           allFiles.push({ ...folder, folder: '(root)', path: folder.name })
           continue
         }
-        const { data: files } = await supabase.storage.from('datasets').list(folder.name, { limit: 100 })
+        const { data: files } = await supabase.storage.from(b).list(folder.name, { limit: 100 })
         for (const f of (files || [])) {
           allFiles.push({ ...f, folder: folder.name, path: `${folder.name}/${f.name}` })
         }
@@ -706,12 +904,12 @@ export default function DataManagementPage() {
   function deleteStorageFile(f) {
     setConfirmAction({
       title: 'Delete File',
-      message: `Permanently delete "${f.name}" from datasets/${f.folder}? This cannot be undone.`,
+      message: `Permanently delete "${f.name}" from ${storageBucket}/${f.folder}? This cannot be undone.`,
       danger: true,
       confirmLabel: 'Delete',
       onConfirm: async () => {
         setConfirmAction(null)
-        const { error } = await supabase.storage.from('datasets').remove([f.path])
+        const { error } = await supabase.storage.from(storageBucket).remove([f.path])
         if (error) alert('Delete failed: ' + error.message)
         else loadStorageFiles()
       }
