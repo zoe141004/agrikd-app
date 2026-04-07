@@ -101,25 +101,77 @@ jobs:
         if: inputs.dvc_operation_id != '' && success()
         continue-on-error: true
         run: |
-          # Collect metadata from pulled datasets
-          TOTAL_FILES=0
-          TOTAL_SIZE=0
-          for dir in data/*/; do
-            if [ -d "$dir" ]; then
-              files=$(find "$dir" -type f | wc -l)
-              size=$(du -sb "$dir" | cut -f1)
-              TOTAL_FILES=$((TOTAL_FILES + files))
-              TOTAL_SIZE=$((TOTAL_SIZE + size))
-            fi
-          done
+          # Build rich metadata JSON with per-dataset, per-class breakdown
+          python3 -c "
+          import json, os, glob
+
+          datasets = {}
+          total_files = 0
+          total_size = 0
+
+          for data_dir in sorted(glob.glob('data/*/')):
+              if not os.path.isdir(data_dir):
+                  continue
+              ds_name = os.path.basename(data_dir.rstrip('/'))
+              # Skip non-dataset dirs (exports, staging, etc.)
+              classes = {}
+              ds_files = 0
+              ds_size = 0
+              for cls_dir in sorted(glob.glob(os.path.join(data_dir, '*/'))):
+                  if not os.path.isdir(cls_dir):
+                      continue
+                  cls_name = os.path.basename(cls_dir.rstrip('/'))
+                  imgs = [f for f in os.listdir(cls_dir)
+                          if f.lower().endswith(('.jpg','.jpeg','.png','.bmp','.webp','.tiff'))]
+                  cls_size = sum(os.path.getsize(os.path.join(cls_dir, f)) for f in imgs)
+                  classes[cls_name] = {'count': len(imgs), 'size': cls_size}
+                  ds_files += len(imgs)
+                  ds_size += cls_size
+              if not classes:
+                  continue
+              # Read DVC file hash if exists
+              dvc_file = f'data_{ds_name}.dvc'
+              dvc_md5 = ''
+              if os.path.exists(dvc_file):
+                  with open(dvc_file) as f:
+                      for line in f:
+                          if line.strip().startswith('md5:'):
+                              dvc_md5 = line.strip().split(':', 1)[1].strip()
+                              break
+              datasets[ds_name] = {
+                  'file_count': ds_files,
+                  'total_size': ds_size,
+                  'num_classes': len(classes),
+                  'classes': classes,
+                  'dvc_md5': dvc_md5
+              }
+              total_files += ds_files
+              total_size += ds_size
+
+          metadata = {
+              'file_count': total_files,
+              'total_size': total_size,
+              'datasets': datasets
+          }
+          with open('/tmp/metadata.json', 'w') as f:
+              json.dump(metadata, f)
+          "
+
+          METADATA=$(cat /tmp/metadata.json)
+          COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Merge status + completed_at into metadata payload
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          m = json.load(open('/tmp/metadata.json'))
+          print(json.dumps({'status':'completed','completed_at':'$COMPLETED_AT','metadata':m}))
+          ")
           curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "$(printf '{"status":"completed","completed_at":"%s","metadata":{"file_count":%d,"total_size":%d}}' \
-              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TOTAL_FILES" "$TOTAL_SIZE")"
+            -d "$PAYLOAD"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

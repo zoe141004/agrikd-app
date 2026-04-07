@@ -313,22 +313,67 @@ jobs:
         if: inputs.stage_only != 'true' && inputs.dvc_operation_id != '' && success()
         continue-on-error: true
         run: |
-          DATA_DIR="data/${LEAF_TYPE}"
-          TOTAL=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
-          SIZE=$(du -sb "$DATA_DIR" | cut -f1)
-          DVC_FILE="data_${LEAF_TYPE}.dvc"
-          DVC_MD5=""
-          if [ -f "$DVC_FILE" ]; then
-            DVC_MD5=$(grep -oP 'md5:\s*\K\S+' "$DVC_FILE" || true)
-          fi
+          python3 -c "
+          import json, os, glob
+
+          leaf = os.environ['LEAF_TYPE']
+          data_dir = f'data/{leaf}'
+          classes = {}
+          total_files = 0
+          total_size = 0
+
+          for cls_dir in sorted(glob.glob(os.path.join(data_dir, '*/'))):
+              if not os.path.isdir(cls_dir):
+                  continue
+              cls_name = os.path.basename(cls_dir.rstrip('/'))
+              imgs = [f for f in os.listdir(cls_dir)
+                      if f.lower().endswith(('.jpg','.jpeg','.png','.bmp','.webp','.tiff'))]
+              cls_size = sum(os.path.getsize(os.path.join(cls_dir, f)) for f in imgs)
+              classes[cls_name] = {'count': len(imgs), 'size': cls_size}
+              total_files += len(imgs)
+              total_size += cls_size
+
+          dvc_file = f'data_{leaf}.dvc'
+          dvc_md5 = ''
+          if os.path.exists(dvc_file):
+              with open(dvc_file) as f:
+                  for line in f:
+                      if line.strip().startswith('md5:'):
+                          dvc_md5 = line.strip().split(':', 1)[1].strip()
+                          break
+
+          metadata = {
+              'file_count': total_files,
+              'total_size': total_size,
+              'num_classes': len(classes),
+              'classes': classes,
+              'dvc_file': dvc_file,
+              'dvc_md5': dvc_md5,
+              'datasets': {leaf: {
+                  'file_count': total_files,
+                  'total_size': total_size,
+                  'num_classes': len(classes),
+                  'classes': classes,
+                  'dvc_md5': dvc_md5
+              }}
+          }
+          with open('/tmp/metadata.json', 'w') as f:
+              json.dump(metadata, f)
+          "
+
+          COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PAYLOAD=$(python3 -c "
+          import json
+          m = json.load(open('/tmp/metadata.json'))
+          print(json.dumps({'status':'completed','completed_at':'$COMPLETED_AT','metadata':m}))
+          ")
           curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "$(printf '{"status":"completed","completed_at":"%s","metadata":{"file_count":%d,"total_size":%d,"dvc_file":"%s","dvc_md5":"%s"}}' \
-              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TOTAL" "$SIZE" "$DVC_FILE" "$DVC_MD5")"
+            -d "$PAYLOAD"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

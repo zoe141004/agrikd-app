@@ -635,14 +635,19 @@ export default function DataManagementPage() {
             <div className="card">
               <div className="card-header"><div><div className="card-label">Activity</div><div className="card-title">Recent DVC Operations</div></div></div>
               <table>
-                <thead><tr><th>Operation</th><th>Dataset</th><th>Source</th><th>Status</th><th>Started</th></tr></thead>
+                <thead><tr><th>Operation</th><th>Dataset</th><th>Status</th><th>Details</th><th>Started</th></tr></thead>
                 <tbody>
                   {dvcOps.slice(0, 5).map(op => (
                     <tr key={op.id}>
                       <td><span className="badge">{op.operation}</span></td>
                       <td><strong style={{ color: '#121c28' }}>{op.leaf_type}</strong></td>
-                      <td style={{ fontSize: 12, color: '#64748b' }}>{op.source || '—'}</td>
                       <td><StatusBadge status={op.status} /></td>
+                      <td style={{ fontSize: 12, color: '#64748b' }}>
+                        {op.metadata?.file_count != null && <span>{op.metadata.file_count} files</span>}
+                        {op.metadata?.total_size != null && <span style={{ marginLeft: 6 }}>{formatBytes(op.metadata.total_size)}</span>}
+                        {op.metadata?.num_classes != null && <span style={{ marginLeft: 6 }}>{op.metadata.num_classes} classes</span>}
+                        {op.error_message && <span style={{ color: '#ef4444' }}> {op.error_message}</span>}
+                      </td>
                       <td style={{ fontSize: 12, color: '#94a3b8' }}>{formatDateTime(op.started_at)}</td>
                     </tr>
                   ))}
@@ -898,9 +903,51 @@ export default function DataManagementPage() {
                         <td><strong style={{ color: '#121c28' }}>{op.leaf_type}</strong></td>
                         <td style={{ fontSize: 12, color: '#64748b' }}>{op.source || '—'}</td>
                         <td><StatusBadge status={op.status} /></td>
-                        <td style={{ fontSize: 12, color: '#64748b' }}>
+                        <td style={{ fontSize: 12, color: '#64748b', maxWidth: 320 }}>
                           {op.metadata?.file_count != null && <span>{op.metadata.file_count} files</span>}
                           {op.metadata?.total_size != null && <span style={{ marginLeft: 8 }}>{formatBytes(op.metadata.total_size)}</span>}
+                          {op.metadata?.num_classes != null && <span style={{ marginLeft: 8 }}>{op.metadata.num_classes} classes</span>}
+                          {op.metadata?.datasets && (
+                            <details style={{ marginTop: 4 }}>
+                              <summary style={{ cursor: 'pointer', color: '#3b82f6', fontSize: 11 }}>Dataset breakdown</summary>
+                              {Object.entries(op.metadata.datasets).map(([dsName, ds]) => (
+                                <div key={dsName} style={{ marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #e2e8f0' }}>
+                                  <div style={{ fontWeight: 600, color: '#334155' }}>{dsName}</div>
+                                  <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    {ds.file_count} images &middot; {ds.num_classes} classes &middot; {formatBytes(ds.total_size)}
+                                    {ds.dvc_md5 && <span> &middot; md5: {ds.dvc_md5.slice(0, 8)}&hellip;</span>}
+                                  </div>
+                                  {ds.classes && (
+                                    <table style={{ fontSize: 11, marginTop: 2, borderCollapse: 'collapse', width: '100%' }}>
+                                      <tbody>
+                                        {Object.entries(ds.classes).map(([cls, info]) => (
+                                          <tr key={cls} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                            <td style={{ padding: '1px 6px 1px 0', color: '#475569' }}>{cls}</td>
+                                            <td style={{ padding: '1px 0', textAlign: 'right', color: '#64748b' }}>{info.count}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              ))}
+                            </details>
+                          )}
+                          {op.metadata?.classes && !op.metadata?.datasets && (
+                            <details style={{ marginTop: 4 }}>
+                              <summary style={{ cursor: 'pointer', color: '#3b82f6', fontSize: 11 }}>Per-class breakdown</summary>
+                              <table style={{ fontSize: 11, marginTop: 2, borderCollapse: 'collapse', width: '100%' }}>
+                                <tbody>
+                                  {Object.entries(op.metadata.classes).map(([cls, info]) => (
+                                    <tr key={cls} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                      <td style={{ padding: '1px 6px 1px 0', color: '#475569' }}>{cls}</td>
+                                      <td style={{ padding: '1px 0', textAlign: 'right', color: '#64748b' }}>{typeof info === 'object' ? info.count : info}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </details>
+                          )}
                           {op.error_message && <div style={{ color: '#ef4444', fontSize: 11 }}>{op.error_message}</div>}
                         </td>
                         <td style={{ fontSize: 12, color: '#94a3b8' }}>{formatDateTime(op.started_at)}</td>
