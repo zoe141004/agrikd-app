@@ -47,6 +47,10 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 5 | `database/migrations/005_storage.sql` | 3 storage buckets + policies |
 | 6 | `database/migrations/006_model_reports_and_rpcs.sql` | Model report tables + RPC functions |
 | 7 | `database/migrations/007_multi_version.sql` | Multi-version model registry (status lifecycle), enforce_version_lifecycle() trigger, pipeline_runs table |
+| 8 | `database/migrations/008_cleanup_and_realtime.sql` | Cleanup deprecated objects + enable Realtime on pipeline_runs |
+| 9 | `database/migrations/009_security_hardening.sql` | Security hardening: tighten RLS policies, add missing indexes |
+| 10 | `database/migrations/010_fix_lifecycle_for_update.sql` | Fix enforce_version_lifecycle trigger for UPDATE operations |
+| 11 | `database/migrations/011_dvc_operations.sql` | DVC operations tracking table (stage/push/pull/export with status lifecycle) |
 
 All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
 
@@ -59,13 +63,19 @@ Run the verification script:
 ```
 
 Expected output: All checks should show `[PASS]`. The script verifies:
-- RLS enabled on all 6 tables
+- RLS enabled on all required tables (including dvc_operations)
 - All policies exist per table
 - `is_admin_role()` function exists and is SECURITY DEFINER
 - `handle_new_user()` trigger on auth.users
 - `enforce_version_lifecycle()` trigger on model_registry (replaces old sync_model_urls)
 - Storage buckets exist (models, datasets, prediction-images)
-- All 7 indexes exist
+- All indexes exist
+
+**After running migration 011**, also enable Realtime for the new table:
+
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE public.dvc_operations;
+```
 
 ## 5. Set Admin User
 
@@ -140,7 +150,7 @@ This generates:
 
 | Problem | Solution |
 |---------|----------|
-| "relation does not exist" | Run migrations in order: 001 → 002 → 003 → 004 → 005 → 006 → 007 |
+| "relation does not exist" | Run migrations in order: 001 → 002 → ... → 011 |
 | "function is_admin_role() does not exist" | Run 002_functions_triggers.sql (creates the function referenced by 003_rls_policies.sql) |
 | RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
 | Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |

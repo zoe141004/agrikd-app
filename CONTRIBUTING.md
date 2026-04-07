@@ -134,6 +134,7 @@ agrikd/
 │       ├── config.example.json  # Template (commit this)
 │       └── config.json          # Local only (gitignored)
 ├── database/
+│   ├── migrations/              # 11 SQL migration files (001-011)
 │   └── verify_rls_policies.sql  # RLS verification queries
 ├── models/                      # Exported ONNX and TFLite artifacts
 ├── docs/                        # Extended documentation
@@ -200,7 +201,7 @@ instances with different batch-norm statistics. This is not a real failure.
 ### Admin Dashboard
 
 ```bash
-cd admin-dashboard && npm run lint
+cd admin-dashboard && npm test
 ```
 
 ---

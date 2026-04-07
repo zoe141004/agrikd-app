@@ -81,7 +81,7 @@ dashboard, and an Infrastructure-as-Code RLS audit script for the Supabase datab
 | Edge REST API | Flask | Rate-limited (30 req/min), 10 MB upload limit |
 | Backend | Supabase (PostgreSQL + Auth + Storage) | Managed |
 | Admin Dashboard | React 18 + Vite 5 | SPA on Vercel |
-| Error Tracking (Dashboard) | @sentry/react | ^8.0.0 |
+| Error Tracking (Dashboard) | @sentry/react | ^10.47.0 |
 | MLOps Runtime | Python 3.10 + DVC + GitHub Actions | venv at venv_mlops/ |
 | Edge Hardware | NVIDIA Jetson (ARM64) | L4T-based |
 | Local Database | SQLite (sqflite 2.4.1 / Python sqlite3) | - |
@@ -162,12 +162,16 @@ agrikd/
 ├── database/                          # Infrastructure-as-Code DB scripts
 │   ├── migrations/
 │   │   ├── 001_tables.sql
-│   │   ├── 002_rls_policies.sql
-│   │   ├── 003_functions_triggers.sql
+│   │   ├── 002_functions_triggers.sql
+│   │   ├── 003_rls_policies.sql
 │   │   ├── 004_indexes.sql
 │   │   ├── 005_storage.sql
 │   │   ├── 006_model_reports_and_rpcs.sql
-│   │   └── 007_multi_version.sql
+│   │   ├── 007_multi_version.sql
+│   │   ├── 008_cleanup_and_realtime.sql
+│   │   ├── 009_security_hardening.sql
+│   │   ├── 010_fix_lifecycle_for_update.sql
+│   │   └── 011_dvc_operations.sql
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
 ├── .github/workflows/                 # CI/CD (11 workflow files)
@@ -181,7 +185,9 @@ agrikd/
 │   ├── dvc-pull.yml                   # Pull datasets from DVC remote
 │   ├── dvc-push.yml                   # Push datasets to DVC remote
 │   ├── export-data.yml                # Export prediction records
-│   └── dataset-upload.yml             # Upload datasets to storage
+│   └── dataset-upload.yml             # Upload datasets to storage (staging + DVC)
+├── .github/scripts/
+│   └── stage_dataset_to_storage.py    # Stage dataset ZIP to Supabase Storage
 │
 ├── docs/                              # Project documentation
 ├── data/                              # DVC-tracked datasets (gitignored)
@@ -425,6 +431,7 @@ prevent key leakage in published APKs.
 | `model_versions` | id, leaf_type, version, model_url, accuracy, archived_at | Archived model version snapshots |
 | `model_reports` | id, user_id, model_version, leaf_type, prediction_id, reason, created_at | User feedback on wrong predictions |
 | `pipeline_runs` | id, leaf_type, version, status, github_run_id, triggered_by | CI/CD pipeline progress tracking (Realtime) |
+| `dvc_operations` | id, leaf_type, operation, source, status, metadata, github_run_id, triggered_by | DVC operation tracking: stage/push/pull/export with Realtime status updates |
 
 Row-Level Security (RLS) policies ensure that regular users can only access their own
 prediction records, while admin-role users have full read access through the dashboard.

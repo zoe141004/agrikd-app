@@ -23,13 +23,15 @@ jobs:
 
       - name: Report status — pushing
         if: inputs.dvc_operation_id != ''
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"status\":\"pushing\",\"github_run_id\":${{ github.run_id }},\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+            -H "Prefer: return=minimal" \
+            -d "{\"status\":\"pushing\",\"github_run_id\":\"${{ github.run_id }}\",\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -46,13 +48,15 @@ jobs:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
       - name: Report status — completed
-        if: inputs.dvc_operation_id != ''
+        if: inputs.dvc_operation_id != '' && success()
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
             -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -61,12 +65,14 @@ jobs:
 
       - name: Report status — failed
         if: failure() && inputs.dvc_operation_id != ''
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
             -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"DVC push failed — check GitHub Actions logs\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

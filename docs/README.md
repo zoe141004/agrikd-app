@@ -17,7 +17,7 @@ Step-by-step instructions for setup, build, and deployment.
 | Guide | Description |
 |-------|-------------|
 | [flutter_app_build.md](guides/flutter_app_build.md) | Flutter app — prerequisites, env config, debug/release builds, signing, APK variants, TFLite bundling |
-| [supabase_setup.md](guides/supabase_setup.md) | Supabase project — create project, Auth, run migration SQL (001-007), verify RLS, set admin, storage buckets |
+| [supabase_setup.md](guides/supabase_setup.md) | Supabase project — create project, Auth, run migration SQL (001-011), verify RLS, set admin, storage buckets |
 | [mlops_pipeline_setup.md](guides/mlops_pipeline_setup.md) | MLOps pipeline — Python venv, DVC, config files, run pipeline, individual scripts, adding new datasets |
 | [cicd_setup.md](guides/cicd_setup.md) | CI/CD — GitHub Secrets, all 11 workflows (CI, Release, Train, Model Pipeline, DVC, Deploy, etc.) |
 | [admin_dashboard_manual.md](guides/admin_dashboard_manual.md) | Admin Dashboard — deployment (Vercel), local dev, page-by-page usage guide, troubleshooting |

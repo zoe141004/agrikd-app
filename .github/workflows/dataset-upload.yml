@@ -63,13 +63,15 @@ jobs:
       # ── Report status: staging ──────────────────────────────────────────
       - name: Report status — staging
         if: inputs.dvc_operation_id != ''
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"status\":\"staging\",\"github_run_id\":${{ github.run_id }},\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+            -H "Prefer: return=minimal" \
+            -d "{\"status\":\"staging\",\"github_run_id\":\"${{ github.run_id }}\",\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -240,12 +242,14 @@ jobs:
       # ── DVC add and push (stage_only=false) ─────────────────────────────
       - name: Report status — pushing
         if: inputs.stage_only != 'true' && inputs.dvc_operation_id != ''
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
             -d '{"status":"pushing"}'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -306,7 +310,8 @@ jobs:
 
       # ── Report status: completed ────────────────────────────────────────
       - name: Report status — completed
-        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != ''
+        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != '' && success()
+        continue-on-error: true
         run: |
           DATA_DIR="data/${LEAF_TYPE}"
           TOTAL=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)
@@ -316,12 +321,14 @@ jobs:
           if [ -f "$DVC_FILE" ]; then
             DVC_MD5=$(grep -oP 'md5:\s*\K\S+' "$DVC_FILE" || true)
           fi
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"file_count\":$TOTAL,\"total_size\":$SIZE,\"dvc_file\":\"$DVC_FILE\",\"dvc_md5\":\"$DVC_MD5\"}}"
+            -H "Prefer: return=minimal" \
+            -d "$(printf '{"status":"completed","completed_at":"%s","metadata":{"file_count":%d,"total_size":%d,"dvc_file":"%s","dvc_md5":"%s"}}' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TOTAL" "$SIZE" "$DVC_FILE" "$DVC_MD5")"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -331,12 +338,14 @@ jobs:
       # ── Report status: failed ───────────────────────────────────────────
       - name: Report status — failed
         if: failure() && inputs.dvc_operation_id != ''
+        continue-on-error: true
         run: |
-          curl -sf -X PATCH \
+          curl -sS --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
             -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Dataset upload failed — check GitHub Actions logs\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

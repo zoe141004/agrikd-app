@@ -115,6 +115,11 @@ Steps:
 
 ## 6. DVC Workflows
 
+All DVC workflows support an optional `dvc_operation_id` input. When
+provided, the workflow reports its progress back to the `dvc_operations`
+Supabase table (status transitions: pending → running → completed/failed)
+with `github_run_id` and `github_run_url` for traceability.
+
 ### Pull data (`dvc-pull.yml`):
 ```
 Manual trigger → Select leaf_type (optional) → Pull from Google Drive
@@ -127,15 +132,26 @@ Manual trigger → Push all DVC-tracked data to Google Drive
 ```
 
 ### Dataset Upload (`dataset-upload.yml`):
-Two modes:
+Three source modes plus staging support:
 - **gdrive**: Download ZIP from Google Drive URL → prepare dataset
+- **kaggle**: Download dataset from Kaggle → prepare dataset
 - **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset
+
+Additional inputs:
+- `stage_only` (default `'false'`): When `'true'`, stages the dataset to
+  Supabase Storage instead of pushing to DVC. Uses
+  `.github/scripts/stage_dataset_to_storage.py` to collect metadata and
+  upload a ZIP to the `datasets/{leaf_type}/staging/` path.
+- `dvc_operation_id`: Links the workflow run to a `dvc_operations` row
+  for real-time status tracking from the admin dashboard.
 
 ## 7. Export Data (`export-data.yml`)
 
 Manually triggered. Exports all predictions (paginated, 1000/page) from Supabase, saves to `data/exports/predictions_snapshot.json`, then tracks with DVC and pushes to Google Drive.
 
 **PII filtering:** Export excludes sensitive fields from the prediction data.
+
+Supports `dvc_operation_id` for status report-back.
 
 ## 8. Admin Dashboard Deploy (`deploy.yml`)
 

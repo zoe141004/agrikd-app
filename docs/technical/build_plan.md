@@ -871,7 +871,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 **Verification:**
 - `flutter analyze` — 0 issues
 - `flutter test` — 89/89 passed
-- Admin Dashboard tests — 23/23 passed
+- Admin Dashboard tests — 30/30 passed
 - No secrets committed, no SQL injection, no debug artifacts
 
 ---
@@ -888,7 +888,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | Sync | ✅ | Auto-sync + manual + exponential backoff + OTA model update |
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
 | CI/CD | ✅ | GitHub Actions: lint, test, model conversion, build, release |
-| Admin Dashboard | ✅ | React + Vite + Supabase JS (10 pages: Login, Dashboard, Predictions, Models, Users, Data Management, Releases, System Health, Settings, Model Reports) |
+| Admin Dashboard | ✅ | React + Vite + Supabase JS (10 pages, 30 tests: 3 smoke + 22 integration + 5 data management) |
 | Jetson Edge | ✅ | Docker + TensorRT FP16 + REST API + systemd service |
 | i18n | ✅ | EN + VI (~300 keys each) |
 | Tests | ✅ | 89 tests (unit, DAO, provider, widget, integration) |

@@ -91,12 +91,32 @@ User administration panel.
 
 ### Data Management (`/data`)
 
-Interface for dataset lifecycle operations powered by DVC.
+Interface for dataset lifecycle operations powered by DVC, with a
+two-stage staging workflow and full operation tracking via the
+`dvc_operations` database table.
 
-- **Upload** -- Provide a Google Drive URL to pull a new dataset version
-  into the DVC-tracked storage.
-- **Export** -- Package prediction records from the database into a
-  labeled dataset for retraining.
+Five tabs:
+
+- **Overview** -- DVC dataset listing, storage usage, and a summary of
+  the 5 most recent DVC operations.
+- **Stage Data** -- Two methods for staging new datasets:
+  - *From Predictions* -- export prediction images above a confidence
+    threshold as a staging dataset.
+  - *External Source* -- supply a Google Drive or Kaggle URL to download
+    and stage a dataset ZIP.
+  Staged datasets appear with metadata (file count, classes, size) and
+  can be reviewed before pushing to DVC.
+- **DVC Operations** -- Full history table of all DVC operations (stage,
+  push, pull, export) with status badges, GitHub Actions links, and
+  action buttons. Also provides DVC Pull/Verify and Push All controls.
+- **Prediction Data** -- Browse prediction statistics, export CSV/JSON,
+  and import CSV (collapsed by default).
+- **Storage Files** -- Supabase Storage bucket browser with download and
+  delete capabilities.
+
+Operation tracking uses Supabase Realtime subscriptions on the
+`dvc_operations` table with GitHub Actions polling as a fallback, so
+status persists across page refreshes.
 
 ### Releases (`/releases`)
 
