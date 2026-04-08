@@ -234,7 +234,18 @@ jobs:
 
       - name: DVC add and push
         run: |
+          # Kiểm tra xem dữ liệu là JSON hay Base64
+          if echo "$GDRIVE_CREDENTIALS_RAW" | grep -q '^{'; then
+            echo "Dữ liệu là JSON thuần, đang lưu trực tiếp..."
+            echo "$GDRIVE_CREDENTIALS_RAW" > /tmp/gdrive-sa.json
+          else
+            echo "Dữ liệu là Base64, đang giải mã..."
+            echo "$GDRIVE_CREDENTIALS_RAW" | base64 -d > /tmp/gdrive-sa.json
+          fi
+          # 2. Cấu hình DVC dùng Service Account bằng file JSON vừa tạo
           dvc remote modify gdrive gdrive_use_service_account true
+          dvc remote modify --local gdrive gdrive_service_account_json_file_path /tmp/gdrive-sa.json
+          
           DATA_DIR="data/${LEAF_TYPE}"
           DVC_FILE="data_${LEAF_TYPE}.dvc"
 
@@ -250,21 +261,22 @@ jobs:
           echo "=== DVC file ==="
           cat "$DVC_FILE"
 
-          # Push data to Google Drive remote
-          for attempt in 1 2 3; do
-            echo "DVC push attempt $attempt/3..."
-            if dvc push "$DVC_FILE" -v; then
+          # 3. Push data lên Google Drive (Giới hạn 2 luồng để tránh Rate Limit, lặp 4 lần, chờ 30s)
+          for attempt in 1 2 3 4; do
+            echo "DVC push attempt $attempt/4..."
+            if dvc push "$DVC_FILE" --jobs 2 -v; then
               echo "DVC push succeeded on attempt $attempt"
               break
             fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "[ERROR] DVC push failed after 3 attempts"
+            if [ "$attempt" -eq 4 ]; then
+              echo "[ERROR] DVC push failed after 4 attempts"
               exit 1
             fi
-            sleep 10
+            echo "Rate limit hit. Waiting 30 seconds before retrying..."
+            sleep 30
           done
         env:
-          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          GDRIVE_CREDENTIALS_DATA_B64: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Commit DVC tracking files
