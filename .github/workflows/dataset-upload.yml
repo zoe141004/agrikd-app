@@ -238,8 +238,15 @@ jobs:
           DATA_DIR="data/${LEAF_TYPE}"
           DVC_FILE="data_${LEAF_TYPE}.dvc"
 
-          # Add to DVC tracking (--file places .dvc at repo root, matching existing convention)
-          dvc add "$DATA_DIR" --file "$DVC_FILE"
+          # DVC 3.x creates .dvc next to tracked dir: data/${LEAF_TYPE}.dvc
+          # Move to repo root (data_X.dvc) and fix internal path to match convention
+          dvc add "$DATA_DIR"
+          DVC_CREATED="data/${LEAF_TYPE}.dvc"
+          if [ -f "$DVC_CREATED" ] && [ "$DVC_CREATED" != "$DVC_FILE" ]; then
+            mv "$DVC_CREATED" "$DVC_FILE"
+            # Fix path: DVC wrote "path: LEAF_TYPE", needs "path: data/LEAF_TYPE"
+            sed -i "s|path: ${LEAF_TYPE}$|path: data/${LEAF_TYPE}|" "$DVC_FILE"
+          fi
           echo "=== DVC file ==="
           cat "$DVC_FILE"
 
@@ -271,6 +278,7 @@ jobs:
 
           git add "$DVC_FILE" "$CONFIG"
           [ -f "$GITIGNORE" ] && git add "$GITIGNORE"
+          [ -f "data/.gitignore" ] && git add "data/.gitignore"
 
           if git diff --cached --quiet; then
             echo "No changes to commit"

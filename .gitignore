@@ -62,7 +62,12 @@ model_checkpoints_student/
 !mobile_app/assets/models/**/*.tflite
 
 # Datasets (large, tracked via DVC)
-/data/
+# DVC creates per-directory .gitignore to ignore actual data files.
+# We un-ignore data/ so .dvc tracking files and .gitignore files are committed.
+/data/**
+!/data/**/
+!data/**/*.dvc
+!data/**/.gitignore
 
 # Environment files (secrets)
 .env
