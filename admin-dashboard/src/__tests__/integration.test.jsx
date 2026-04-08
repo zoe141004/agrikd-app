@@ -349,24 +349,25 @@ describe('Group 1: Dashboard RPC Integration', () => {
   })
 
   it('handles RPC error gracefully without crashing', async () => {
-    // Override RPCs to reject — Promise.all will reject on the first failure
+    // Override RPCs to reject — with Promise.allSettled, individual failures
+    // are handled gracefully (show zero/empty data instead of crashing)
     mockRpc.mockImplementation(() => {
       return Promise.reject(new Error('Database connection failed'))
     })
 
-    // from() still returns normal chainables; Promise.all rejects before
-    // awaiting them so the actual resolve values don't matter.
     mockFrom.mockImplementation(() => createChainable({ data: null, count: 0 }))
 
     renderPage(DashboardPage)
 
-    // Should show error message instead of crashing
+    // Page should still render with default/empty data (Promise.allSettled
+    // treats each rejection individually, so the page doesn't crash)
     await waitFor(() => {
-      expect(screen.getByText('Database connection failed')).toBeInTheDocument()
+      expect(screen.getByText('Dashboard')).toBeInTheDocument()
     })
 
-    // Page header should still be present (component didn't crash)
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
+    // Stats should show zero values (graceful degradation)
+    const statValues = screen.getAllByText('0', { selector: '.stat-value' })
+    expect(statValues.length).toBeGreaterThan(0)
   })
 
   it('handles empty RPC responses gracefully', async () => {

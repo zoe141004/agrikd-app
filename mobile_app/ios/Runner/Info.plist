@@ -66,6 +66,17 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.agrikd.app</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.agrikd.app</string>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>AgriKD needs camera access to capture leaf images for disease diagnosis.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

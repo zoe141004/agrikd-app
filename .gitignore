@@ -91,3 +91,6 @@ jetson/config/config.json
 
 # Build reports
 **/build/reports/
+
+# Claude Code agent state
+.claude/

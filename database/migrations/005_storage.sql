@@ -81,7 +81,20 @@ CREATE POLICY "Users read own images"
         AND (storage.foldername(name))[1] = auth.uid()::text
     );
 
+DROP POLICY IF EXISTS "Users delete own images" ON storage.objects;
+CREATE POLICY "Users delete own images"
+    ON storage.objects FOR DELETE
+    USING (
+        bucket_id = 'prediction-images'
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+
 DROP POLICY IF EXISTS "Admin read all images" ON storage.objects;
 CREATE POLICY "Admin read all images"
     ON storage.objects FOR SELECT
+    USING (bucket_id = 'prediction-images' AND public.is_admin_role());
+
+DROP POLICY IF EXISTS "Admin delete all images" ON storage.objects;
+CREATE POLICY "Admin delete all images"
+    ON storage.objects FOR DELETE
     USING (bucket_id = 'prediction-images' AND public.is_admin_role());

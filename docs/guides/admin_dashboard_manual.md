@@ -52,8 +52,8 @@ The landing page provides a high-level snapshot of the system:
 
 - **Stats cards** -- Total predictions processed, number of active models,
   and registered user count.
-- **Bar chart** -- Prediction volume over time, rendered with Recharts.
-- **Pie chart** -- Distribution of predictions by leaf type.
+- **Area chart** -- Prediction volume over the last 30 days, rendered with Recharts.
+- **Leaf type split** -- Horizontal progress bars showing distribution of predictions by leaf type.
 
 ### Predictions (`/predictions`)
 
@@ -73,13 +73,13 @@ The model registry and pipeline control center with five tabs:
 - **Registry** -- Lists all model versions with status (staging/active/backup),
   format, size, and SHA-256 checksums. Admin can promote staging models to
   active or archive old versions. Max 2 active versions per leaf type.
-- **Compare** -- Side-by-side comparison of benchmark metrics across model
-  versions and formats (PyTorch, ONNX, TFLite float16, TFLite float32).
-- **Upload** -- Upload `.pth` student checkpoints to Supabase Storage.
-- **Pipeline** -- Trigger the GitHub Actions model-pipeline workflow and track
-  progress in real-time via Supabase Realtime (pipeline_runs table).
 - **Benchmarks** -- View detailed benchmark results: accuracy, precision,
   recall, F1, latency, model size, and FLOPs per format.
+- **Upload Model** -- Upload `.pth` student checkpoints to Supabase Storage.
+- **Validate** -- Trigger the GitHub Actions model-pipeline workflow and track
+  progress in real-time via Supabase Realtime (pipeline_runs table).
+- **OTA Deploy** -- Configure and trigger over-the-air model deployment to
+  mobile apps via the model registry status lifecycle.
 
 ### Users (`/users`)
 
@@ -91,9 +91,9 @@ User administration panel.
 
 ### Data Management (`/data`)
 
-Interface for dataset lifecycle operations powered by DVC, with a
-two-stage staging workflow and full operation tracking via the
-`dvc_operations` database table.
+Interface for dataset lifecycle operations powered by DVC. Datasets are
+pushed directly to DVC (Google Drive) — Supabase only stores metadata
+via the `dvc_operations` database table.
 
 Five tabs:
 
@@ -113,7 +113,7 @@ Five tabs:
 - **Prediction Data** -- Browse prediction statistics, export CSV/JSON,
   and import CSV (collapsed by default).
 - **Storage Files** -- Two sub-tabs:
-  - *Datasets* -- Browse `datasets` and `models` Supabase Storage buckets
+  - *Datasets* -- Browse the `datasets` Supabase Storage bucket
     with download and delete capabilities.
   - *Prediction Images* -- Query the `predictions` table for rows with
     uploaded images. Thumbnails use signed URLs (private
@@ -138,19 +138,23 @@ Operational status overview.
 
 - **Supabase status** -- Connection health and API latency.
 - **Database statistics** -- Row counts and table sizes.
-- **Storage usage** -- Supabase Storage bucket utilization.
+- **Storage buckets** -- Number of Supabase Storage buckets detected.
 
 ### Settings (`/settings`)
 
-Application-level configuration.
+Application-level configuration with six tabs: **General**, **Integrations**,
+**Admin**, **CI/CD**, **Deployment**, and **Audit Log**.
 
-- View and update general app configuration values.
-- **GitHub Actions Integration** -- Configure repository owner, repo name,
+- **General** -- View and update general app configuration values. Display
+  the current Supabase connection details (project URL and anonymous key).
+- **Integrations** -- Configure GitHub repository owner, repo name,
   branch, and Personal Access Token (PAT). Token is stored in
   `localStorage` (persists across sessions). Required for DVC sync,
   model validation, and CI/CD triggers.
-- Display the current Supabase connection details (project URL and
-  anonymous key) for verification purposes.
+- **Admin** -- Admin-specific settings and user management shortcuts.
+- **CI/CD** -- Quick-trigger buttons for common CI/CD workflows.
+- **Deployment** -- Trigger Vercel deployments and view deployment status.
+- **Audit Log** -- View recent audit log entries for admin actions.
 
 ---
 
@@ -184,7 +188,8 @@ Application-level configuration.
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co https://*.sentry.io; font-src 'self' https://fonts.gstatic.com;" }
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.github.com https://*.sentry.io; font-src 'self' https://fonts.gstatic.com;" }
       ]
     }
   ]
@@ -197,7 +202,8 @@ Application-level configuration.
 | `X-Content-Type-Options: nosniff` | Stops browsers from MIME-sniffing the response away from the declared content type |
 | `Referrer-Policy` | Sends the origin only on cross-origin requests; full URL on same-origin |
 | `Strict-Transport-Security` | Enforces HTTPS for 2 years with subdomains and preload eligibility |
-| `Content-Security-Policy` | Restricts resource loading to `self`, Supabase, Sentry, and Google Fonts origins |
+| `Permissions-Policy` | Disables camera, microphone, and geolocation APIs |
+| `Content-Security-Policy` | Restricts resource loading to `self`, Supabase (REST + WebSocket), GitHub API, Sentry, and Google Fonts |
 
 ### Manual Trigger
 

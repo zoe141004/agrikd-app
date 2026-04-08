@@ -71,7 +71,8 @@ Expected output: All checks should show `[PASS]`. The script verifies:
 - Storage buckets exist (models, datasets, prediction-images)
 - All indexes exist
 
-**After running migration 011**, also enable Realtime for the new table:
+**Migration 011** auto-enables Realtime for `dvc_operations`. If it fails
+due to insufficient privileges, run manually in the SQL Editor:
 
 ```sql
 ALTER PUBLICATION supabase_realtime ADD TABLE public.dvc_operations;

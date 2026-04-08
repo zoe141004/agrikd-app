@@ -281,7 +281,6 @@ export default function DataManagementPage() {
         source: stagedOp.source || 'manual',
         leaf_type: stagedOp.leaf_type,
         dvc_operation_id: pushOp.id,
-        stage_only: 'false',
         display_name: stagedOp.metadata?.display_name || stagedOp.leaf_type,
       })
 

@@ -33,13 +33,13 @@ export default function DashboardPage() {
     const addFilter = (q) => leafFilter ? q.eq('leaf_type', leafFilter) : q
 
     const [
-      { data: rpcStats },
-      { data: diseaseDist },
-      { data: leafTypeOpts },
-      { count: models },
-      { data: dailyRows },
-      { data: recent },
-    ] = await Promise.all([
+      rpcStatsRes,
+      diseaseDistRes,
+      leafTypeOptsRes,
+      modelsRes,
+      dailyRowsRes,
+      recentRes,
+    ] = await Promise.allSettled([
       supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_leaf_type_options'),
@@ -47,6 +47,13 @@ export default function DashboardPage() {
       addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true })),
       addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, created_at').order('created_at', { ascending: false }).limit(8)),
     ])
+
+    const rpcStats = rpcStatsRes.status === 'fulfilled' ? rpcStatsRes.value?.data : null
+    const diseaseDist = diseaseDistRes.status === 'fulfilled' ? diseaseDistRes.value?.data : null
+    const leafTypeOpts = leafTypeOptsRes.status === 'fulfilled' ? leafTypeOptsRes.value?.data : null
+    const models = modelsRes.status === 'fulfilled' ? modelsRes.value?.count : 0
+    const dailyRows = dailyRowsRes.status === 'fulfilled' ? dailyRowsRes.value?.data : null
+    const recent = recentRes.status === 'fulfilled' ? recentRes.value?.data : null
 
     // Leaf type options for dropdown
     if (leafTypeOpts) {

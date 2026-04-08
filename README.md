@@ -27,11 +27,16 @@ cd mobile_app && flutter run       # Loads .env via flutter_dotenv
 
 ## Documentation
 
-- [Project Architecture & Overview](docs/project_context.md)
-- [Product Release Guide](docs/product_release.md)
-- [Contributing / Developer Setup](CONTRIBUTING.md)
-- [Admin Dashboard Manual](docs/admin_dashboard_manual.md)
-- [Jetson Deployment & GUI Guide](docs/jetson_deployment_guide.md)
+All guides are in [`docs/`](docs/README.md):
+
+- [Project Architecture & Overview](docs/technical/project_context.md)
+- [Product Release Guide](docs/guides/product_release.md)
+- [Supabase Setup](docs/guides/supabase_setup.md)
+- [CI/CD Setup](docs/guides/cicd_setup.md)
+- [Admin Dashboard Manual](docs/guides/admin_dashboard_manual.md)
+- [Jetson Deployment & GUI Guide](docs/guides/jetson_deployment_guide.md)
+- [Flutter App Build](docs/guides/flutter_app_build.md)
+- [MLOps Pipeline](docs/guides/mlops_pipeline_setup.md)
 
 ## Benchmark Results
 

@@ -20,6 +20,8 @@ Go to **Repository → Settings → Secrets and variables → Actions** and add:
 | `GOOGLE_WEB_CLIENT_ID` | CI, Release | Google Cloud Console → Credentials → OAuth Client ID |
 | `GDRIVE_CREDENTIALS_DATA` | DVC Pull/Push, Train, Validate, Export, Dataset Upload | Base64-encoded Google Drive service account JSON |
 | `VERCEL_DEPLOY_HOOK` | Deploy (optional) | Vercel → Project → Settings → Git → Deploy Hooks |
+| `KAGGLE_USERNAME` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Username |
+| `KAGGLE_KEY` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Create New Token |
 
 ### Create DVC credentials:
 ```bash
@@ -49,7 +51,7 @@ base64 -w 0 service-account.json
 | **DVC Pull** | `dvc-pull.yml` | Pull datasets from Google Drive |
 | **DVC Push** | `dvc-push.yml` | Push datasets to Google Drive |
 | **Export Data** | `export-data.yml` | Export predictions from Supabase |
-| **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive or predictions |
+| **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive, Kaggle, or predictions → push directly to DVC |
 | **Deploy** | `deploy.yml` | Trigger Vercel deployment for admin dashboard |
 | **Model Rollback** | `model-rollback.yml` | Rollback model version in registry |
 
@@ -132,16 +134,12 @@ Manual trigger → Push all DVC-tracked data to Google Drive
 ```
 
 ### Dataset Upload (`dataset-upload.yml`):
-Three source modes plus staging support:
-- **gdrive**: Download ZIP from Google Drive URL → prepare dataset
-- **kaggle**: Download dataset from Kaggle → prepare dataset
-- **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset
+Three source modes — datasets are pushed directly to DVC (Google Drive), not staged in Supabase Storage:
+- **gdrive**: Download ZIP from Google Drive URL → prepare dataset → push to DVC
+- **kaggle**: Download dataset from Kaggle → prepare dataset → push to DVC (requires `KAGGLE_USERNAME` + `KAGGLE_KEY` secrets)
+- **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset → push to DVC
 
 Additional inputs:
-- `stage_only` (default `'false'`): When `'true'`, stages the dataset to
-  Supabase Storage instead of pushing to DVC. Uses
-  `.github/scripts/stage_dataset_to_storage.py` to collect metadata and
-  upload a ZIP to the `datasets/{leaf_type}/staging/` path.
 - `dvc_operation_id`: Links the workflow run to a `dvc_operations` row
   for real-time status tracking from the admin dashboard.
 

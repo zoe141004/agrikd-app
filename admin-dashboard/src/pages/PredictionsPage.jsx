@@ -32,7 +32,7 @@ export default function PredictionsPage() {
     try {
     const rpcFilter = filters.leafType || null
 
-    const [{ data, count }, { data: rpcStats }, { data: diseaseDist }] = await Promise.all([
+    const [predsRes, rpcStatsRes, diseaseDistRes] = await Promise.allSettled([
       applyFilters(
         supabase.from('predictions').select('*', { count: 'exact' })
           .order('created_at', { ascending: false })
@@ -41,6 +41,11 @@ export default function PredictionsPage() {
       supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
     ])
+
+    const data = predsRes.status === 'fulfilled' ? predsRes.value?.data : []
+    const count = predsRes.status === 'fulfilled' ? predsRes.value?.count : 0
+    const rpcStats = rpcStatsRes.status === 'fulfilled' ? rpcStatsRes.value?.data : null
+    const diseaseDist = diseaseDistRes.status === 'fulfilled' ? diseaseDistRes.value?.data : null
 
     setPredictions(data || [])
     setTotal(count || 0)

@@ -93,6 +93,7 @@ class SupabaseSyncService {
               'all_confidences': prediction.allConfidences,
               'inference_time_ms': prediction.inferenceTimeMs,
               'notes': prediction.notes,
+              'source': 'mobile',
               'created_at': prediction.createdAt.toUtc().toIso8601String(),
               'local_id': entityId,
             }, onConflict: 'user_id,local_id')

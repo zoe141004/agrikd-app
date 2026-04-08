@@ -62,6 +62,14 @@ CREATE POLICY "Admins manage dvc operations"
 
 
 -- ── 4. Enable Supabase Realtime for dvc_operations ──────────────────────────
--- Run this in Supabase Dashboard → SQL Editor after applying this migration:
---   ALTER PUBLICATION supabase_realtime ADD TABLE public.dvc_operations;
--- (Cannot be run via migrations — requires superuser privileges)
+-- Attempt automated Realtime setup. Falls back to manual if insufficient privileges.
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.dvc_operations;
+  RAISE NOTICE 'Realtime enabled for dvc_operations';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE WARNING 'Could not enable Realtime automatically. Run manually in Supabase Dashboard → SQL Editor:';
+  RAISE WARNING '  ALTER PUBLICATION supabase_realtime ADD TABLE public.dvc_operations;';
+WHEN duplicate_object THEN
+  RAISE NOTICE 'dvc_operations already in supabase_realtime publication';
+END $$;
