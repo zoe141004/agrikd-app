@@ -1,6 +1,10 @@
 """
 Stage a validated dataset to Supabase Storage and update dvc_operations.
 
+NOTE: This script is NOT called by any workflow. Dataset uploads now push
+directly to DVC (Google Drive) without Supabase Storage staging. Kept for
+reference / potential future local use.
+
 Usage:
     python stage_dataset_to_storage.py \
         --data-dir data/mango \

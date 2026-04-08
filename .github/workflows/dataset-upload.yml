@@ -33,16 +33,6 @@ on:
         required: false
         type: string
         default: ''
-      stage_only:
-        description: 'If true, only stage data to Supabase Storage (no DVC push)'
-        required: false
-        type: string
-        default: 'false'
-      staging_path:
-        description: 'Supabase Storage path of staged data (for push phase after staging)'
-        required: false
-        type: string
-        default: ''
 
 permissions:
   contents: write
@@ -225,23 +215,9 @@ jobs:
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
-      # ── Stage to Supabase Storage (stage_only=true) ─────────────────────
-      - name: Stage dataset to Supabase Storage
-        if: inputs.stage_only == 'true'
-        run: |
-          python .github/scripts/stage_dataset_to_storage.py \
-            --data-dir "data/${LEAF_TYPE}" \
-            --leaf-type "$LEAF_TYPE" \
-            --dvc-operation-id "$DVC_OP_ID"
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          LEAF_TYPE: ${{ inputs.leaf_type }}
-          DVC_OP_ID: ${{ inputs.dvc_operation_id }}
-
-      # ── DVC add and push (stage_only=false) ─────────────────────────────
+      # ── DVC add and push ────────────────────────────────────────────────
       - name: Report status — pushing
-        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != ''
+        if: inputs.dvc_operation_id != ''
         continue-on-error: true
         run: |
           curl -sS --fail-with-body -X PATCH \
@@ -257,7 +233,6 @@ jobs:
           DVC_OP_ID: ${{ inputs.dvc_operation_id }}
 
       - name: DVC add and push
-        if: inputs.stage_only != 'true'
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
           DATA_DIR="data/${LEAF_TYPE}"
@@ -286,7 +261,6 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Commit DVC tracking files
-        if: inputs.stage_only != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -310,7 +284,7 @@ jobs:
 
       # ── Report status: completed ────────────────────────────────────────
       - name: Report status — completed
-        if: inputs.stage_only != 'true' && inputs.dvc_operation_id != '' && success()
+        if: inputs.dvc_operation_id != '' && success()
         continue-on-error: true
         run: |
           python3 -c "
@@ -398,7 +372,6 @@ jobs:
           DVC_OP_ID: ${{ inputs.dvc_operation_id }}
 
       - name: Summary
-        if: inputs.stage_only != 'true'
         run: |
           DATA_DIR="data/${LEAF_TYPE}"
           total=$(find "$DATA_DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.bmp" -o -name "*.webp" \) | wc -l)

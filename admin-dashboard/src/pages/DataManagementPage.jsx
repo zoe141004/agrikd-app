@@ -55,7 +55,7 @@ export default function DataManagementPage() {
   // Storage Files state
   const [storedFiles, setStoredFiles] = useState([])
   const [storageLoading, setStorageLoading] = useState(false)
-  const [storageBucket, setStorageBucket] = useState('datasets')
+  const [storageBucket] = useState('datasets')
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
   const [storageSubTab, setStorageSubTab] = useState('Datasets') // 'Datasets' | 'Prediction Images'
@@ -243,13 +243,12 @@ export default function DataManagementPage() {
         source,
         ...inputs,
         dvc_operation_id: op.id,
-        stage_only: 'true',
       })
 
       setDvcOps(prev => [op, ...prev])
       subscribeToDvcOp(op.id)
       setDvcOpStatus('pending')
-      setDsMsg({ type: 'success', text: `Staging workflow dispatched. Data will be uploaded to Storage for review.` })
+      setDsMsg({ type: 'success', text: `Workflow dispatched. Dataset will be validated and pushed directly to DVC (Google Drive).` })
       logAudit(supabase, 'dvc_staging_triggered', 'dvc_operation', op.id, { source, leaf_type: inputs.leaf_type })
     } catch (err) {
       setDsMsg({ type: 'error', text: err.message })
@@ -408,10 +407,6 @@ export default function DataManagementPage() {
   // ── Discard staged data ───────────────────────────────────────────────────
   const discardStaged = async (op) => {
     try {
-      // Delete staged file from storage
-      if (op.metadata?.staging_path) {
-        await supabase.storage.from(op.metadata?.staging_bucket || 'datasets').remove([op.metadata.staging_path])
-      }
       await supabase.from('dvc_operations').update({
         status: 'failed',
         error_message: 'Discarded by admin',
@@ -832,7 +827,7 @@ export default function DataManagementPage() {
                       <button className="btn btn-sm btn-primary" onClick={() => triggerDvcPush(op)} disabled={isOperationActive}>Push to DVC</button>
                       <button className="btn btn-sm btn-danger" onClick={() => setConfirmAction({
                         title: 'Discard Staged Data',
-                        message: `Discard staged data for "${op.leaf_type}"? The staged ZIP will be deleted from Storage.`,
+                        message: `Discard staged data for "${op.leaf_type}"? This will mark the operation as failed.`,
                         danger: true, confirmLabel: 'Discard',
                         onConfirm: () => { setConfirmAction(null); discardStaged(op) }
                       })}>Discard</button>
@@ -857,7 +852,7 @@ export default function DataManagementPage() {
               <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Stage user predictions as a dataset. Images are downloaded, organized by class, and uploaded to Storage for review before pushing to DVC.</div>
+                <div>Export user predictions as a dataset and push directly to DVC (Google Drive). Images are downloaded, organized by class, and tracked via DVC.</div>
               </div>
               <div className="form-group">
                 <label className="form-label">Leaf Type *</label>
@@ -884,7 +879,7 @@ export default function DataManagementPage() {
               )}
               <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total || ghNotConfigured || isOperationActive}
                 onClick={() => triggerStaging('predictions', { leaf_type: dsLeafType, confidence_threshold: dsConfidence })}>
-                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Staging…</> : 'Stage Dataset'}
+                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : 'Upload to DVC'}
               </button>
             </div>
 
@@ -893,7 +888,7 @@ export default function DataManagementPage() {
               <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">From External Source</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Download dataset from Google Drive or Kaggle, validate structure, and stage to Storage for review.<br/><strong>Expected structure:</strong> <code>dataset_name/class_name/images.*</code></div>
+                <div>Download dataset from Google Drive or Kaggle, validate structure, and push directly to DVC (Google Drive).<br/><strong>Expected structure:</strong> <code>dataset_name/class_name/images.*</code></div>
               </div>
               <div className="form-group">
                 <label className="form-label">Source</label>
@@ -935,7 +930,7 @@ export default function DataManagementPage() {
                   if (dsExternalSource === 'kaggle') inputs.kaggle_url = dsKaggleUrl
                   triggerStaging(dsExternalSource, inputs)
                 }}>
-                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Staging…</> : 'Stage Dataset'}
+                {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : 'Upload to DVC'}
               </button>
             </div>
           </div>
@@ -1221,14 +1216,6 @@ export default function DataManagementPage() {
           {/* ── Datasets sub-tab ── */}
           {storageSubTab === 'Datasets' && (
             <div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                {['datasets', 'models'].map(b => (
-                  <button key={b} className={`btn btn-sm ${storageBucket === b ? 'btn-primary' : ''}`}
-                    onClick={() => { setStorageBucket(b); setStoredFiles([]); setTimeout(() => loadStorageFiles(b), 0) }}>
-                    {b}
-                  </button>
-                ))}
-              </div>
               <div className="card">
                 <div className="card-header">
                   <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in &quot;{storageBucket}&quot; bucket</div></div>
