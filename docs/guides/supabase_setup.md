@@ -97,6 +97,12 @@ Created automatically by `005_storage.sql`:
 
 Verify in Dashboard → Storage.
 
+> **Note:** The admin dashboard's *Prediction Images* browser reads from the
+> private `prediction-images` bucket using signed URLs (`createSignedUrl`
+> with 1-hour expiry). Admin users must have read access to this bucket
+> (handled automatically via the authenticated Supabase session with
+> appropriate RLS policies).
+
 ## 7. Environment Variables
 
 After setup, distribute your credentials:

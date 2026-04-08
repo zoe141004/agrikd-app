@@ -108,11 +108,18 @@ Five tabs:
   can be reviewed before pushing to DVC.
 - **DVC Operations** -- Full history table of all DVC operations (stage,
   push, pull, export) with status badges, GitHub Actions links, and
-  action buttons. Also provides DVC Pull/Verify and Push All controls.
+  action buttons. DVC Pull/Verify and Push All controls trigger
+  GitHub Actions workflows against the DVC remote (Google Drive).
 - **Prediction Data** -- Browse prediction statistics, export CSV/JSON,
   and import CSV (collapsed by default).
-- **Storage Files** -- Supabase Storage bucket browser with download and
-  delete capabilities.
+- **Storage Files** -- Two sub-tabs:
+  - *Datasets* -- Browse `datasets` and `models` Supabase Storage buckets
+    with download and delete capabilities.
+  - *Prediction Images* -- Query the `predictions` table for rows with
+    uploaded images. Thumbnails use signed URLs (private
+    `prediction-images` bucket, 1-hour expiry). Features: leaf type
+    filter, 20-per-page pagination, inline label editing (click label →
+    edit → save), and full-size image preview modal.
 
 Operation tracking uses Supabase Realtime subscriptions on the
 `dvc_operations` table with GitHub Actions polling as a fallback, so
@@ -138,6 +145,10 @@ Operational status overview.
 Application-level configuration.
 
 - View and update general app configuration values.
+- **GitHub Actions Integration** -- Configure repository owner, repo name,
+  branch, and Personal Access Token (PAT). Token is stored in
+  `localStorage` (persists across sessions). Required for DVC sync,
+  model validation, and CI/CD triggers.
 - Display the current Supabase connection details (project URL and
   anonymous key) for verification purposes.
 

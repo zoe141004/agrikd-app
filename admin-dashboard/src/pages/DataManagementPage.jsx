@@ -12,9 +12,10 @@ export default function DataManagementPage() {
   const [loading, setLoading] = useState(true)
   const [leafOptions, setLeafOptions] = useState([])
 
-  // DVC datasets (from GitHub .dvc files)
+  // DVC datasets (from dvc_operations metadata or GitHub .dvc files fallback)
   const [dvcDatasets, setDvcDatasets] = useState([])
   const [dvcDatasetsLoading, setDvcDatasetsLoading] = useState(false)
+  const [dvcDatasetsSource, setDvcDatasetsSource] = useState(null) // 'db' | 'github' | null
 
   // DVC Operations tracking (DB-backed, mirrors ModelsPage pipeline_runs pattern)
   const [dvcOps, setDvcOps] = useState([])
@@ -57,11 +58,25 @@ export default function DataManagementPage() {
   const [storageBucket, setStorageBucket] = useState('datasets')
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
+  const [storageSubTab, setStorageSubTab] = useState('Datasets') // 'Datasets' | 'Prediction Images'
+
+  // Prediction Images browser
+  const [predImages, setPredImages] = useState([])
+  const [predImagesLoading, setPredImagesLoading] = useState(false)
+  const [predImgLeaf, setPredImgLeaf] = useState('')
+  const [predImgPage, setPredImgPage] = useState(0)
+  const [predImgHasMore, setPredImgHasMore] = useState(false)
+  const [previewImg, setPreviewImg] = useState(null) // { url, prediction }
+  const [editingLabel, setEditingLabel] = useState(null) // prediction id being edited
+  const [editLabelValue, setEditLabelValue] = useState('')
 
   useEffect(() => { loadData(); loadDvcOperations() }, [])
 
   useEffect(() => {
-    if (dtab === 'Storage Files' && storedFiles.length === 0) loadStorageFiles()
+    if (dtab === 'Storage Files') {
+      if (storageSubTab === 'Datasets' && storedFiles.length === 0) loadStorageFiles()
+      if (storageSubTab === 'Prediction Images' && predImages.length === 0) loadPredictionImages(true)
+    }
   }, [dtab])
 
   useEffect(() => {
@@ -93,7 +108,7 @@ export default function DataManagementPage() {
         })
       )
       setQuality(qualityResults)
-      fetchDvcDatasets()
+      fetchTrackedDatasets()
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
@@ -155,7 +170,7 @@ export default function DataManagementPage() {
           supabase.removeChannel(channel)
           realtimeChannelRef.current = null
           if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-          fetchDvcDatasets()
+          fetchTrackedDatasets()
           loadDvcOperations()
         }
       })
@@ -185,7 +200,7 @@ export default function DataManagementPage() {
             loadDvcOperations()
             clearInterval(ghPollRef.current)
             ghPollRef.current = null
-            fetchDvcDatasets()
+            fetchTrackedDatasets()
             return
           } else {
             const mapped = latest.status === 'queued' ? 'pending' : latest.status === 'in_progress' ? 'staging' : null
@@ -409,11 +424,68 @@ export default function DataManagementPage() {
   }
 
   // ── Fetch DVC datasets from GitHub ────────────────────────────────────────
-  const fetchDvcDatasets = async () => {
+  const fetchTrackedDatasets = async () => {
     setDvcDatasetsLoading(true)
-    const { ghToken, ghOwner, ghRepo, ghBranch } = getGitHubConfig()
-    if (!ghToken || !ghOwner || !ghRepo) { setDvcDatasetsLoading(false); return }
     try {
+      // Primary: get latest completed pull/push/stage per leaf_type from dvc_operations
+      const { data: ops } = await supabase
+        .from('dvc_operations')
+        .select('leaf_type, metadata, completed_at')
+        .in('operation', ['pull', 'push', 'stage'])
+        .eq('status', 'completed')
+        .not('metadata', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(50)
+
+      if (ops && ops.length > 0) {
+        const seen = new Set()
+        const datasets = []
+        for (const op of ops) {
+          const md = op.metadata
+          if (md?.datasets) {
+            for (const [dsName, dsInfo] of Object.entries(md.datasets)) {
+              if (seen.has(dsName)) continue
+              seen.add(dsName)
+              datasets.push({
+                name: dsName,
+                file: `data_${dsName}.dvc`,
+                size: dsInfo.total_size || null,
+                nfiles: dsInfo.file_count || null,
+                md5: dsInfo.dvc_md5 || null,
+                num_classes: dsInfo.num_classes || (dsInfo.classes ? Object.keys(dsInfo.classes).length : null),
+                classes: dsInfo.classes || null,
+                lastUpdated: op.completed_at,
+              })
+            }
+          } else if (md?.file_count != null && !seen.has(op.leaf_type)) {
+            seen.add(op.leaf_type)
+            datasets.push({
+              name: op.leaf_type,
+              file: `data_${op.leaf_type}.dvc`,
+              size: md.total_size || null,
+              nfiles: md.file_count || null,
+              md5: md.dvc_md5 || null,
+              num_classes: md.num_classes || (md.classes ? Object.keys(md.classes).length : null),
+              classes: md.classes || null,
+              lastUpdated: op.completed_at,
+            })
+          }
+        }
+        if (datasets.length > 0) {
+          setDvcDatasets(datasets)
+          setDvcDatasetsSource('db')
+          setDvcDatasetsLoading(false)
+          return
+        }
+      }
+
+      // Fallback: read .dvc files from GitHub repo
+      const { ghToken, ghOwner, ghRepo, ghBranch } = getGitHubConfig()
+      if (!ghToken || !ghOwner || !ghRepo) {
+        setDvcDatasetsSource(null)
+        setDvcDatasetsLoading(false)
+        return
+      }
       const res = await fetch(
         `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents?ref=${ghBranch}`,
         { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }
@@ -434,13 +506,75 @@ export default function DataManagementPage() {
           size: sizeMatch ? parseInt(sizeMatch[1]) : null,
           nfiles: nfilesMatch ? parseInt(nfilesMatch[1]) : null,
           md5: md5Match ? md5Match[1] : null,
+          num_classes: null, classes: null, lastUpdated: null,
         })
       }
       setDvcDatasets(datasets)
+      setDvcDatasetsSource('github')
     } catch (err) {
-      console.warn('Failed to fetch DVC datasets:', err.message)
+      console.warn('Failed to fetch tracked datasets:', err.message)
     }
     setDvcDatasetsLoading(false)
+  }
+
+  // ── Prediction Images browser ────────────────────────────────────────────
+  const PAGE_SIZE = 20
+  const loadPredictionImages = async (reset = false) => {
+    setPredImagesLoading(true)
+    const page = reset ? 0 : predImgPage
+    const from = page * PAGE_SIZE
+    let query = supabase.from('predictions')
+      .select('id, leaf_type, predicted_class_name, confidence, image_url, created_at')
+      .not('image_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE_SIZE)
+    if (predImgLeaf) query = query.eq('leaf_type', predImgLeaf)
+    const { data } = await query
+    const rows = data || []
+
+    // range() is inclusive: range(0,20) returns up to 21 items. If we get 21, there's more data.
+    const hasMore = rows.length === PAGE_SIZE + 1
+    const display = hasMore ? rows.slice(0, PAGE_SIZE) : rows
+
+    // Generate signed URLs for thumbnails (private bucket)
+    const withUrls = await Promise.all(display.map(async (r) => {
+      if (!r.image_url) return { ...r, signedUrl: null }
+      try {
+        const match = r.image_url.match(/prediction-images\/(.+)$/)
+        if (!match) return { ...r, signedUrl: null }
+        const storagePath = match[1]
+        const { data: signed } = await supabase.storage.from('prediction-images').createSignedUrl(storagePath, 3600)
+        return { ...r, signedUrl: signed?.signedUrl || null }
+      } catch { return { ...r, signedUrl: null } }
+    }))
+
+    if (reset) {
+      setPredImages(withUrls)
+      setPredImgPage(1)
+    } else {
+      setPredImages(prev => [...prev, ...withUrls])
+      setPredImgPage(page + 1)
+    }
+    setPredImgHasMore(hasMore)
+    setPredImagesLoading(false)
+  }
+
+  const savePredLabel = async (predId, newLabel) => {
+    await supabase.from('predictions').update({ predicted_class_name: newLabel }).eq('id', predId)
+    setPredImages(prev => prev.map(p => p.id === predId ? { ...p, predicted_class_name: newLabel } : p))
+    setEditingLabel(null)
+  }
+
+  const openPreview = async (pred) => {
+    if (pred.signedUrl) {
+      setPreviewImg({ url: pred.signedUrl, prediction: pred })
+    } else if (pred.image_url) {
+      const match = pred.image_url.match(/prediction-images\/(.+)$/)
+      if (match) {
+        const { data: signed } = await supabase.storage.from('prediction-images').createSignedUrl(match[1], 3600)
+        setPreviewImg({ url: signed?.signedUrl || pred.image_url, prediction: pred })
+      }
+    }
   }
 
   // ── Preview predictions ───────────────────────────────────────────────────
@@ -609,24 +743,28 @@ export default function DataManagementPage() {
             <div className="card">
               <div className="card-header">
                 <div><div className="card-label">Training Data (DVC)</div><div className="card-title">Tracked Datasets</div></div>
-                <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
+                <button className="btn btn-sm" onClick={fetchTrackedDatasets} disabled={dvcDatasetsLoading}>
                   {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
                 </button>
               </div>
               {dvcDatasets.length > 0 ? (
                 <table>
-                  <thead><tr><th>Dataset</th><th>Files</th><th>Size</th></tr></thead>
+                  <thead><tr><th>Dataset</th><th>Classes</th><th>Images</th><th>Size</th><th>Version</th><th>Updated</th></tr></thead>
                   <tbody>
                     {dvcDatasets.map(ds => (
                       <tr key={ds.name}>
                         <td><span className="badge badge-primary">{ds.name}</span></td>
+                        <td>{ds.num_classes != null ? ds.num_classes : '—'}</td>
                         <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
                         <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
+                        <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 8) + '…' : '—'}</td>
+                        <td style={{ fontSize: 12, color: '#94a3b8' }}>{ds.lastUpdated ? formatDateTime(ds.lastUpdated) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No DVC datasets found.'}</p></div>}
+              ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
+              {dvcDatasetsSource && <div style={{ fontSize: 11, color: '#94a3b8', padding: '6px 16px' }}>Source: {dvcDatasetsSource === 'db' ? 'DVC operations history' : 'GitHub .dvc files'}</div>}
             </div>
           </div>
 
@@ -821,7 +959,7 @@ export default function DataManagementPage() {
             {/* DVC Pull/Verify */}
             <div className="card">
               <div className="card-header"><div><div className="card-label">DVC Pull</div><div className="card-title">Verify Remote</div></div></div>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Pull and verify DVC remote data is intact and accessible.</p>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Pull latest datasets from DVC remote (Google Drive). Runs via GitHub Actions.</p>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <select value={dvcPullLeaf} onChange={e => setDvcPullLeaf(e.target.value)} className="form-input" style={{ flex: 1 }}>
                   <option value="">All datasets</option>
@@ -836,7 +974,7 @@ export default function DataManagementPage() {
             {/* DVC Push All */}
             <div className="card">
               <div className="card-header"><div><div className="card-label">DVC Push</div><div className="card-title">Sync to Remote</div></div></div>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Push all locally tracked datasets to DVC remote (Google Drive).</p>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Push all tracked datasets to DVC remote (Google Drive). Runs via GitHub Actions.</p>
               <button className="btn btn-primary btn-sm" onClick={triggerDvcPushAll} disabled={dvcRunning || ghNotConfigured || isOperationActive}>
                 Push All
               </button>
@@ -864,26 +1002,45 @@ export default function DataManagementPage() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div><div className="card-label">DVC Remote</div><div className="card-title">Tracked Datasets</div></div>
-              <button className="btn btn-sm" onClick={fetchDvcDatasets} disabled={dvcDatasetsLoading}>
+              <button className="btn btn-sm" onClick={fetchTrackedDatasets} disabled={dvcDatasetsLoading}>
                 {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
               </button>
             </div>
             {dvcDatasets.length > 0 ? (
               <table>
-                <thead><tr><th>Dataset</th><th>DVC File</th><th>Files</th><th>Size</th><th>MD5</th></tr></thead>
+                <thead><tr><th>Dataset</th><th>Classes</th><th>Images</th><th>Size</th><th>Version</th><th>Updated</th><th>Per-class</th></tr></thead>
                 <tbody>
                   {dvcDatasets.map(ds => (
                     <tr key={ds.name}>
                       <td><strong style={{ color: '#121c28' }}>{ds.name}</strong></td>
-                      <td style={{ fontSize: 12 }}><code>{ds.file}</code></td>
+                      <td>{ds.num_classes != null ? ds.num_classes : '—'}</td>
                       <td>{ds.nfiles != null ? ds.nfiles.toLocaleString() : '—'}</td>
                       <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
-                      <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 12) + '…' : '—'}</td>
+                      <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 8) + '…' : '—'}</td>
+                      <td style={{ fontSize: 12, color: '#94a3b8' }}>{ds.lastUpdated ? formatDateTime(ds.lastUpdated) : '—'}</td>
+                      <td>
+                        {ds.classes ? (
+                          <details>
+                            <summary style={{ cursor: 'pointer', color: '#3b82f6', fontSize: 11 }}>View</summary>
+                            <table style={{ fontSize: 11, marginTop: 2, borderCollapse: 'collapse' }}>
+                              <tbody>
+                                {Object.entries(ds.classes).map(([cls, info]) => (
+                                  <tr key={cls} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                    <td style={{ padding: '1px 8px 1px 0', color: '#475569' }}>{cls}</td>
+                                    <td style={{ padding: '1px 0', textAlign: 'right', color: '#64748b' }}>{typeof info === 'object' ? info.count : info}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </details>
+                        ) : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No DVC datasets found.'}</p></div>}
+            ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
+            {dvcDatasetsSource && <div style={{ fontSize: 11, color: '#94a3b8', padding: '6px 16px' }}>Source: {dvcDatasetsSource === 'db' ? 'DVC operations history' : 'GitHub .dvc files'}</div>}
           </div>
 
           {/* Operations History */}
@@ -1048,46 +1205,175 @@ export default function DataManagementPage() {
       {/* ── Storage Files Tab ── */}
       {dtab === 'Storage Files' && (
         <div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            {['datasets', 'models', 'prediction-images'].map(b => (
-              <button key={b} className={`btn btn-sm ${storageBucket === b ? 'btn-primary' : ''}`}
-                onClick={() => { setStorageBucket(b); setStoredFiles([]); setTimeout(() => loadStorageFiles(b), 0) }}>
-                {b}
+          {/* Sub-tab nav */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+            {['Datasets', 'Prediction Images'].map(t => (
+              <button key={t} onClick={() => {
+                setStorageSubTab(t)
+                if (t === 'Prediction Images' && predImages.length === 0) loadPredictionImages(true)
+                if (t === 'Datasets' && storedFiles.length === 0) loadStorageFiles()
+              }} style={{ padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: storageSubTab === t ? '#0284c7' : '#64748b', borderBottom: `2px solid ${storageSubTab === t ? '#0284c7' : 'transparent'}`, fontFamily: 'inherit' }}>
+                {t}
               </button>
             ))}
           </div>
-          <div className="card">
-            <div className="card-header">
-              <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in "{storageBucket}" bucket</div></div>
-              <button className="btn btn-sm btn-primary" onClick={() => loadStorageFiles()} disabled={storageLoading}>
-                {storageLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
-              </button>
-            </div>
-            {storageLoading && storedFiles.length === 0 ? (
-              <div className="loading-spinner"><div className="spinner" /></div>
-            ) : storedFiles.length > 0 ? (
-              <div className="table-wrapper">
-                <table>
-                  <thead><tr><th>Folder</th><th>Filename</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {storedFiles.map(f => (
-                      <tr key={f.path}>
-                        <td><span className="badge badge-primary">{f.folder}</span></td>
-                        <td style={{ fontSize: 13, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</td>
-                        <td style={{ fontSize: 12, color: '#64748b' }}>{formatBytes(f.metadata?.size || 0)}</td>
-                        <td style={{ fontSize: 12, color: '#94a3b8' }}>{f.created_at ? new Date(f.created_at).toLocaleDateString() : '—'}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 5 }}>
-                            <a href={supabase.storage.from(storageBucket).getPublicUrl(f.path).data.publicUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Download</a>
-                            <button className="btn btn-sm btn-danger" onClick={() => deleteStorageFile(f)}>Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+          {/* ── Datasets sub-tab ── */}
+          {storageSubTab === 'Datasets' && (
+            <div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {['datasets', 'models'].map(b => (
+                  <button key={b} className={`btn btn-sm ${storageBucket === b ? 'btn-primary' : ''}`}
+                    onClick={() => { setStorageBucket(b); setStoredFiles([]); setTimeout(() => loadStorageFiles(b), 0) }}>
+                    {b}
+                  </button>
+                ))}
               </div>
-            ) : <div className="empty-state"><p>No files found in "{storageBucket}" bucket.</p></div>}
+              <div className="card">
+                <div className="card-header">
+                  <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in &quot;{storageBucket}&quot; bucket</div></div>
+                  <button className="btn btn-sm btn-primary" onClick={() => loadStorageFiles()} disabled={storageLoading}>
+                    {storageLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading&hellip;</> : 'Refresh'}
+                  </button>
+                </div>
+                {storageLoading && storedFiles.length === 0 ? (
+                  <div className="loading-spinner"><div className="spinner" /></div>
+                ) : storedFiles.length > 0 ? (
+                  <div className="table-wrapper">
+                    <table>
+                      <thead><tr><th>Folder</th><th>Filename</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        {storedFiles.map(f => (
+                          <tr key={f.path}>
+                            <td><span className="badge badge-primary">{f.folder}</span></td>
+                            <td style={{ fontSize: 13, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</td>
+                            <td style={{ fontSize: 12, color: '#64748b' }}>{formatBytes(f.metadata?.size || 0)}</td>
+                            <td style={{ fontSize: 12, color: '#94a3b8' }}>{f.created_at ? new Date(f.created_at).toLocaleDateString() : '—'}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 5 }}>
+                                <a href={supabase.storage.from(storageBucket).getPublicUrl(f.path).data.publicUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Download</a>
+                                <button className="btn btn-sm btn-danger" onClick={() => deleteStorageFile(f)}>Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : <div className="empty-state"><p>No files found in &quot;{storageBucket}&quot; bucket.</p></div>}
+              </div>
+            </div>
+          )}
+
+          {/* ── Prediction Images sub-tab ── */}
+          {storageSubTab === 'Prediction Images' && (
+            <div>
+              {/* Filters */}
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
+                <select className="form-input" style={{ width: 200 }} value={predImgLeaf} onChange={e => { setPredImgLeaf(e.target.value); loadPredictionImages(true) }}>
+                  <option value="">All leaf types</option>
+                  {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
+                </select>
+                <button className="btn btn-sm btn-primary" onClick={() => loadPredictionImages(true)} disabled={predImagesLoading}>
+                  {predImagesLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading&hellip;</> : 'Refresh'}
+                </button>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>{predImages.length} images loaded</span>
+              </div>
+
+              {/* Images grid */}
+              {predImagesLoading && predImages.length === 0 ? (
+                <div className="loading-spinner"><div className="spinner" /></div>
+              ) : predImages.length > 0 ? (
+                <>
+                  <div className="card">
+                    <div className="table-wrapper">
+                      <table>
+                        <thead><tr><th style={{ width: 64 }}>Preview</th><th>Label</th><th>Confidence</th><th>Leaf Type</th><th>Date</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          {predImages.map(p => (
+                            <tr key={p.id}>
+                              <td>
+                                {p.signedUrl ? (
+                                  <img src={p.signedUrl} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', border: '1px solid #e2e8f0' }}
+                                    onClick={() => openPreview(p)} />
+                                ) : (
+                                  <div style={{ width: 48, height: 48, background: '#f1f5f9', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10, color: '#94a3b8' }}
+                                    onClick={() => openPreview(p)}>
+                                    No img
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                {editingLabel === p.id ? (
+                                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                    <input className="form-input" style={{ width: 150, padding: '4px 8px', fontSize: 12 }}
+                                      value={editLabelValue} onChange={e => setEditLabelValue(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') savePredLabel(p.id, editLabelValue); if (e.key === 'Escape') setEditingLabel(null) }}
+                                      autoFocus />
+                                    <button className="btn btn-sm btn-primary" style={{ padding: '2px 8px', fontSize: 11 }}
+                                      onClick={() => savePredLabel(p.id, editLabelValue)}>Save</button>
+                                    <button className="btn btn-sm" style={{ padding: '2px 8px', fontSize: 11 }}
+                                      onClick={() => setEditingLabel(null)}>Cancel</button>
+                                  </div>
+                                ) : (
+                                  <span style={{ cursor: 'pointer', borderBottom: '1px dashed #94a3b8' }} title="Click to edit label"
+                                    onClick={() => { setEditingLabel(p.id); setEditLabelValue(p.predicted_class_name || '') }}>
+                                    {p.predicted_class_name || '—'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <span style={{ fontSize: 12, color: p.confidence >= 0.8 ? '#16a34a' : p.confidence >= 0.5 ? '#f59e0b' : '#ef4444' }}>
+                                  {p.confidence != null ? `${(p.confidence * 100).toFixed(1)}%` : '—'}
+                                </span>
+                              </td>
+                              <td><span className="badge badge-primary">{p.leaf_type}</span></td>
+                              <td style={{ fontSize: 12, color: '#94a3b8' }}>{p.created_at ? formatDateTime(p.created_at) : '—'}</td>
+                              <td>
+                                <button className="btn btn-sm" onClick={() => openPreview(p)}>Preview</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  {predImgHasMore && (
+                    <div style={{ textAlign: 'center', marginTop: 16 }}>
+                      <button className="btn btn-primary" onClick={() => loadPredictionImages(false)} disabled={predImagesLoading}>
+                        {predImagesLoading ? 'Loading...' : 'Load More'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : <div className="empty-state"><p>No prediction images found. Images appear here when users make predictions via the mobile app.</p></div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Image Preview Modal ── */}
+      {previewImg && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setPreviewImg(null)}>
+          <div style={{ background: '#fff', borderRadius: 12, maxWidth: 600, maxHeight: '90vh', overflow: 'auto', padding: 20, position: 'relative' }}
+            onClick={e => e.stopPropagation()}>
+            <button onClick={() => setPreviewImg(null)} style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#64748b' }}>&times;</button>
+            {previewImg.url ? (
+              <img src={previewImg.url} alt="Prediction" style={{ width: '100%', borderRadius: 8, marginBottom: 12 }} />
+            ) : (
+              <div style={{ width: '100%', height: 300, background: '#f1f5f9', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', marginBottom: 12 }}>Image not available</div>
+            )}
+            {previewImg.prediction && (
+              <div style={{ fontSize: 13, color: '#334155' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+                  <strong>Label:</strong><span>{previewImg.prediction.predicted_class_name || '—'}</span>
+                  <strong>Confidence:</strong><span>{previewImg.prediction.confidence != null ? `${(previewImg.prediction.confidence * 100).toFixed(1)}%` : '—'}</span>
+                  <strong>Leaf Type:</strong><span>{previewImg.prediction.leaf_type}</span>
+                  <strong>Date:</strong><span>{previewImg.prediction.created_at ? formatDateTime(previewImg.prediction.created_at) : '—'}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

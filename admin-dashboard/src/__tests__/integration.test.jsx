@@ -49,6 +49,7 @@ vi.mock('../lib/supabase', () => ({
         getPublicUrl: vi.fn(() => ({ data: { publicUrl: '' } })),
         list: vi.fn(() => Promise.resolve({ data: [], error: null })),
         remove: vi.fn(() => Promise.resolve({ error: null })),
+        createSignedUrl: vi.fn(() => Promise.resolve({ data: { signedUrl: 'https://signed.test/img.jpg' } })),
       }),
       createBucket: vi.fn(() => Promise.resolve({ error: null })),
     },
@@ -99,6 +100,7 @@ const MOCK_PREDICTIONS = [
     created_at: '2026-03-20T10:00:00Z',
     model_version: '1.0.0',
     notes: null,
+    image_url: 'https://test.supabase.co/storage/v1/object/public/prediction-images/user-001/img1.jpg',
   },
   {
     id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
@@ -109,6 +111,7 @@ const MOCK_PREDICTIONS = [
     created_at: '2026-03-19T14:30:00Z',
     model_version: '1.0.0',
     notes: 'Field sample',
+    image_url: null,
   },
   {
     id: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
@@ -119,6 +122,7 @@ const MOCK_PREDICTIONS = [
     created_at: '2026-03-18T08:15:00Z',
     model_version: '1.0.0',
     notes: null,
+    image_url: null,
   },
 ]
 
