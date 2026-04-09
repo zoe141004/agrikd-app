@@ -51,6 +51,15 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 9 | `database/migrations/009_security_hardening.sql` | Security hardening: tighten RLS policies, add missing indexes |
 | 10 | `database/migrations/010_fix_lifecycle_for_update.sql` | Fix enforce_version_lifecycle trigger for UPDATE operations |
 | 11 | `database/migrations/011_dvc_operations.sql` | DVC operations tracking table (stage/push/pull/export with status lifecycle) |
+| 12 | `database/migrations/012_devices.sql` | Device management: provisioning_tokens, devices table with Device Shadow, RLS, config_version trigger, device_id on predictions |
+
+### Migration 012: Device Management
+- `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning
+- `devices` table — Jetson device registry with Device Shadow
+- RLS policies for admin, user, device self-access via `X-Device-Token` header
+- Auto-increment `config_version` trigger
+- `device_id` column added to `predictions` table
+- File: `database/migrations/012_devices.sql`
 
 All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
 
@@ -63,13 +72,17 @@ Run the verification script:
 ```
 
 Expected output: All checks should show `[PASS]`. The script verifies:
-- RLS enabled on all required tables (including dvc_operations)
+- RLS enabled on all required tables (profiles, predictions, model_registry, audit_log, model_benchmarks, model_versions, dvc_operations)
 - All policies exist per table
 - `is_admin_role()` function exists and is SECURITY DEFINER
 - `handle_new_user()` trigger on auth.users
 - `enforce_version_lifecycle()` trigger on model_registry (replaces old sync_model_urls)
 - Storage buckets exist (models, datasets, prediction-images)
 - All indexes exist
+
+> **Note:** The verification script does not yet cover `provisioning_tokens` and
+> `devices` tables from migration 012. Verify their RLS manually:
+> `SELECT tablename, policyname FROM pg_policies WHERE tablename IN ('provisioning_tokens', 'devices');`
 
 **Migration 011** auto-enables Realtime for `dvc_operations`. If it fails
 due to insufficient privileges, run manually in the SQL Editor:
@@ -116,6 +129,9 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...
 GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
 SENTRY_DSN=https://xxx@sentry.io/xxx
 GDRIVE_CREDENTIALS_DATA=<base64-encoded-service-account-json>
+VERCEL_DEPLOY_HOOK=https://api.vercel.com/v1/integrations/deploy/...
+KAGGLE_USERNAME=your_kaggle_username
+KAGGLE_KEY=your_kaggle_api_key
 ```
 
 ### Sync to sub-projects:
@@ -157,7 +173,7 @@ This generates:
 
 | Problem | Solution |
 |---------|----------|
-| "relation does not exist" | Run migrations in order: 001 → 002 → ... → 011 |
+| "relation does not exist" | Run migrations in order: 001 → 002 → ... → 012 |
 | "function is_admin_role() does not exist" | Run 002_functions_triggers.sql (creates the function referenced by 003_rls_policies.sql) |
 | RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
 | Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |

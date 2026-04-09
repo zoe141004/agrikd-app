@@ -19,7 +19,7 @@ export default function UsersPage() {
   const loadUsers = async () => {
     setLoading(true)
     try {
-      const { data, error: err } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+      const { data, error: err } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(500)
       if (!err && data) {
         setUseProfiles(true); setUsers(data)
       } else {

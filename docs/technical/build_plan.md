@@ -888,7 +888,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | Sync | ✅ | Auto-sync + manual + exponential backoff + OTA model update |
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
 | CI/CD | ✅ | GitHub Actions: lint, test, model conversion, build, release |
-| Admin Dashboard | ✅ | React + Vite + Supabase JS (10 pages, 30 tests: 3 smoke + 22 integration + 5 data management) |
+| Admin Dashboard | ✅ | React + Vite + Supabase JS (11 pages, 30 tests: 3 smoke + 22 integration + 5 data management) |
 | Jetson Edge | ✅ | Docker + TensorRT FP16 + REST API + systemd service |
 | i18n | ✅ | EN + VI (~300 keys each) |
 | Tests | ✅ | 89 tests (unit, DAO, provider, widget, integration) |

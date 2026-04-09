@@ -1,10 +1,17 @@
 """TensorRT inference engine for AgriKD on Jetson."""
 
 import hashlib
+import logging
+import os
+import queue
+import threading
 import time
+from concurrent.futures import Future
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger("inference")
 
 
 class TensorRTInference:
@@ -130,3 +137,126 @@ class TensorRTInference:
             "all_confidences": probs.tolist(),
             "inference_time_ms": round(elapsed_ms, 2),
         }
+
+
+# ── Sentinel to signal worker shutdown ──
+_SHUTDOWN = object()
+
+
+class InferenceWorkerPool:
+    """Thread-safe inference pool.
+
+    A single worker thread owns the CUDA context and all TensorRT engine
+    buffers.  Callers from *any* thread use ``submit(leaf_type, frame)``
+    which returns a ``concurrent.futures.Future``.  The worker picks jobs
+    off an internal queue, runs ``engine.predict(frame)``, and resolves
+    the future.
+
+    This eliminates all CUDA context-affinity and shared-buffer race
+    conditions (C1 in the audit) without requiring ``cuda.Context.push/pop``.
+    """
+
+    def __init__(self, config, inference_config=None):
+        """Build engines from *config* (the ``models`` section).
+
+        Engine construction happens on the **worker thread** so that
+        ``pycuda.autoinit`` binds the CUDA context there.
+        """
+        self._model_configs = config
+        self._inference_config = inference_config or {}
+        self._engines = {}          # Populated by worker thread
+        self._queue = queue.Queue()
+        self._ready = threading.Event()
+        self._error = None          # Propagate init errors to main thread
+        self._leaf_types = []       # Available engines after init
+
+        self._thread = threading.Thread(
+            target=self._worker_loop, daemon=True, name="inference-worker",
+        )
+        self._thread.start()
+
+        # Block until engines are loaded (or worker reports an error)
+        self._ready.wait()
+        if self._error is not None:
+            raise self._error
+
+    # ── Public API ──────────────────────────────────────────────────
+
+    def submit(self, leaf_type, frame):
+        """Submit an inference job.  Returns a Future.
+
+        Usage::
+
+            future = pool.submit("tomato", frame)
+            result = future.result(timeout=30)
+        """
+        fut = Future()
+        self._queue.put((leaf_type, frame, fut))
+        return fut
+
+    def available_engines(self):
+        """Return list of loaded leaf-type names."""
+        return list(self._leaf_types)
+
+    def shutdown(self):
+        """Signal the worker to exit (best-effort)."""
+        self._queue.put(_SHUTDOWN)
+
+    # ── Worker (runs on its own thread — owns CUDA context) ─────────
+
+    def _worker_loop(self):
+        """Dequeue jobs and run predict() sequentially."""
+        try:
+            self._init_engines()
+        except Exception as exc:
+            self._error = exc
+            self._ready.set()
+            return
+
+        self._ready.set()
+        logger.info(
+            "Inference worker ready — engines: %s",
+            ", ".join(self._leaf_types),
+        )
+
+        while True:
+            job = self._queue.get()
+            if job is _SHUTDOWN:
+                logger.info("Inference worker shutting down")
+                break
+
+            leaf_type, frame, fut = job
+            try:
+                engine = self._engines.get(leaf_type)
+                if engine is None:
+                    fut.set_exception(
+                        ValueError(f"Unknown leaf type: {leaf_type}")
+                    )
+                else:
+                    result = engine.predict(frame)
+                    fut.set_result(result)
+            except Exception as exc:
+                fut.set_exception(exc)
+
+    def _init_engines(self):
+        """Load TensorRT engines ON the worker thread (CUDA-owner)."""
+        for leaf_type, model_cfg in self._model_configs.items():
+            engine_path = model_cfg["engine_path"]
+            if not os.path.exists(engine_path):
+                logger.warning(
+                    "Engine not found: %s — skipping %s", engine_path, leaf_type,
+                )
+                continue
+            eng = TensorRTInference(
+                engine_path,
+                model_cfg,
+                expected_sha256=model_cfg.get("sha256_checksum"),
+                inference_config=self._inference_config,
+            )
+            self._engines[leaf_type] = eng
+            logger.info("Loaded TensorRT engine: %s (%s)", leaf_type, engine_path)
+
+        if not self._engines:
+            raise RuntimeError("No TensorRT engines loaded.")
+
+        self._leaf_types = list(self._engines.keys())

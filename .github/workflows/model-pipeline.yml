@@ -25,6 +25,9 @@ on:
         type: string
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   pipeline:
     runs-on: ubuntu-latest
@@ -101,6 +104,14 @@ jobs:
           MODEL_URL="$MODEL_URL_INPUT"
           echo "Model URL: $MODEL_URL"
 
+          # Security: Validate URL points to our Supabase storage domain
+          SUPABASE_DOMAIN=$(echo "$SUPABASE_URL" | sed 's|https\?://||' | sed 's|/.*||')
+          if ! echo "$MODEL_URL" | grep -qE "^https://${SUPABASE_DOMAIN}/storage/"; then
+            echo "[ERROR] URL must point to Supabase storage: $MODEL_URL"
+            echo "Expected domain: $SUPABASE_DOMAIN"
+            exit 1
+          fi
+
           # If URL points to .tflite (from previous pipeline run), find the .pth checkpoint instead
           if echo "$MODEL_URL" | grep -q '\.tflite'; then
             echo "URL points to .tflite — looking for checkpoint .pth in same folder..."
@@ -141,6 +152,13 @@ jobs:
 
           if [ "$FILE_SIZE" -lt 10000 ]; then
             echo "[ERROR] File too small ($FILE_SIZE bytes), likely not a valid checkpoint"
+            exit 1
+          fi
+
+          # Validate it looks like a PyTorch checkpoint (ZIP/PK magic bytes)
+          MAGIC=$(xxd -l 2 -p "$PTH_FILE")
+          if [ "$MAGIC" != "504b" ] && [ "$MAGIC" != "8950" ]; then
+            echo "[ERROR] File does not appear to be a valid PyTorch checkpoint (magic: $MAGIC)"
             exit 1
           fi
         env:

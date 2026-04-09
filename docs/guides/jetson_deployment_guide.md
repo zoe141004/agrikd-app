@@ -92,8 +92,8 @@ python3 /opt/agrikd/app/gui_app.py
 
 ## 4. Setup Script Explained
 
-The `setup_jetson.sh` script performs ten sequential steps. Each step is logged
-to the console with a numbered prefix (`[1/10]` through `[10/10]`).
+The `setup_jetson.sh` script performs eleven sequential steps. Each step is logged
+to the console with a numbered prefix (`[1/11]` through `[11/11]`).
 
 ### Step 1 -- Create Service User
 
@@ -126,11 +126,12 @@ All files from the repository's `app/` and `config/` directories are copied into
 ### Step 4 -- Install Python Dependencies
 
 ```bash
-pip3 install --no-cache-dir numpy opencv-python requests flask
+pip3 install --no-cache-dir numpy==1.24.4 opencv-python==4.8.1.78 requests==2.31.0 flask==3.0.3 waitress==3.0.0
 ```
 
 OpenCV is installed with GUI support (`opencv-python`, not
 `opencv-python-headless`) so that the GUI application can render camera frames.
+`waitress` is the production WSGI server used by the headless REST API.
 
 ### Step 5 -- Install GUI Dependencies
 
@@ -190,12 +191,64 @@ A `.desktop` file is installed to `/usr/share/applications/` so the GUI
 application appears in the desktop environment's application menu as
 **"AgriKD Plant Disease Detection"**.
 
-### Step 10 -- Supabase Credential Configuration
+### Step 10 -- Copy Provisioning Scripts
 
-The script checks whether `supabase_url` and `supabase_key` are configured in
-`config.json`. If they are empty, it prints instructions for the operator to
-fill them in manually. Supabase sync is optional; the system operates fully
-offline without it.
+```bash
+cp -r scripts/* "$INSTALL_DIR/scripts/"
+```
+
+The Zero-Touch Provisioning script (`provision.py`) and any helper scripts are
+copied to `/opt/agrikd/scripts/` with ownership set to the `agrikd` user.
+
+### Step 11 -- Zero-Touch Provisioning
+
+The script prompts the operator to paste a provisioning token, provide a path
+to a `.token` file, or type `skip` to defer provisioning:
+
+```
+Paste provisioning token (or path to .token file, or 'skip'):
+```
+
+- **Paste token:** Runs `provision.py agrikd://...` to register the device.
+- **File path:** Runs `provision.py --file <path>` to read the token from a file.
+- **Skip:** Skips provisioning; the device will run in local-only mode until
+  provisioned manually later.
+
+Supabase sync is optional; the system operates fully offline without it.
+
+---
+
+## Zero-Touch Provisioning
+
+### Prerequisites
+- Admin creates a provisioning token on the Dashboard: **Devices -> Provisioning Tokens -> Generate Token**
+- Token format: `agrikd://<base64url encoded JSON>` (contains Supabase URL, anon key, token ID, expiry)
+
+### Provisioning Flow
+1. Run `setup_jetson.sh` -- it prompts for token at step 11
+2. Or manually: `python3 /opt/agrikd/scripts/provision.py agrikd://...`
+3. Script validates token -> detects hardware -> registers device -> writes `config/config.json` and `data/device_state.json`
+4. Device starts in `unassigned` status, running Local-First (capture + inference + SQLite)
+5. Admin assigns user on Dashboard -> next poll cycle syncs all backlog
+
+### Hardware Identity
+- `hw_id = SHA-256(MAC:serial)` -- unique per physical device
+- Serial fallback chain: device-tree -> DBUS machine-id -> disk UUID
+- Re-register blocked for active devices (use `--force` or decommission first)
+
+### device_state.json (single-writer: sync_engine only)
+
+```json
+{
+  "device_token": "<uuid>",
+  "device_id": "<int>",
+  "hw_id": "<hash>",
+  "user_id": "<uuid or null>",
+  "config_version_applied": 0,
+  "desired_config": {},
+  "reported_config": {}
+}
+```
 
 ---
 
@@ -509,10 +562,29 @@ no external dependencies. When the limit is exceeded, the server returns HTTP 42
 }
 ```
 
-Timestamps older than 60 seconds are pruned automatically on each request. The
-`/health` and `/stats` endpoints are not rate-limited.
+Timestamps older than 60 seconds are pruned automatically on each request. All
+three endpoints (`/health`, `/predict`, `/stats`) are rate-limited at 30
+requests per minute per client IP.
 
-### 6.4 Upload Size Limit
+### 6.4 API Key Authentication
+
+The server supports optional API key authentication via the `X-API-Key` header.
+When `server.api_key` is set in `config.json`, all endpoints **except `/health`**
+require a matching `X-API-Key` header. Requests without the key receive HTTP 401.
+
+```bash
+# Example: predict with API key authentication
+curl -X POST http://localhost:8080/predict \
+  -H "X-API-Key: your-secret-key" \
+  -F "image=@leaf_photo.jpg" \
+  -F "leaf_type=tomato"
+```
+
+If `api_key` is empty (the default), authentication is disabled and all
+endpoints are accessible without a key. For production deployments on a shared
+network, always set an API key.
+
+### 6.5 Upload Size Limit
 
 Flask's `MAX_CONTENT_LENGTH` is set to **10 MB** (10,485,760 bytes). Any request
 body exceeding this size is rejected before the file is fully read, and the
@@ -524,7 +596,7 @@ server returns HTTP 413:
 }
 ```
 
-### 6.5 MIME Validation
+### 6.6 MIME Validation
 
 Before processing, the server validates the uploaded file's extension against
 an allowlist. Only the following extensions are accepted:
@@ -543,7 +615,7 @@ Files with any other extension (or no extension) are rejected with HTTP 400:
 }
 ```
 
-### 6.6 curl Examples
+### 6.7 curl Examples
 
 ```bash
 # Health check
@@ -604,6 +676,8 @@ site-specific settings (camera source, server port, etc.).
     "models": {
         "tomato": {
             "engine_path": "models/tomato_student.engine",
+            "sha256_checksum": "",
+            "version": "1.0.0",
             "num_classes": 10,
             "class_labels": [
                 "Bacterial_spot", "Early_blight", "Late_blight",
@@ -614,6 +688,8 @@ site-specific settings (camera source, server port, etc.).
         },
         "burmese_grape_leaf": {
             "engine_path": "models/burmese_grape_leaf_student.engine",
+            "sha256_checksum": "",
+            "version": "1.0.0",
             "num_classes": 5,
             "class_labels": [
                 "Anthracnose", "Healthy", "Insect Damage",
@@ -624,12 +700,15 @@ site-specific settings (camera source, server port, etc.).
     "sync": {
         "supabase_url": "",
         "supabase_key": "",
+        "email": "",
+        "password": "",
         "batch_size": 50,
         "interval_seconds": 300
     },
     "server": {
-        "host": "0.0.0.0",
-        "port": 8080
+        "host": "127.0.0.1",
+        "port": 8080,
+        "api_key": ""
     },
     "database": {
         "path": "data/agrikd_jetson.db"
@@ -684,7 +763,7 @@ Each key is a leaf type identifier. The value is an object with:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `host` | string | `"0.0.0.0"` | Bind address for the REST API server |
+| `host` | string | `"127.0.0.1"` | Bind address for the REST API server |
 | `port` | int | `8080` | Port number for the REST API server |
 
 ### 7.8 `database`
@@ -758,7 +837,7 @@ cloud database.
 1. Every `interval_seconds` (default: 300 seconds / 5 minutes), the sync engine
    queries the local SQLite database for unsynced predictions.
 2. Up to `batch_size` (default: 50) records are sent per cycle.
-3. Each prediction is posted individually to the Supabase REST API
+3. Each batch is posted as a single JSON array to the Supabase REST API
    (`/rest/v1/predictions`) with proper `apikey` and `Authorization` headers.
 4. On successful upload (HTTP 200 or 201), the local record is marked as synced
    with a `synced_at` timestamp.
@@ -1034,10 +1113,13 @@ issued by a trusted CA (e.g., Let's Encrypt).
     camera.py            # USB/CSI camera capture
     database.py          # SQLite database (WAL mode)
     health_server.py     # Flask REST API (/health, /predict, /stats)
-                         #   - Rate limit: 30 req/min on /predict (429)
+                         #   - Rate limit: 30 req/min per IP (429)
                          #   - Upload limit: 10 MB (413)
                          #   - MIME validation: jpg, jpeg, png, bmp, tiff
-    sync_engine.py       # Background Supabase sync
+                         #   - API key authentication (X-API-Key header)
+    sync_engine.py       # Background Supabase sync + device config polling
+  scripts/
+    provision.py         # Zero-Touch Provisioning CLI (decode token, register, write config)
   config/
     config.example.json  # Version-controlled template (committed to git)
     config.json          # Site-specific config (GITIGNORED — copy from example)
@@ -1046,6 +1128,7 @@ issued by a trusted CA (e.g., Let's Encrypt).
     burmese_grape_leaf_student.engine
   data/
     agrikd_jetson.db     # SQLite database file
+    device_state.json    # Device registration state (GITIGNORED, chmod 600)
     images/
       tomato/            # Active Learning images (tomato)
       burmese_grape_leaf/  # Active Learning images (burmese grape leaf)
