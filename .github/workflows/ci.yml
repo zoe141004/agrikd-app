@@ -2,9 +2,9 @@ name: AgriKD CI
 
 on:
   push:
-    branches: [main, release/*]
+    branches: [main, release/*, develop, feature/**]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
