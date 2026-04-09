@@ -205,6 +205,8 @@ class SupabaseSyncService {
   /// Uses temp file + rename for atomic writes, then promotes via ModelDao.
   /// Returns true if the model was successfully updated.
   Future<bool> downloadModelUpdate(ModelUpdate update) async {
+    // Web platform has no local filesystem — OTA model updates not supported.
+    if (kIsWeb) return false;
     if (update.fileUrl == null || update.fileUrl!.isEmpty) return false;
 
     try {
