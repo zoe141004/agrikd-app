@@ -329,12 +329,11 @@ jobs:
           REPORT_PATH: models/${{ inputs.leaf_type }}/benchmark_report.md
           MIN_ACC: ${{ inputs.min_accuracy }}
 
-      - name: Cleanup intermediate files (keep only .pth + .tflite float16)
+      - name: Cleanup intermediate files (keep .pth + .onnx + .tflite float16)
         if: always()
         run: |
           BASE="models/${LEAF_TYPE}"
-          echo "Cleaning up ONNX and TFLite float32 (metrics already extracted)..."
-          rm -f "${BASE}/${LEAF_TYPE}_student.onnx"
+          echo "Cleaning up TFLite float32 (metrics already extracted)..."
           rm -f "${BASE}/${LEAF_TYPE}_student_float32.tflite"
           echo "[OK] Cleaned intermediate files. Remaining:"
           ls -la "${BASE}/" || true
@@ -357,6 +356,16 @@ jobs:
             echo "size_mb_float16=" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+
+          ONNX_PATH="models/${LEAF_TYPE}/${LEAF_TYPE}_student.onnx"
+          if [ -f "$ONNX_PATH" ]; then
+            ONNX_HASH=$(sha256sum "$ONNX_PATH" | awk '{print $1}')
+            echo "hash_onnx=$ONNX_HASH" >> "$GITHUB_OUTPUT"
+            echo "[OK] ONNX SHA-256: $ONNX_HASH"
+          else
+            echo "[WARN] ONNX not found: $ONNX_PATH"
+            echo "hash_onnx=" >> "$GITHUB_OUTPUT"
+          fi
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
@@ -367,6 +376,7 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
           VERSION: ${{ inputs.version }}
           TFLITE_FLOAT16_SHA256: ${{ steps.sha256.outputs.hash_float16 }}
+          ONNX_SHA256: ${{ steps.sha256.outputs.hash_onnx }}
           PIPELINE_RUN_ID: ${{ inputs.pipeline_run_id }}
         run: python .github/scripts/upload_benchmarks.py
 

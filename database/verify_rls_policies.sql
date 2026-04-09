@@ -29,7 +29,8 @@ DECLARE
         'pipeline_runs',
         'devices',
         'provisioning_tokens',
-        'dvc_operations'
+        'dvc_operations',
+        'model_engines'
     ];
 BEGIN
     RAISE NOTICE '===================================================================';

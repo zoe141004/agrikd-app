@@ -55,7 +55,7 @@ tmp_*
 
 # Model artifacts (large binaries - tracked via DVC/external hosting)
 model_checkpoints_student/
-# *.onnx
+*.onnx
 *.tflite
 *.engine
 # But keep bundled app models

@@ -1,13 +1,13 @@
 """
 Upload pipeline results to Supabase after model-pipeline.yml completes.
 
-1. Upload .pth + .tflite float16 to Supabase Storage (ONNX/float32 not uploaded)
+1. Upload .pth + .onnx + .tflite float16 to Supabase Storage
 2. Parse benchmark_report.md and write metrics for 3 formats (pytorch, onnx, tflite_float16) to model_benchmarks
-3. Update model_registry with model_url, pth_url, sha256, accuracy (status stays 'staging')
+3. Update model_registry with model_url, pth_url, onnx_url, sha256, accuracy (status stays 'staging')
 4. Auto-activate model if fewer than 2 active versions exist for this leaf_type
 
 Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION,
-          TFLITE_FLOAT16_SHA256, PIPELINE_RUN_ID (optional)
+          TFLITE_FLOAT16_SHA256, ONNX_SHA256, PIPELINE_RUN_ID (optional)
 """
 
 import json
@@ -64,17 +64,14 @@ def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
 
 
 def upload_all_models(supabase_url, service_key, leaf_type, version):
-    """Upload PTH and TFLite float16 to Supabase Storage. Returns dict of URLs.
-
-    ONNX and TFLite float32 are NOT uploaded (metrics still extracted from
-    benchmark_report.md and stored in model_benchmarks table).
-    """
+    """Upload PTH, ONNX, and TFLite float16 to Supabase Storage. Returns dict of URLs."""
     prefix = f"{leaf_type}/v{version}"
     models_dir = f"models/{leaf_type}"
     checkpoint_dir = "model_checkpoints_student"
 
     files = [
         (f"{checkpoint_dir}/{leaf_type}_student.pth",           f"{prefix}/{leaf_type}_v{version}_checkpoint.pth", "pth"),
+        (f"{models_dir}/{leaf_type}_student.onnx",              f"{prefix}/{leaf_type}_v{version}.onnx",           "onnx"),
         (f"{models_dir}/{leaf_type}_student_float16.tflite",    f"{prefix}/{leaf_type}_v{version}_float16.tflite", "tflite_float16"),
     ]
 
@@ -241,6 +238,7 @@ def main():
     leaf_type = os.environ.get("LEAF_TYPE")
     version = os.environ.get("VERSION")
     tflite_f16_sha256 = os.environ.get("TFLITE_FLOAT16_SHA256", "")
+    onnx_sha256 = os.environ.get("ONNX_SHA256", "")
     pipeline_run_id = os.environ.get("PIPELINE_RUN_ID", "")
 
     if not all([supabase_url, service_key, leaf_type, version]):
@@ -256,12 +254,13 @@ def main():
     # Update pipeline status to 'uploading'
     update_pipeline_status(supabase_url, service_key, pipeline_run_id, "uploading")
 
-    # ── 1. Upload .pth + .tflite float16 to Supabase Storage ─────────────────
+    # ── 1. Upload .pth + .onnx + .tflite float16 to Supabase Storage ─────────
     print("\n=== Step 1: Upload model files to Supabase Storage ===")
-    print("  (Only uploading .pth + .tflite float16 — ONNX/float32 not uploaded)")
+    print("  (Uploading .pth + .onnx + .tflite float16)")
     model_urls = upload_all_models(supabase_url, service_key, leaf_type, version)
     tflite_f16_url = model_urls.get("tflite_float16")
     pth_url = model_urls.get("pth")
+    onnx_url = model_urls.get("onnx")
 
     # ── 2. Update model_registry with model_url + pth_url + sha256 ───────────
     if tflite_f16_url:
@@ -275,13 +274,17 @@ def main():
         }
         if pth_url:
             registry_update["pth_url"] = pth_url
+        if onnx_url:
+            registry_update["onnx_url"] = onnx_url
+        if onnx_sha256:
+            registry_update["onnx_sha256"] = onnx_sha256
         if tflite_f16_sha256:
             registry_update["sha256_checksum"] = tflite_f16_sha256
 
         url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
         ok, resp = supabase_request(url, {**api_headers, "Prefer": "return=minimal"}, registry_update, "PATCH")
         if ok:
-            print(f"  [OK] model_registry updated (tflite_float16 URL + pth_url)")
+            print(f"  [OK] model_registry updated (tflite_float16 URL + pth_url + onnx_url)")
         else:
             print(f"  [WARN] Could not update model_registry: {resp}")
 
