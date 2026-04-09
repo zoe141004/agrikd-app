@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: data
-          key: dvc-${{ inputs.leaf_type }}-${{ hashFiles(format('data_{0}.dvc', inputs.leaf_type)) }}
+          key: dvc-${{ inputs.leaf_type }}-${{ hashFiles(format('dvc/data_{0}.dvc', inputs.leaf_type)) }}
           restore-keys: |
             dvc-${{ inputs.leaf_type }}-
 
@@ -72,10 +72,10 @@ jobs:
           else
             echo "[CACHE MISS] Pulling test data via DVC..."
             dvc remote modify gdrive gdrive_use_service_account true
-            DVC_FILE="data_${LEAF_TYPE}.dvc"
+            DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
             if [ ! -f "$DVC_FILE" ]; then
               echo "[ERROR] DVC file not found: $DVC_FILE"
-              ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
+              ls -la dvc/*.dvc 2>/dev/null || echo "No .dvc files in dvc/"
               exit 1
             fi
             echo "Found DVC file: $DVC_FILE"

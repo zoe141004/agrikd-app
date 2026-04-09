@@ -237,16 +237,17 @@ jobs:
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
           DATA_DIR="data/${LEAF_TYPE}"
-          DVC_FILE="data_${LEAF_TYPE}.dvc"
+          DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
 
           # DVC 3.x creates .dvc next to tracked dir: data/${LEAF_TYPE}.dvc
-          # Move to repo root (data_X.dvc) and fix internal path to match convention
+          # Move to dvc/ folder and fix internal path to use ../data/ prefix
           dvc add "$DATA_DIR"
+          mkdir -p dvc
           DVC_CREATED="data/${LEAF_TYPE}.dvc"
           if [ -f "$DVC_CREATED" ] && [ "$DVC_CREATED" != "$DVC_FILE" ]; then
             mv "$DVC_CREATED" "$DVC_FILE"
-            # Fix path: DVC wrote "path: LEAF_TYPE", needs "path: data/LEAF_TYPE"
-            sed -i "s|path: ${LEAF_TYPE}$|path: data/${LEAF_TYPE}|" "$DVC_FILE"
+            # Fix path: DVC wrote "path: LEAF_TYPE", needs "path: ../data/LEAF_TYPE"
+            sed -i "s|path: ${LEAF_TYPE}$|path: ../data/${LEAF_TYPE}|" "$DVC_FILE"
           fi
           echo "=== DVC file ==="
           cat "$DVC_FILE"
@@ -273,7 +274,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          DVC_FILE="data_${LEAF_TYPE}.dvc"
+          DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
           CONFIG="mlops_pipeline/configs/${LEAF_TYPE}.json"
           GITIGNORE="data/${LEAF_TYPE}/.gitignore"
 
@@ -319,7 +320,7 @@ jobs:
               total_files += len(imgs)
               total_size += cls_size
 
-          dvc_file = f'data_{leaf}.dvc'
+          dvc_file = f'dvc/data_{leaf}.dvc'
           dvc_md5 = ''
           if os.path.exists(dvc_file):
               with open(dvc_file) as f:

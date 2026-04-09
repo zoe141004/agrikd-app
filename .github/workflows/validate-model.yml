@@ -33,7 +33,7 @@ jobs:
       - name: Pull DVC data
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
-          DVC_FILE="data_${LEAF_TYPE}.dvc"
+          DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
           for attempt in 1 2 3; do
             if dvc pull "$DVC_FILE"; then break; fi
             [ "$attempt" -eq 3 ] && exit 1

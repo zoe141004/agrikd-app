@@ -49,10 +49,10 @@ jobs:
         run: |
           dvc remote modify gdrive gdrive_use_service_account true
           if [ -n "$LEAF_TYPE" ]; then
-            DVC_FILE="data_${LEAF_TYPE}.dvc"
+            DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
             if [ ! -f "$DVC_FILE" ]; then
               echo "[ERROR] DVC file not found: $DVC_FILE"
-              ls -la *.dvc 2>/dev/null || echo "No .dvc files at root"
+              ls -la dvc/*.dvc 2>/dev/null || echo "No .dvc files in dvc/"
               exit 1
             fi
             for attempt in 1 2 3; do
@@ -134,7 +134,7 @@ jobs:
               if not classes:
                   continue
               # Read DVC file hash if exists
-              dvc_file = f'data_{ds_name}.dvc'
+              dvc_file = f'dvc/data_{ds_name}.dvc'
               dvc_md5 = ''
               if os.path.exists(dvc_file):
                   with open(dvc_file) as f:
