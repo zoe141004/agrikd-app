@@ -20,12 +20,14 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
+  const [authError, setAuthError] = useState(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (!session) setLoading(false)
-    }).catch(() => {
+    }).catch((err) => {
+      setAuthError(err?.message || 'Failed to load session')
       setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -68,7 +70,18 @@ export default function App() {
       </div>
     </div>
   )
-  if (!session) return <LoginPage />
+  if (!session) return (
+    <>
+      {authError && (
+        <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+          background: '#fee2e2', color: '#dc2626', padding: '10px 20px', borderRadius: 8,
+          fontSize: 13, fontWeight: 500, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+          {authError}
+        </div>
+      )}
+      <LoginPage />
+    </>
+  )
 
   if (accessDenied) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#f0f4f8' }}>

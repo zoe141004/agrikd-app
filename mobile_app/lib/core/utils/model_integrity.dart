@@ -1,6 +1,7 @@
 import 'dart:io' show File;
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class ModelIntegrity {
@@ -19,6 +20,7 @@ class ModelIntegrity {
 
   /// Compute SHA-256 checksum of a filesystem file (for OTA models)
   static Future<String> sha256File(String filePath) async {
+    if (kIsWeb) return '';
     final bytes = await File(filePath).readAsBytes();
     return sha256.convert(bytes).toString();
   }
@@ -39,6 +41,7 @@ class ModelIntegrity {
     String filePath,
     String expectedChecksum,
   ) async {
+    if (kIsWeb) return true;
     final actual = await sha256File(filePath);
     return actual == expectedChecksum;
   }

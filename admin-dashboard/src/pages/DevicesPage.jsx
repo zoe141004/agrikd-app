@@ -26,9 +26,13 @@ export default function DevicesPage() {
   const [tokenLabel, setTokenLabel] = useState('')
   const [generatedToken, setGeneratedToken] = useState('')
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    loadData(controller.signal)
+    return () => controller.abort()
+  }, [])
 
-  const loadData = async () => {
+  const loadData = async (signal) => {
     setLoading(true)
     setError(null)
     try {
@@ -40,8 +44,10 @@ export default function DevicesPage() {
       if (devRes.status === 'fulfilled' && devRes.value.data) setDevices(devRes.value.data)
       if (tokRes.status === 'fulfilled' && tokRes.value.data) setTokens(tokRes.value.data)
       if (usersRes.status === 'fulfilled' && usersRes.value.data) setUsers(usersRes.value.data)
-    } catch (err) { setError(err.message) }
-    setLoading(false)
+    } catch (err) {
+      if (err.name !== 'AbortError') setError(err.message)
+    }
+    if (!signal?.aborted) setLoading(false)
   }
 
   // ── Fleet Tab ──────────────────────────────────────────────────

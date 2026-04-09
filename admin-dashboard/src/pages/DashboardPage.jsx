@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell
@@ -18,19 +18,33 @@ export default function DashboardPage() {
   const [leafFilter, setLeafFilter] = useState('')
   const [leafOptions, setLeafOptions] = useState([])
 
-  useEffect(() => { loadDashboard(true) }, [leafFilter])
+  // Ref to track latest leafFilter inside interval callback (avoids stale closure)
+  const leafFilterRef = useRef(leafFilter)
+  useEffect(() => { leafFilterRef.current = leafFilter }, [leafFilter])
 
+  // Primary load: re-fetch when filter changes, cancel on unmount or re-trigger
   useEffect(() => {
-    const id = setInterval(() => loadDashboard(false), 60000)
-    return () => clearInterval(id)
+    const controller = new AbortController()
+    loadDashboard(true, controller.signal)
+    return () => controller.abort()
   }, [leafFilter])
 
-  const loadDashboard = async (showSpinner) => {
+  // Auto-refresh every 60s — single interval, reads latest filter via ref
+  useEffect(() => {
+    const id = setInterval(() => {
+      const controller = new AbortController()
+      loadDashboard(false, controller.signal)
+    }, 60000)
+    return () => clearInterval(id)
+  }, [])
+
+  const loadDashboard = async (showSpinner, signal) => {
     if (showSpinner) setLoading(true)
     setError(null)
     try {
-    const rpcFilter = leafFilter || null
-    const addFilter = (q) => leafFilter ? q.eq('leaf_type', leafFilter) : q
+    const currentFilter = leafFilterRef.current
+    const rpcFilter = currentFilter || null
+    const addFilter = (q) => currentFilter ? q.eq('leaf_type', currentFilter) : q
 
     const [
       rpcStatsRes,
@@ -49,6 +63,9 @@ export default function DashboardPage() {
       addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, created_at').order('created_at', { ascending: false }).limit(8)),
       supabase.from('devices').select('*', { count: 'exact', head: true }).in('status', ['online', 'assigned', 'offline']),
     ])
+
+    // Bail out if this request was cancelled (component unmounted or filter changed)
+    if (signal?.aborted) return
 
     const rpcStats = rpcStatsRes.status === 'fulfilled' ? rpcStatsRes.value?.data : null
     const diseaseDist = diseaseDistRes.status === 'fulfilled' ? diseaseDistRes.value?.data : null
@@ -93,8 +110,10 @@ export default function DashboardPage() {
     }
 
     setRecentPreds(recent || [])
-    } catch (err) { setError(err.message) }
-    setLoading(false)
+    } catch (err) {
+      if (err.name !== 'AbortError') setError(err.message)
+    }
+    if (!signal?.aborted) setLoading(false)
   }
 
   if (loading) return (

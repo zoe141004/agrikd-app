@@ -41,7 +41,7 @@ export default function UsersPage() {
   const openEdit = (u) => { setForm({ role: u.role || 'user', is_active: u.is_active !== false }); setEditUser(u) }
 
   const saveUser = async () => {
-    if (!useProfiles) return alert('Requires a profiles table in Supabase.')
+    if (!useProfiles) return setError('Requires a profiles table in Supabase.')
     const doSave = async () => {
       setSaving(true)
       const { error } = await supabase.from('profiles').update({ role: form.role, is_active: form.is_active }).eq('id', editUser.id)
@@ -49,7 +49,7 @@ export default function UsersPage() {
       if (!error) {
         logAudit(supabase, form.role !== editUser.role ? 'user_role_changed' : 'user_status_changed', 'user', editUser.id, { email: editUser.email, role: form.role, is_active: form.is_active })
         setEditUser(null); loadUsers()
-      } else alert('Error: ' + error.message)
+      } else setError('Error: ' + error.message)
     }
     if (editUser.role === 'admin' && form.role !== 'admin') {
       setConfirmAction({ title: 'Revoke Admin', message: `Remove admin privileges from ${editUser.email}?`, danger: true, confirmLabel: 'Revoke', onConfirm: () => { setConfirmAction(null); doSave() } })

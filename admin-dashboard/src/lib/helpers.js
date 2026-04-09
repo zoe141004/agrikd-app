@@ -101,7 +101,9 @@ export async function uploadToStorage(supabase, bucket, path, file, onProgress) 
 export async function ensureBucket(supabase, bucket) {
   const { error } = await supabase.storage.createBucket(bucket, { public: true })
   // Ignore "already exists" error
-  if (error && !error.message?.includes('already')) console.warn('Bucket:', error.message)
+  if (error && !(typeof error?.message === 'string' && error.message.includes('already'))) {
+    console.warn('Bucket:', error?.message ?? error)
+  }
 }
 
 // ── Rate limiting ─────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -100,7 +101,12 @@ class SupabaseSyncService {
             .select('id')
             .single();
 
-        final serverId = response['id'].toString();
+        final serverId = response['id']?.toString() ?? '';
+        if (serverId.isEmpty) {
+          await _syncQueue.markFailed(queueId);
+          failed++;
+          continue;
+        }
 
         // Mark synced in local DB
         await _predictionDao.markSynced(entityId, serverId);
@@ -153,6 +159,7 @@ class SupabaseSyncService {
       return _client.storage.from('prediction-images').getPublicUrl(path);
     } catch (e) {
       // Image upload failure should not block prediction sync
+      debugPrint('[SyncService] Image upload failed for localId=$localId: $e');
       return null;
     }
   }
@@ -197,6 +204,7 @@ class SupabaseSyncService {
       }
       return updates;
     } catch (e) {
+      debugPrint('[SyncService] checkModelUpdates failed: $e');
       return [];
     }
   }

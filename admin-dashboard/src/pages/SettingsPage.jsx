@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const [ciRunning, setCiRunning] = useState('')
   const [auditLogs, setAuditLogs] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState(null)
 
   useEffect(() => {
     supabase.from('model_registry').select('leaf_type, version, model_url, status').then(({ data }) => setModels(data || []))
@@ -35,7 +36,10 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if (stab === 'Audit Log' && auditLogs.length === 0) loadAuditLogs()
+    if (stab !== 'Audit Log') return
+    const controller = new AbortController()
+    loadAuditLogs(controller.signal)
+    return () => controller.abort()
   }, [stab])
 
   const saveGitHub = () => {
@@ -51,7 +55,10 @@ export default function SettingsPage() {
     const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
     if (!ghToken) { setCiMsg({ type: 'error', text: 'Save GitHub config first.' }); return }
     try {
-      const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } })
+      const ghController = new AbortController()
+      const timeoutId = setTimeout(() => ghController.abort(), 10000)
+      const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })
+      clearTimeout(timeoutId)
       const data = await res.json()
       if (res.ok) setCiMsg({ type: 'success', text: `✓ Connected to ${data.full_name} (${data.private ? 'private' : 'public'}). ${data.open_issues_count} open issues.` })
       else setCiMsg({ type: 'error', text: `Error: ${data.message}` })
@@ -367,10 +374,11 @@ export default function SettingsPage() {
         <div className="card">
           <div className="card-header">
             <div><div className="card-label">Activity</div><div className="card-title">Admin Audit Log</div></div>
-            <button className="btn btn-sm btn-primary" onClick={loadAuditLogs} disabled={auditLoading}>
+            <button className="btn btn-sm btn-primary" onClick={() => loadAuditLogs()} disabled={auditLoading}>
               {auditLoading ? 'Loading…' : 'Refresh'}
             </button>
           </div>
+          {auditError && <div className="alert alert-error" style={{ margin: '0 16px 12px' }}>{auditError}</div>}
           {auditLogs.length > 0 ? (
             <div className="table-wrapper">
               <table>
@@ -399,14 +407,21 @@ export default function SettingsPage() {
     </>
   )
 
-  async function loadAuditLogs() {
+  async function loadAuditLogs(signal) {
     setAuditLoading(true)
+    setAuditError(null)
     try {
-      const { data } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50)
+      const { data, error: err } = await supabase
+        .from('audit_log').select('*')
+        .order('created_at', { ascending: false }).limit(50)
+      if (signal?.aborted) return
+      if (err) throw err
       setAuditLogs(data || [])
     } catch (err) {
-      console.warn('Failed to load audit logs:', err.message)
+      if (err.name !== 'AbortError' && !signal?.aborted) {
+        setAuditError(err.message || 'Failed to load audit logs')
+      }
     }
-    setAuditLoading(false)
+    if (!signal?.aborted) setAuditLoading(false)
   }
 }
