@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: export-data
+  cancel-in-progress: false
+
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -73,6 +77,12 @@ jobs:
           dvc push
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Commit DVC tracking file
         run: |

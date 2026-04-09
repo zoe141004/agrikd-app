@@ -13,7 +13,11 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: dvc-pull-${{ inputs.leaf_type || 'all' }}
+  cancel-in-progress: false
 
 jobs:
   dvc-pull:
@@ -84,6 +88,12 @@ jobs:
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Report dataset info
         run: |

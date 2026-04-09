@@ -9,7 +9,11 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: train-${{ inputs.leaf_type || 'all' }}
+  cancel-in-progress: false
 
 jobs:
   train:
@@ -48,6 +52,12 @@ jobs:
           done
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Run training pipeline
         run: |

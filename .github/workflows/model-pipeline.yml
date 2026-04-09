@@ -26,7 +26,7 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   pipeline:
@@ -98,8 +98,24 @@ jobs:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
+
       - name: Download .pth checkpoint
         run: |
+          # Validate inputs
+          if ! echo "$LEAF_TYPE" | grep -qE '^[a-z_]+$'; then
+            echo "[ERROR] Invalid leaf_type format: $LEAF_TYPE (must be lowercase letters and underscores only)"
+            exit 1
+          fi
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "[ERROR] Invalid version format: $VERSION (must be semver like 1.2.3)"
+            exit 1
+          fi
+
           mkdir -p model_checkpoints_student
           PTH_FILE="model_checkpoints_student/${LEAF_TYPE}_student.pth"
           MODEL_URL="$MODEL_URL_INPUT"

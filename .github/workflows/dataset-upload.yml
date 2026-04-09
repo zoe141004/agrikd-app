@@ -37,6 +37,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dvc-${{ inputs.leaf_type || 'all' }}
+  cancel-in-progress: false
+
 jobs:
   upload-dataset:
     runs-on: ubuntu-latest
@@ -268,6 +272,12 @@ jobs:
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Commit DVC tracking files
         run: |

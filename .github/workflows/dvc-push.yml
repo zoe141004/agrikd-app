@@ -9,7 +9,11 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: dvc-push
+  cancel-in-progress: false
 
 jobs:
   dvc-push:
@@ -50,6 +54,12 @@ jobs:
           dvc push -v
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Report status — completed
         if: inputs.dvc_operation_id != '' && success()
