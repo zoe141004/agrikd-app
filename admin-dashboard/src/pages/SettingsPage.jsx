@@ -387,6 +387,7 @@ export default function SettingsPage() {
           </div>
           {auditError && <div className="alert alert-error" style={{ margin: '0 16px 12px' }}>{auditError}</div>}
           {auditLogs.length > 0 ? (
+            <>
             <div className="table-wrapper">
               <table>
                 <thead><tr><th>Action</th><th>Entity</th><th>Entity ID</th><th>User</th><th>Date</th><th>Details</th></tr></thead>
@@ -409,6 +410,7 @@ export default function SettingsPage() {
               <span style={{ color: '#94a3b8', fontSize: 13 }}>Page {auditPage + 1}</span>
               <button className="btn btn-sm" disabled={!auditHasMore || auditLoading} onClick={() => loadAuditLogs(null, auditPage + 1)}>Next →</button>
             </div>
+            </>
           ) : (
             <div className="empty-state"><p>No audit log entries yet. Actions like model uploads, edits, and deletions will appear here.</p></div>
           )}

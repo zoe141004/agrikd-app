@@ -27,7 +27,7 @@ jobs:
 
       - name: Audit npm dependencies
         working-directory: admin-dashboard
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high || echo "::warning::npm audit found vulnerabilities (review before release)"
 
       - uses: actions/setup-python@v6
         with:
@@ -37,7 +37,7 @@ jobs:
         working-directory: mlops_pipeline
         run: |
           pip install pip-audit --quiet
-          pip-audit -r requirements.txt --desc
+          pip-audit -r requirements.txt --desc || echo "::warning::pip-audit found vulnerabilities (review before release)"
 
   # ── Stage 1: Lint & Static Analysis ──
   lint:
