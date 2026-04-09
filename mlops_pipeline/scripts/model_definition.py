@@ -272,6 +272,16 @@ def load_leaf_config(config_path):
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
 
+    # Validate critical config fields
+    num_classes = config.get("num_classes")
+    if num_classes is None or not isinstance(num_classes, int) or num_classes < 2 or num_classes > 1000:
+        raise ValueError(f"num_classes must be int in [2, 1000], got: {num_classes}")
+    input_size = config.get("input_size")
+    if input_size is None or not isinstance(input_size, int) or input_size < 32 or input_size > 1024:
+        raise ValueError(f"input_size must be int in [32, 1024], got: {input_size}")
+    if not config.get("leaf_type") or not isinstance(config["leaf_type"], str):
+        raise ValueError(f"leaf_type must be a non-empty string, got: {config.get('leaf_type')}")
+
     # Project root: two levels up from this script (scripts/ -> mlops_pipeline/ -> root)
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 

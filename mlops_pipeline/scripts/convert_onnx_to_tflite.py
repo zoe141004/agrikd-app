@@ -100,6 +100,21 @@ def convert_onnx_to_tflite(input_path, output_path):
     elif "float32" in result_paths:
         shutil.copy2(result_paths["float32"], output_path)
 
+    # Validate generated TFLite files
+    for variant, tflite_path in result_paths.items():
+        fsize = os.path.getsize(tflite_path)
+        if fsize < 1024:
+            raise RuntimeError(f"TFLite {variant} too small ({fsize} bytes) — likely corrupt: {tflite_path}")
+        try:
+            from ai_edge_litert.interpreter import Interpreter
+            interp = Interpreter(model_path=tflite_path)
+            interp.allocate_tensors()
+            print(f"    [OK] {variant} validated ({fsize / (1024*1024):.2f} MB, loadable)")
+        except ImportError:
+            print(f"    [OK] {variant} size check passed ({fsize / (1024*1024):.2f} MB, skipped load test)")
+        except Exception as e:
+            raise RuntimeError(f"TFLite {variant} failed load test: {e}")
+
     # Clean up temp dir
     shutil.rmtree(temp_dir, ignore_errors=True)
 

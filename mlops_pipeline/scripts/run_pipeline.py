@@ -89,8 +89,8 @@ def main():
                   [python, os.path.join(SCRIPTS_DIR, "convert_onnx_to_tflite.py"),
                    "--config", config_path])
     if not ok:
-        print("[WARN] TFLite conversion failed, continuing...")
-        pipeline_ok = False
+        print("[CRITICAL] TFLite conversion failed — aborting pipeline")
+        sys.exit(1)
 
     # Step 3: Cross-format validation
     if not args.skip_validate:

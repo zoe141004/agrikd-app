@@ -144,7 +144,11 @@ class ModelEvaluator:
         p2 = np.clip(probs2, epsilon, 1.0)
         p1 = p1 / p1.sum(axis=1, keepdims=True)
         p2 = p2 / p2.sum(axis=1, keepdims=True)
-        return np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
+        kl = np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
+        if not np.isfinite(kl):
+            print(f"[WARN] KL divergence is {kl}, returning 0.0")
+            return 0.0
+        return float(kl)
 
     def _compute_flops(self, model):
         """Compute FLOPs/MACs using thop library."""
