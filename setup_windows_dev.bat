@@ -108,14 +108,20 @@ echo.
 REM ── 6. Environment configuration ─────────────────────────
 echo [6/7] Setting up environment variables...
 if not exist ".env" (
-    echo   .env not found. Creating from .env.example...
-    copy .env.example .env >nul
-    echo.
-    echo   ************************************************************
-    echo   *  IMPORTANT: Edit .env with your actual credentials.      *
-    echo   *  Then re-run this script or run: python sync_env.py      *
-    echo   ************************************************************
-    echo.
+    if exist ".env.development" (
+        echo   Copying .env.development -^> .env ^(public keys for dev^)...
+        copy .env.development .env >nul
+        python sync_env.py
+    ) else if exist ".env.example" (
+        echo   .env not found. Creating from .env.example...
+        copy .env.example .env >nul
+        echo.
+        echo   ************************************************************
+        echo   *  IMPORTANT: Edit .env with your actual credentials.      *
+        echo   *  Then re-run this script or run: python sync_env.py      *
+        echo   ************************************************************
+        echo.
+    )
 ) else (
     echo   .env found. Syncing to sub-projects...
     python sync_env.py
