@@ -70,8 +70,11 @@ Future<void> _startApp() async {
   // 1. Initialize database (creates tables + seeds default preferences)
   await AppDatabase.database;
 
-  // 2. Initialize Supabase in background (non-blocking: app works offline)
-  SupabaseConfig.initialize().catchError((_) {
+  // 2. Initialize Supabase in background (non-blocking: app works offline).
+  // Keep the Future so we can trigger retryInit() on the ProviderContainer
+  // once init completes — fixes the race condition where AuthNotifier._init()
+  // runs before _initialized is set and stays in 'unknown' state indefinitely.
+  final supabaseFuture = SupabaseConfig.initialize().catchError((_) {
     _showOfflineNotification = true;
   });
 
@@ -91,6 +94,17 @@ Future<void> _startApp() async {
   runApp(
     UncontrolledProviderScope(container: container, child: const AgriKDApp()),
   );
+
+  // After runApp (so providers are live), call retryInit() once Supabase init
+  // completes. This handles the race condition where init finishes after
+  // AuthNotifier already ran _init() and stayed in 'unknown' state.
+  supabaseFuture.then((_) {
+    try {
+      container.read(authProvider.notifier).retryInit();
+    } catch (_) {
+      // Provider may already be disposed (hot restart, test) — safe to ignore.
+    }
+  }).catchError((_) {});
 }
 
 Future<void> _initWebDb() async {

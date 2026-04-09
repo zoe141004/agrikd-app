@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const [ghSaved, setGhSaved] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null)
 
-  // GitHub config (all fields stored in localStorage)
+  // GitHub config (all fields stored in sessionStorage — cleared on tab close)
   const [ghForm, setGhForm] = useState({ ghOwner: '', ghRepo: '', ghToken: '', ghBranch: 'main' })
 
   // CI/CD trigger
@@ -35,14 +35,18 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if (stab === 'Audit Log' && auditLogs.length === 0) loadAuditLogs()
+    if (stab === 'Audit Log' && auditLogs.length === 0) {
+      const controller = new AbortController()
+      loadAuditLogs(controller.signal)
+      return () => controller.abort()
+    }
   }, [stab])
 
   const saveGitHub = () => {
-    localStorage.setItem('gh_owner', ghForm.ghOwner)
-    localStorage.setItem('gh_repo', ghForm.ghRepo)
-    localStorage.setItem('gh_token', ghForm.ghToken)
-    localStorage.setItem('gh_branch', ghForm.ghBranch || 'main')
+    sessionStorage.setItem('gh_owner', ghForm.ghOwner)
+    sessionStorage.setItem('gh_repo', ghForm.ghRepo)
+    sessionStorage.setItem('gh_token', ghForm.ghToken)
+    sessionStorage.setItem('gh_branch', ghForm.ghBranch || 'main')
     setGhSaved(true)
     setTimeout(() => setGhSaved(false), 2000)
   }
@@ -188,7 +192,7 @@ export default function SettingsPage() {
             </div>
             <div className="alert alert-info" style={{ marginBottom: 14 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Token stored in <code>localStorage</code> (persists across sessions). Required for DVC sync, model validation, and CI/CD triggers.</div>
+              <div>Token stored in <code>sessionStorage</code> (cleared when tab closes). Required for DVC sync, model validation, and CI/CD triggers.</div>
             </div>
             <div className="form-group">
               <label className="form-label">Repository Owner</label>
@@ -399,13 +403,14 @@ export default function SettingsPage() {
     </>
   )
 
-  async function loadAuditLogs() {
+  async function loadAuditLogs(signal) {
     setAuditLoading(true)
     try {
-      const { data } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50)
+      const q = supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50)
+      const { data } = await (signal ? q.abortSignal(signal) : q)
       setAuditLogs(data || [])
     } catch (err) {
-      console.warn('Failed to load audit logs:', err.message)
+      if (err?.name !== 'AbortError') console.warn('Failed to load audit logs:', err.message)
     }
     setAuditLoading(false)
   }

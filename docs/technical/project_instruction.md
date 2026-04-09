@@ -224,6 +224,7 @@ app/
 |   |-- dataset-upload.yml            # Add new dataset from GDrive or predictions
 |   |-- deploy.yml                    # Trigger Vercel deployment
 |   |-- export-data.yml               # Export predictions from Supabase
+|   |-- codeql.yml                    # SAST scan (Python + JS/TS)
 |
 |-- mobile_app/test/                  # Flutter tests (89 tests)
 |   |-- unit/                         # 6 files, 36 tests
@@ -947,7 +948,7 @@ curl http://localhost:8080/health
 
 ## 12. CI/CD Pipeline (GitHub Actions) — ✅ DA TRIEN KHAI
 
-### 12.1 Workflows Overview (11 workflows)
+### 12.1 Workflows Overview (12 workflows)
 
 **Automatic workflows** (triggered boi push/PR):
 
@@ -955,6 +956,7 @@ curl http://localhost:8080/health
 |----------|------|---------|----------|
 | **CI** | `ci.yml` | Push to `main`/`release/*`, PRs to `main` | Lint, test, build APK |
 | **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release |
+| **CodeQL** | `codeql.yml` | Push/PR to `main`, weekly schedule | SAST scan (Python + JS/TS) |
 
 **Manual workflows** (workflow_dispatch):
 
@@ -1003,6 +1005,27 @@ curl http://localhost:8080/health
 - Cai GitHub Actions runner tren Jetson (se them khi setup Jetson deployment)
 - Test TensorRT conversion truc tiep tren hardware
 - Verify .engine file hoat dong dung
+
+---
+
+## 12.6 Production Hardening (Phase 3 — Final Audit)
+
+Cac fix duoi day duoc ap dung de dat 90/100 diem trong Final Audit:
+
+| Item | File | Mo ta |
+|------|------|-------|
+| DB version sort | `007_multi_version.sql` | `ORDER BY string_to_array(version,'.')::int[]` — fix so sanh 1.10.0 > 1.2.0 |
+| Token race condition | `012_devices.sql` | `claim_provisioning_token` dung `SELECT … FOR UPDATE SKIP LOCKED` |
+| Offline cold start | `main.dart` | `supabaseFuture.then()` goi `authProvider.notifier.retryInit()` sau khi Supabase init xong (fix race condition) |
+| Model URL validation | `model-pipeline.yml` | Whitelist domain Supabase + kiem tra magic bytes `.pth` truoc download |
+| Git push fail | `dataset-upload.yml` | `if ! git push; then exit 1; fi` |
+| Web guard OTA | `supabase_sync_service.dart` | `if (kIsWeb) return false` trong `downloadModelUpdate()` |
+| Peak memory | `evaluate_models.py` | Sampling RSS bang background thread (50ms) thay vi chi do end-state |
+| Camera timeout | `camera.py` | `SIGALRM` timeout (default 10s) trong `capture_single()` |
+| Health auth | `health_server.py` | `health_auth_required` flag — co the bat auth ngay ca tren `/health` |
+| AbortController | `DashboardPage.jsx`, `SettingsPage.jsx` | Huy request khi component unmount, tranh memory leak |
+| OIDC permissions | `model-pipeline.yml`, `dataset-upload.yml`, `release.yml` | `permissions: id-token: write` |
+| SAST scan | `codeql.yml` | CodeQL weekly scan (Python + JS/TS), `security-extended` queries |
 
 ---
 

@@ -1,0 +1,822 @@
+Writing the Remediation Plan to the plan file now.
+
+Starting: *Exit plan mode for user approval* (2/2)
+
+Tổng kết trước khi bạn review:
+
+**Remediation Plan: 3 Phases, 19 fixes, 25 files**
+
+| Phase | Fixes | Focus | Local-First Impact |
+|---|---|---|---|
+| **Phase 1** | 6 fixes, 7 files | Jetson blockers (C1 Queue, C2 Lock, C3 timestamp, H1 frame, H2 auth, NEW-1 shutdown) | ZERO — all in-process |
+| **Phase 2** | 8 fixes, 8 files | Web Admin + DB (H8 sessionStorage, H6 limits, H4 null guards, H5 allSettled, H7 rate fix, M22 RLS, NEW-2 chmod, M5 device_id) | N/A |
+| **Phase 3** | 5 fixes, 9 files | CI/CD (dashboard tests, Jetson lint, permissions, RLS verify, docs) | N/A |
+
+**Key architectural decisions (từ phân tích)**:
+- **C1**: Inference Worker Queue > push/pop+Lock (giải thích đầy đủ ở Phần 1)
+- **C2**: Single threading.Lock > Connection pool (đủ cho workload, no deadlock risk)
+- **H8**: sessionStorage > encrypted storage (single admin, CSP strong)
+- **H6**: .limit() caps > server-side RPC (đủ cho <1K/day scale)
+
+Here is Claude's plan:
+
+# Feature Freeze — Remediation Plan
+
+## Context
+
+Comprehensive audit found **67 issues** (3 CRITICAL, 14 HIGH, 22 MEDIUM). Production readiness: **65/100**. Feature Freeze declared — zero new features, all effort on bug fixes and hardening. The **Local-First, Cloud-Sync** architecture is **inviolable** — no fix may cause Jetson to block on network for capture/inference/SQLite save.
+
+### User-Provided Constraints (from Q&A)
+- **Hardware**: Jetson Orin NX 8GB, MobileNet ~2MB engine → GPU memory is NOT a concern
+- **Network**: LAN-only (no internet exposure) → H2 auth hardening is MEDIUM priority (still fix, no TLS needed)
+- **Scale**: 1-3 devices, <1K predictions/day → Query optimization is MEDIUM priority (still fix, simpler approach OK)
+- **Admin**: Single admin only → sessionStorage sufficient for H8 (PAT storage)
+
+---
+
+## Phase 1: Jetson Blockers (6 fixes, 7 files)
+
+> **Goal**: Make Jetson edge deployment crash-free and functionally correct.
+
+### Fix 1.1 — C1: Inference Worker Queue (eliminates CUDA threading bug)
+
+**Problem**: `pycuda.autoinit` (`inference.py:36`) binds CUDA context to the importing thread. `predict()` uses shared pre-allocated buffers (`inference.py:72-80`). Main thread (`main.py:174`) and Waitress threads (`health_server.py:163`) call `predict()` concurrently → buffer overwrite, CUDA corruption.
+
+**Solution**: Create `InferenceWorkerPool` — a single worker thread owns the CUDA context and all buffers. All callers submit jobs via `queue.Queue`, receive results via `concurrent.futures.Future`.
+
+**Why Queue > push/pop+Lock**: push/pop still shares buffers (needs Lock anyway). Queue naturally serializes, zero context leak risk, cleaner architecture. Throughput: ~450 FPS (1-2ms inference + 0.1ms queue overhead) — more than sufficient.
+
+**Files**:
+- `jetson/app/inference.py` — Add `InferenceWorkerPool` class (~60 lines). Wraps existing `TensorRTInference`. Worker thread: `while True: job = queue.get() → result = engine.predict(frame) → future.set_result(result)`. Public API: `pool.submit(leaf_type, frame) → Future`.
+- `jetson/app/main.py` — Replace `engines[leaf_type].predict(frame)` (line 174) with `pool.submit(leaf_type, frame).result()`. Pass `pool` instead of `engines` dict to health_server.
+- `jetson/app/health_server.py` — Replace `engine.predict(frame)` (line 163) with `pool.submit(leaf_type, frame).result()`. Remove `_inference_lock` (no longer needed — Queue serializes). Accept `pool` parameter instead of `engines` dict.
+- `jetson/app/gui_app.py` — **NO CHANGE** (runs as separate process with own CUDA context, confirmed at `gui_app.py:556`).
+
+**Local-First impact**: NONE. Queue is in-process, no network dependency. `submit().result()` blocks the calling thread only for inference time (~2ms).
+
+---
+
+### Fix 1.2 — C2: SQLite threading lock
+
+**Problem**: Single `sqlite3.Connection` (`database.py:14`, `check_same_thread=False`) shared across 6+ threads with no Python-level synchronization. WAL + busy_timeout provide some protection but Python's sqlite3 module is not guaranteed thread-safe on the same connection.
+
+**Solution**: Add a single `threading.Lock()` wrapping all `execute()`+`commit()` pairs.
+
+**Why single Lock (not connection pool)**: Deadlock impossible with one lock (no circular dependency). All DB operations are <1ms. Starvation risk negligible (sync's `mark_synced` is single UPDATE per call). Connection pool adds complexity for zero practical benefit at this scale.
+
+**Files**:
+- `jetson/app/database.py` — Add `self._lock = threading.Lock()`. Wrap every method body (`save_prediction`, `get_unsynced`, `mark_synced`, `get_stats`, `cleanup_old_records`, `close`) in `with self._lock:`. ~15 lines changed.
+
+**Local-First impact**: NONE. Lock is in-process, no network. Maximum blocking: <1ms per operation.
+
+---
+
+### Fix 1.3 — C3: Heartbeat timestamp
+
+**Problem**: `sync_engine.py:306` sends `{"last_seen_at": "now()"}` — PostgREST stores literal string "now()", not a timestamp. Device monitoring is completely broken.
+
+**Solution**: Replace with `datetime.now(timezone.utc).isoformat()`.
+
+**Files**:
+- `jetson/app/sync_engine.py` — Line 306: `body = {"last_seen_at": datetime.now(timezone.utc).isoformat()}`. Add `from datetime import datetime, timezone` at top.
+
+---
+
+### Fix 1.4 — H1: Active learning frame + orphan cleanup
+
+**Problem**: (a) `gui_app.py:413` saves `self.current_frame` (live camera, possibly shifted by 2-3 frames) instead of the analyzed frame. (b) `database.py:101-111` `cleanup_old_records()` deletes DB rows but NOT associated image files → orphaned JPEGs accumulate.
+
+**Solution**:
+- (a) Save `frame` from `inference_worker.frame` instead of `self.current_frame`
+- (b) In `cleanup_old_records()`, collect `image_path` values before DELETE, then `os.unlink()` each file after DELETE
+
+**Files**:
+- `jetson/app/gui_app.py` — Line 413: change `self.current_frame` → `frame` (the variable from line 399 that holds the analyzed frame)
+- `jetson/app/database.py` — In `cleanup_old_records()`: SELECT image_path WHERE conditions → DELETE → unlink files. Add `import os` if not present.
+
+---
+
+### Fix 1.5 — H2: Health server auth hardening
+
+**Problem**: (a) Empty `api_key` bypasses auth entirely (`health_server.py:40`). (b) String `!=` is not timing-safe. (c) Default config binds to `0.0.0.0`.
+
+**Solution** (scoped for LAN-only):
+- (a) If `_api_key` is empty, **log warning but still allow** (current behavior OK for LAN-only development). Add a startup log message recommending setting api_key.
+- (b) Replace `!=` with `hmac.compare_digest()` for timing-safe comparison.
+- (c) Change `config.example.json` default host from `"0.0.0.0"` to `"127.0.0.1"`. Users who need LAN access explicitly change to `0.0.0.0`.
+
+**Files**:
+- `jetson/app/health_server.py` — Line 40: `if _api_key and not hmac.compare_digest(request.headers.get("X-API-Key", ""), _api_key):`. Add `import hmac` at top.
+- `jetson/config/config.example.json` — Change `"host": "0.0.0.0"` to `"host": "127.0.0.1"`.
+
+---
+
+### Fix 1.6 — NEW-1: Graceful shutdown (try/finally + daemon drain)
+
+**Problem**: `main.py:149-190` has no try/finally around the main loop. Uncaught exception skips `camera.release()` and `db.close()`. Also, `db.close()` can execute while sync_engine daemon thread is mid-operation → `ProgrammingError` on closed database.
+
+**Solution**: Wrap main loop in try/finally. Set a `shutdown_event` that sync_engine checks, with a brief drain timeout.
+
+**Files**:
+- `jetson/app/main.py` — Wrap lines 149-190 in `try: ... finally: camera.release(); db.close()`. Add `shutdown_event = threading.Event()` passed to SyncEngine. Signal handler sets `shutdown_event`. Before `db.close()`, call `sync_thread.join(timeout=5)` to drain.
+- `jetson/app/sync_engine.py` — Accept `shutdown_event` in `__init__`. In `run()` loop, check `if self._shutdown_event.is_set(): break` instead of `while True`. This allows graceful exit.
+
+---
+
+## Phase 2: Web Admin & Database (8 fixes, 8 files)
+
+> **Goal**: Close security gaps and prevent UI issues at scale.
+
+### Fix 2.1 — H8: GitHub PAT → sessionStorage
+
+**Problem**: PAT in `localStorage` persists forever, survives tab close, browser restart. XSS or browser extension can steal it.
+
+**Solution**: Move to `sessionStorage` (cleared when tab closes). Add warning banner that token is session-only.
+
+**Files**:
+- `admin-dashboard/src/pages/SettingsPage.jsx` — Lines 42-45: Replace all `localStorage.setItem` → `sessionStorage.setItem`. Lines 26-30: Replace all `localStorage.getItem` → `sessionStorage.getItem`.
+- `admin-dashboard/src/lib/helpers.js` — Lines 42-49 (`getGitHubConfig`): Replace `localStorage.getItem` → `sessionStorage.getItem`.
+
+---
+
+### Fix 2.2 — H6/M10: Add limits to unlimited queries
+
+**Problem**: 7 Supabase queries have NO LIMIT. Worst: `DashboardPage.jsx:48` fetches all 30-day predictions to count daily totals in JS.
+
+**Solution**: Add `.limit()` to all unlimited queries. For DashboardPage daily chart, use a Supabase RPC (server-side aggregation) OR add `.limit(10000)` as a pragmatic cap (sufficient for <1K/day × 30 days = 30K max scenario with current scale).
+
+**Files**:
+- `admin-dashboard/src/pages/DashboardPage.jsx` — Line 48: Add `.limit(10000)` to 30-day predictions query.
+- `admin-dashboard/src/pages/DataManagementPage.jsx` — Line 577 (`previewPredictions`): Add `.limit(5000)`.
+- `admin-dashboard/src/pages/UsersPage.jsx` — Line 22: Add `.limit(500)` to profiles query.
+- `admin-dashboard/src/pages/DevicesPage.jsx` — Line 36: Add `.limit(200)` to devices query. Line 38: Add `.limit(200)` to profiles query.
+- `admin-dashboard/src/pages/ModelsPage.jsx` — Lines 98-100: Add `.limit(100)` to each of 3 queries.
+
+---
+
+### Fix 2.3 — H4: DevicesPage null guards
+
+**Problem**: `DevicesPage.jsx:150-151` calls `hostname.toLowerCase()` without null check → crash when hostname is null.
+
+**Solution**: Add null guards with fallback empty string.
+
+**Files**:
+- `admin-dashboard/src/pages/DevicesPage.jsx` — Lines 150-151: `(d.hostname || '').toLowerCase()`, `(d.hw_id || '').toLowerCase()`.
+
+---
+
+### Fix 2.4 — H5: Promise.allSettled
+
+**Problem**: `ModelsPage.jsx:97` and `DataManagementPage.jsx:94` use `Promise.all` — one failed query breaks entire page load.
+
+**Solution**: Replace `Promise.all` with `Promise.allSettled`, check each result's status.
+
+**Files**:
+- `admin-dashboard/src/pages/ModelsPage.jsx` — Line 97: `Promise.all([...])` → `Promise.allSettled([...])`. Add result status checks.
+- `admin-dashboard/src/pages/DataManagementPage.jsx` — Line 94: Same pattern.
+
+---
+
+### Fix 2.5 — H7: Rate limit timestamp fix
+
+**Problem**: `helpers.js:115` sets cooldown timestamp BEFORE action executes. If action fails, user is locked out for the cooldown period.
+
+**Solution**: Move timestamp set to AFTER successful action.
+
+**Files**:
+- `admin-dashboard/src/lib/helpers.js` — Move `localStorage.setItem('last_<action>_time', ...)` (line ~115) to after the `await` succeeds, inside the success path.
+
+---
+
+### Fix 2.6 — M22/NEW-3: RLS tightening
+
+**Problem**: (a) "Anon read unused tokens" (`012_devices.sql:25-26`) allows anyone with anon key to enumerate all active provisioning tokens. (b) "Users update own device config" (`012_devices.sql:82-84`) has no column restriction — users can UPDATE `hw_id`, `device_token`, `status`, etc.
+
+**Solution**:
+- (a) Restrict anon SELECT: require matching token ID via request header or remove blanket SELECT for anon.
+- (b) Replace unrestricted UPDATE policy with a column-restricted approach using a SECURITY DEFINER function that only allows updating `desired_config` and `device_name`.
+
+**Files**:
+- `database/migrations/012_devices.sql` — Edit existing policies.
+  - Replace "Anon read unused tokens" with: `FOR SELECT USING (id::text = current_setting('request.header.x-provisioning-token-id', true) AND used_at IS NULL AND expires_at > now())`
+  - Replace "Users update own device config" with a safer SECURITY DEFINER function `update_device_config(device_id, config, name)` that only touches `desired_config` and `device_name` columns, gated by `auth.uid() = user_id`.
+
+---
+
+### Fix 2.7 — NEW-2: config.json file permissions
+
+**Problem**: `provision.py:359-361` writes `config.json` (contains Supabase anon key) with default umask 0644 (world-readable), while `device_state.json` correctly uses `chmod 600`.
+
+**Solution**: Add `os.chmod(config_path, 0o600)` after writing config.json.
+
+**Files**:
+- `jetson/scripts/provision.py` — After line 361 (writing config.json): add `os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)`.
+
+---
+
+### Fix 2.8 — M5: Add device_id to API predictions
+
+**Problem**: `health_server.py:166` calls `save_prediction()` without `device_id` — API predictions can't be traced to a device.
+
+**Solution**: Pass `device_id` from the loaded device state.
+
+**Files**:
+- `jetson/app/health_server.py` — Add `_device_id = None` module global. Set in `start_health_server()`. Pass in `save_prediction(leaf_type, result, device_id=_device_id)` at line 166.
+- `jetson/app/main.py` — Pass `device_id=device_id` kwarg to `start_health_server()`.
+
+---
+
+## Phase 3: CI/CD & Hardening (5 fixes, 9 files)
+
+> **Goal**: Close CI gaps and improve observability.
+
+### Fix 3.1 — H9: Add admin dashboard tests to CI
+
+**Problem**: 30 vitest tests exist but are never executed in ci.yml.
+
+**Solution**: Add a `dashboard-test` job to ci.yml.
+
+**Files**:
+- `.github/workflows/ci.yml` — Add new job: `cd admin-dashboard && npm ci && npx vitest run --reporter=verbose`.
+
+---
+
+### Fix 3.2 — H10: Add Jetson Python linting to CI
+
+**Problem**: 8 Python modules in `jetson/app/` have zero linting or testing in CI.
+
+**Solution**: Add a `jetson-lint` job using `ruff` (fast, free Python linter).
+
+**Files**:
+- `.github/workflows/ci.yml` — Add new job: `pip install ruff && ruff check jetson/app/ jetson/scripts/`.
+- `jetson/ruff.toml` — Create minimal config (line-length=120, target Python 3.8+).
+
+---
+
+### Fix 3.3 — H11: Add permissions blocks to workflows
+
+**Problem**: 7 of 11 workflows missing explicit `permissions` block → inherit broad defaults.
+
+**Solution**: Add minimal `permissions: { contents: read }` (or appropriate) to each workflow.
+
+**Files** (add `permissions` block):
+- `.github/workflows/train.yml`
+- `.github/workflows/validate-model.yml`
+- `.github/workflows/dvc-pull.yml`
+- `.github/workflows/dvc-push.yml`
+- `.github/workflows/export-data.yml`
+- `.github/workflows/dataset-upload.yml`
+- `.github/workflows/model-pipeline.yml`
+
+---
+
+### Fix 3.4 — verify_rls_policies.sql update
+
+**Problem**: Verification script (`database/verify_rls_policies.sql:22-30`) doesn't cover `devices`, `provisioning_tokens`, or `dvc_operations` tables.
+
+**Files**:
+- `database/verify_rls_policies.sql` — Add `'devices'`, `'provisioning_tokens'`, `'dvc_operations'` to `_required_tables` array. Add their expected policies and indexes to the verification checks.
+
+---
+
+### Fix 3.5 — Documentation sync for remediation changes
+
+**Files**:
+- `docs/guides/jetson_deployment_guide.md` — Update architecture diagram to show InferenceWorkerPool. Update config reference (`host` default → `127.0.0.1`).
+- `docs/technical/project_context.md` — Update Jetson data flow diagram. Mention threading lock on SQLite. Note CI coverage for dashboard + Jetson lint.
+
+---
+
+## Execution Order
+
+```
+Phase 1 — Jetson (can be done as one batch, dependencies noted)
+  1.1  InferenceWorkerPool (inference.py → main.py → health_server.py)
+  1.2  SQLite Lock (database.py)
+  1.3  Heartbeat timestamp (sync_engine.py)
+  1.4  Active learning frame fix + orphan cleanup (gui_app.py, database.py)
+  1.5  Health server auth hardening (health_server.py, config.example.json)
+  1.6  Graceful shutdown (main.py, sync_engine.py)
+  → Test: Run Jetson headless + curl /predict concurrently
+
+Phase 2 — Web Admin & Database (independent of Phase 1)
+  2.1  sessionStorage (SettingsPage.jsx, helpers.js)
+  2.2  Query limits (5 page files)
+  2.3  Null guards (DevicesPage.jsx)
+  2.4  Promise.allSettled (ModelsPage.jsx, DataManagementPage.jsx)
+  2.5  Rate limit timestamp (helpers.js)
+  2.6  RLS tightening (012_devices.sql)
+  2.7  config.json permissions (provision.py)
+  2.8  device_id on API predictions (health_server.py, main.py)
+  → Test: npx vitest run (30+ tests), manual dashboard smoke test
+
+Phase 3 — CI/CD (independent of Phases 1-2)
+  3.1  Dashboard tests in CI (ci.yml)
+  3.2  Jetson lint in CI (ci.yml, ruff.toml)
+  3.3  Workflow permissions (7 workflow files)
+  3.4  RLS verification (verify_rls_policies.sql)
+  3.5  Doc sync
+  → Test: Push branch, verify all CI jobs green
+```
+
+## Verification Checklist
+
+### Phase 1 — Jetson
+- [ ] InferenceWorkerPool: Start `main.py` in periodic mode + call `/predict` via curl simultaneously → no crash, correct results
+- [ ] SQLite Lock: Run concurrent `/predict` calls (4 parallel curl) + check no `ProgrammingError` in logs
+- [ ] Heartbeat: Check Supabase `devices` table → `last_seen_at` is a real timestamp (not "now()")
+- [ ] Active Learning: After GUI prediction, verify saved image matches the actual analyzed frame
+- [ ] Orphan cleanup: Run `cleanup_old_records()` → verify image files are deleted alongside DB rows
+- [ ] Shutdown: `kill -TERM <pid>` → verify clean exit in logs, no error messages
+
+### Phase 2 — Admin Dashboard
+- [ ] `npx vitest run` → 30+ tests pass
+- [ ] Open DashboardPage → DevTools Network tab shows queries with `.limit()` params
+- [ ] DevicesPage → search with null hostname → no crash
+- [ ] SettingsPage → set PAT → close tab → reopen → PAT is gone (sessionStorage)
+- [ ] Settings → trigger workflow → fail → try again immediately → NOT locked out (rate limit fix)
+
+### Phase 3 — CI/CD
+- [ ] Push to branch → CI runs dashboard tests + Jetson lint
+- [ ] All 11 workflows have explicit `permissions` block
+- [ ] Run `verify_rls_policies.sql` → includes devices, provisioning_tokens, dvc_operations
+
+## File Impact Summary (25 files total)
+
+| Phase | File | Action |
+|-------|------|--------|
+| 1.1 | `jetson/app/inference.py` | MODIFY — Add InferenceWorkerPool class |
+| 1.1 | `jetson/app/main.py` | MODIFY — Use pool instead of engines dict |
+| 1.1 | `jetson/app/health_server.py` | MODIFY — Use pool, remove _inference_lock |
+| 1.2 | `jetson/app/database.py` | MODIFY — Add threading.Lock to all methods |
+| 1.3 | `jetson/app/sync_engine.py` | MODIFY — Fix heartbeat timestamp |
+| 1.4 | `jetson/app/gui_app.py` | MODIFY — Fix frame variable, orphan cleanup |
+| 1.4 | `jetson/app/database.py` | MODIFY — Delete image files in cleanup |
+| 1.5 | `jetson/app/health_server.py` | MODIFY — hmac.compare_digest |
+| 1.5 | `jetson/config/config.example.json` | MODIFY — Default host 127.0.0.1 |
+| 1.6 | `jetson/app/main.py` | MODIFY — try/finally, shutdown event |
+| 1.6 | `jetson/app/sync_engine.py` | MODIFY — Check shutdown event |
+| 2.1 | `admin-dashboard/src/pages/SettingsPage.jsx` | MODIFY — sessionStorage |
+| 2.1 | `admin-dashboard/src/lib/helpers.js` | MODIFY — sessionStorage |
+| 2.2 | `admin-dashboard/src/pages/DashboardPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/DataManagementPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/UsersPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/DevicesPage.jsx` | MODIFY — Add .limit() + null guards |
+| 2.2 | `admin-dashboard/src/pages/ModelsPage.jsx` | MODIFY — Add .limit() + allSettled |
+| 2.5 | `admin-dashboard/src/lib/helpers.js` | MODIFY — Rate limit timestamp |
+| 2.6 | `database/migrations/012_devices.sql` | MODIFY — RLS tightening |
+| 2.7 | `jetson/scripts/provision.py` | MODIFY — chmod config.json |
+| 2.8 | `jetson/app/health_server.py` | MODIFY — Pass device_id |
+| 3.1-3.2 | `.github/workflows/ci.yml` | MODIFY — Add 2 jobs |
+| 3.2 | `jetson/ruff.toml` | CREATE — Linter config |
+| 3.3 | 7 workflow files | MODIFY — Add permissions |
+| 3.4 | `database/verify_rls_policies.sql` | MODIFY — Add 3 tables |
+| 3.5 | 2 doc files | MODIFY — Architecture + CI changes |
+
+
+
+
+Used tool: AskUserQuestion
+
+Analyzing your answers...
+
+Cảm ơn feedback rất chất lượng! Để tôi phân tích từng điểm:
+
+### Phản hồi 3 đề xuất:
+
+**1. Wake-Capture-Sleep Camera**: Đề xuất TUYỆT VỜI, tôi áp dụng. Hiện tại `camera.py` giữ `cv2.VideoCapture` mở suốt — wasteful cho periodic mode (interval 30+ phút). Giải pháp: sửa `camera.py` thành open/capture/release mỗi cycle. Buffer leak risk? **Không** — `cv2.VideoCapture.release()` là clean, OpenCV xử lý kernel buffer. Warm-up: skip 3-5 frames đầu (auto-exposure settle). Tôi sẽ thêm vào Fix 1.1 vì nó tích hợp vào main loop.
+
+**2. Auto-generate API key**: Đồng ý nguyên tắc "phải có key". Tuy nhiên **ghi ngược vào config.json CÓ rủi ro** — nếu process crash giữa chừng → corrupt config. Giải pháp tốt hơn: **generate ephemeral key in-memory**, in ra log + stdout. Config.json chỉ đọc, never auto-written by runtime code. Reject 401 nếu thiếu key.
+
+**3. Atomic write cho device_state.json**: Code hiện tại ĐÃ CÓ atomic write! `sync_engine.py:98-133` dùng `tempfile.mkstemp()` → write → `os.fsync()` → `os.replace()` — đúng pattern bạn đề xuất. Tuy nhiên, **`gui_app.py:488`** đọc file này KHÔNG có protection — nếu đọc đúng lúc atomic replace → race (cực hiếm nhưng possible). Tôi sẽ thêm retry logic khi đọc file.
+
+Tôi update plan ngay:
+
+Read [](file:///d%3A/Capstone/app/jetson/app/camera.py)
+
+Good — `camera.py` already has lazy `_open()` and `release()` with `self.cap = None` pattern. The Wake-Capture-Sleep integration will be clean. Now let me update the plan:Now add the two new fixes (1.7 Wake-Capture-Sleep & 1.8 device_state read safety) and update Fix 1.5:Now add Fix 1.7 and Fix 1.8 after Fix 1.6:Now update the execution order and file summary to include the 2 new fixes:Now update Phase 1 verification to include new fixes:Update file summary table:Plan updated with all 3 user feedback points integrated. Summary of changes:
+
+**Added Fix 1.7** — Wake-Capture-Sleep: `camera.capture_single()` with 3-frame warm-up + auto-release per cycle. GUI untouched (needs live preview).
+
+**Revised Fix 1.5** — Strict auth: Auto-generate ephemeral key in-memory if api_key empty → print to console → 401 reject all requests without key. Config.json is read-only at runtime (no write-back risk).
+
+**Added Fix 1.8** — device_state.json read safety: Retry-on-read wrapper (50ms backoff) for atomic replace window. Note: write side already uses atomic pattern (mkstemp → fsync → os.replace).
+
+**Final count**: Phase 1 now has 8 fixes across 8 Jetson files.
+
+Here is Claude's plan:
+
+# Feature Freeze — Remediation Plan
+
+## Context
+
+Comprehensive audit found **67 issues** (3 CRITICAL, 14 HIGH, 22 MEDIUM). Production readiness: **65/100**. Feature Freeze declared — zero new features, all effort on bug fixes and hardening. The **Local-First, Cloud-Sync** architecture is **inviolable** — no fix may cause Jetson to block on network for capture/inference/SQLite save.
+
+### User-Provided Constraints (from Q&A)
+- **Hardware**: Jetson Orin NX 8GB, MobileNet ~2MB engine → GPU memory is NOT a concern
+- **Network**: LAN-only (no internet exposure) → H2 auth hardening is MEDIUM priority (still fix, no TLS needed)
+- **Scale**: 1-3 devices, <1K predictions/day → Query optimization is MEDIUM priority (still fix, simpler approach OK)
+- **Admin**: Single admin only → sessionStorage sufficient for H8 (PAT storage)
+
+---
+
+## Phase 1: Jetson Blockers (8 fixes, 8 files)
+
+> **Goal**: Make Jetson edge deployment crash-free and functionally correct.
+
+### Fix 1.1 — C1: Inference Worker Queue (eliminates CUDA threading bug)
+
+**Problem**: `pycuda.autoinit` (`inference.py:36`) binds CUDA context to the importing thread. `predict()` uses shared pre-allocated buffers (`inference.py:72-80`). Main thread (`main.py:174`) and Waitress threads (`health_server.py:163`) call `predict()` concurrently → buffer overwrite, CUDA corruption.
+
+**Solution**: Create `InferenceWorkerPool` — a single worker thread owns the CUDA context and all buffers. All callers submit jobs via `queue.Queue`, receive results via `concurrent.futures.Future`.
+
+**Why Queue > push/pop+Lock**: push/pop still shares buffers (needs Lock anyway). Queue naturally serializes, zero context leak risk, cleaner architecture. Throughput: ~450 FPS (1-2ms inference + 0.1ms queue overhead) — more than sufficient.
+
+**Files**:
+- `jetson/app/inference.py` — Add `InferenceWorkerPool` class (~60 lines). Wraps existing `TensorRTInference`. Worker thread: `while True: job = queue.get() → result = engine.predict(frame) → future.set_result(result)`. Public API: `pool.submit(leaf_type, frame) → Future`.
+- `jetson/app/main.py` — Replace `engines[leaf_type].predict(frame)` (line 174) with `pool.submit(leaf_type, frame).result()`. Pass `pool` instead of `engines` dict to health_server.
+- `jetson/app/health_server.py` — Replace `engine.predict(frame)` (line 163) with `pool.submit(leaf_type, frame).result()`. Remove `_inference_lock` (no longer needed — Queue serializes). Accept `pool` parameter instead of `engines` dict.
+- `jetson/app/gui_app.py` — **NO CHANGE** (runs as separate process with own CUDA context, confirmed at `gui_app.py:556`).
+
+**Local-First impact**: NONE. Queue is in-process, no network dependency. `submit().result()` blocks the calling thread only for inference time (~2ms).
+
+---
+
+### Fix 1.2 — C2: SQLite threading lock
+
+**Problem**: Single `sqlite3.Connection` (`database.py:14`, `check_same_thread=False`) shared across 6+ threads with no Python-level synchronization. WAL + busy_timeout provide some protection but Python's sqlite3 module is not guaranteed thread-safe on the same connection.
+
+**Solution**: Add a single `threading.Lock()` wrapping all `execute()`+`commit()` pairs.
+
+**Why single Lock (not connection pool)**: Deadlock impossible with one lock (no circular dependency). All DB operations are <1ms. Starvation risk negligible (sync's `mark_synced` is single UPDATE per call). Connection pool adds complexity for zero practical benefit at this scale.
+
+**Files**:
+- `jetson/app/database.py` — Add `self._lock = threading.Lock()`. Wrap every method body (`save_prediction`, `get_unsynced`, `mark_synced`, `get_stats`, `cleanup_old_records`, `close`) in `with self._lock:`. ~15 lines changed.
+
+**Local-First impact**: NONE. Lock is in-process, no network. Maximum blocking: <1ms per operation.
+
+---
+
+### Fix 1.3 — C3: Heartbeat timestamp
+
+**Problem**: `sync_engine.py:306` sends `{"last_seen_at": "now()"}` — PostgREST stores literal string "now()", not a timestamp. Device monitoring is completely broken.
+
+**Solution**: Replace with `datetime.now(timezone.utc).isoformat()`.
+
+**Files**:
+- `jetson/app/sync_engine.py` — Line 306: `body = {"last_seen_at": datetime.now(timezone.utc).isoformat()}`. Add `from datetime import datetime, timezone` at top.
+
+---
+
+### Fix 1.4 — H1: Active learning frame + orphan cleanup
+
+**Problem**: (a) `gui_app.py:413` saves `self.current_frame` (live camera, possibly shifted by 2-3 frames) instead of the analyzed frame. (b) `database.py:101-111` `cleanup_old_records()` deletes DB rows but NOT associated image files → orphaned JPEGs accumulate.
+
+**Solution**:
+- (a) Save `frame` from `inference_worker.frame` instead of `self.current_frame`
+- (b) In `cleanup_old_records()`, collect `image_path` values before DELETE, then `os.unlink()` each file after DELETE
+
+**Files**:
+- `jetson/app/gui_app.py` — Line 413: change `self.current_frame` → `frame` (the variable from line 399 that holds the analyzed frame)
+- `jetson/app/database.py` — In `cleanup_old_records()`: SELECT image_path WHERE conditions → DELETE → unlink files. Add `import os` if not present.
+
+---
+
+### Fix 1.5 — H2: Health server auth hardening (REVISED per user feedback)
+
+**Problem**: (a) Empty `api_key` bypasses auth entirely (`health_server.py:40`). (b) String `!=` is not timing-safe. (c) Default config binds to `0.0.0.0`.
+
+**Solution** (user requested strict auth even on LAN):
+- (a) **If `api_key` is empty at startup → auto-generate ephemeral key via `secrets.token_hex(16)`, store in-memory only (NOT written to config.json to avoid corruption risk), print to stdout + log so dev can use it. ALL non-/health requests without valid key → 401 Reject.**
+- (b) Replace `!=` with `hmac.compare_digest()` for timing-safe comparison.
+- (c) Change `config.example.json` default host from `"0.0.0.0"` to `"127.0.0.1"`.
+
+**Why in-memory only (not write-back to config.json)**: Runtime code should NEVER auto-modify its own config file — power loss during write → corrupt config → Jetson won't start. Config.json is read-only at runtime. Admins set api_key deliberately.
+
+**Files**:
+- `jetson/app/health_server.py` — Import `hmac`, `secrets`. In `start_health_server()`: if `api_key` empty → `api_key = secrets.token_hex(16)`, log + print. Line 40: `hmac.compare_digest()`. Remove the `if _api_key and` short-circuit — now ALWAYS require key.
+- `jetson/config/config.example.json` — Change `"host": "0.0.0.0"` to `"host": "127.0.0.1"`.
+
+---
+
+### Fix 1.6 — NEW-1: Graceful shutdown (try/finally + daemon drain)
+
+**Problem**: `main.py:149-190` has no try/finally around the main loop. Uncaught exception skips `camera.release()` and `db.close()`. Also, `db.close()` can execute while sync_engine daemon thread is mid-operation → `ProgrammingError` on closed database.
+
+**Solution**: Wrap main loop in try/finally. Set a `shutdown_event` that sync_engine checks, with a brief drain timeout.
+
+**Files**:
+- `jetson/app/main.py` — Wrap lines 149-190 in `try: ... finally: camera.release(); db.close()`. Add `shutdown_event = threading.Event()` passed to SyncEngine. Signal handler sets `shutdown_event`. Before `db.close()`, call `sync_thread.join(timeout=5)` to drain.
+- `jetson/app/sync_engine.py` — Accept `shutdown_event` in `__init__`. In `run()` loop, check `if self._shutdown_event.is_set(): break` instead of `while True`. This allows graceful exit.
+
+---
+
+### Fix 1.7 — Wake-Capture-Sleep Camera (user-requested optimization)
+
+**Problem**: In periodic mode (interval 30min+), camera stays open continuously → Jetson overheats, sensor degradation, wasted power. Plant diseases develop slowly — no need for continuous video stream.
+
+**Solution**: Change `camera.py` to open/capture/release per cycle. Current code ALREADY has lazy `_open()` + `release()` with `self.cap = None` check (`camera.py:15-36`). Add a `capture_single()` method that opens camera → skips 3 warm-up frames (auto-exposure settle) → captures 1 frame → releases immediately.
+
+**camera.py currently:**
+```
+_open() → lazy open (check cap is None)
+capture() → _open() then read one frame (cap stays open)
+release() → explicit cleanup
+```
+
+**camera.py after fix:**
+```
+_open()          → same
+capture()        → same (for interactive/GUI use, camera stays open)
+capture_single() → NEW: _open() → skip 3 frames → read → release() → return frame
+release()        → same
+```
+
+**Integration**:
+- `main.py` periodic mode: Replace `camera.capture()` with `camera.capture_single()` (wake-capture-sleep per cycle)
+- `main.py` manual mode: No camera use (API-only), no change needed
+- `gui_app.py`: Uses CameraThread with continuous `capture()` — NO CHANGE (GUI needs live preview)
+- `health_server.py`: No camera use (receives uploaded images), no change needed
+
+**Buffer leak risk**: NONE. `cv2.VideoCapture.release()` calls V4L2 `VIDIOC_STREAMOFF` + `close(fd)` — kernel buffer is fully freed. Re-opening is ~100-200ms, negligible vs 30-minute interval.
+
+**Files**:
+- `jetson/app/camera.py` — Add `capture_single(self, warmup_frames=3)` method. After `_open()`, loop `warmup_frames` times calling `self.cap.read()` (discard), then capture final frame, then `self.release()`.
+- `jetson/app/main.py` — Line 171: Replace `camera.capture()` with `camera.capture_single()` in periodic mode.
+
+---
+
+### Fix 1.8 — device_state.json read safety (user-requested hardening)
+
+**Problem**: `sync_engine.py:98-133` already uses atomic write (mkstemp → fsync → os.replace). BUT `gui_app.py:488` and `main.py:76` read device_state.json without retry — if read happens exactly during atomic replace (nanosecond window: old file unlinked, new file not yet visible), `FileNotFoundError` rises.
+
+**Solution**: Add retry-on-read wrapper. If read fails with FileNotFoundError or JSONDecodeError, retry once after 50ms. This covers the atomic replace window.
+
+**Files**:
+- `jetson/app/sync_engine.py` — Extract `_read_device_state(path)` helper with retry logic (try → except → sleep 50ms → retry once → return None on second failure). Use in `_load_device_state()`.
+- `jetson/app/gui_app.py` — Use same retry pattern in `_get_device_status()`.
+- `jetson/app/main.py` — Use same retry pattern in device_state loading (lines 75-85).
+
+---
+
+## Phase 2: Web Admin & Database (8 fixes, 8 files)
+
+> **Goal**: Close security gaps and prevent UI issues at scale.
+
+### Fix 2.1 — H8: GitHub PAT → sessionStorage
+
+**Problem**: PAT in `localStorage` persists forever, survives tab close, browser restart. XSS or browser extension can steal it.
+
+**Solution**: Move to `sessionStorage` (cleared when tab closes). Add warning banner that token is session-only.
+
+**Files**:
+- `admin-dashboard/src/pages/SettingsPage.jsx` — Lines 42-45: Replace all `localStorage.setItem` → `sessionStorage.setItem`. Lines 26-30: Replace all `localStorage.getItem` → `sessionStorage.getItem`.
+- `admin-dashboard/src/lib/helpers.js` — Lines 42-49 (`getGitHubConfig`): Replace `localStorage.getItem` → `sessionStorage.getItem`.
+
+---
+
+### Fix 2.2 — H6/M10: Add limits to unlimited queries
+
+**Problem**: 7 Supabase queries have NO LIMIT. Worst: `DashboardPage.jsx:48` fetches all 30-day predictions to count daily totals in JS.
+
+**Solution**: Add `.limit()` to all unlimited queries. For DashboardPage daily chart, use a Supabase RPC (server-side aggregation) OR add `.limit(10000)` as a pragmatic cap (sufficient for <1K/day × 30 days = 30K max scenario with current scale).
+
+**Files**:
+- `admin-dashboard/src/pages/DashboardPage.jsx` — Line 48: Add `.limit(10000)` to 30-day predictions query.
+- `admin-dashboard/src/pages/DataManagementPage.jsx` — Line 577 (`previewPredictions`): Add `.limit(5000)`.
+- `admin-dashboard/src/pages/UsersPage.jsx` — Line 22: Add `.limit(500)` to profiles query.
+- `admin-dashboard/src/pages/DevicesPage.jsx` — Line 36: Add `.limit(200)` to devices query. Line 38: Add `.limit(200)` to profiles query.
+- `admin-dashboard/src/pages/ModelsPage.jsx` — Lines 98-100: Add `.limit(100)` to each of 3 queries.
+
+---
+
+### Fix 2.3 — H4: DevicesPage null guards
+
+**Problem**: `DevicesPage.jsx:150-151` calls `hostname.toLowerCase()` without null check → crash when hostname is null.
+
+**Solution**: Add null guards with fallback empty string.
+
+**Files**:
+- `admin-dashboard/src/pages/DevicesPage.jsx` — Lines 150-151: `(d.hostname || '').toLowerCase()`, `(d.hw_id || '').toLowerCase()`.
+
+---
+
+### Fix 2.4 — H5: Promise.allSettled
+
+**Problem**: `ModelsPage.jsx:97` and `DataManagementPage.jsx:94` use `Promise.all` — one failed query breaks entire page load.
+
+**Solution**: Replace `Promise.all` with `Promise.allSettled`, check each result's status.
+
+**Files**:
+- `admin-dashboard/src/pages/ModelsPage.jsx` — Line 97: `Promise.all([...])` → `Promise.allSettled([...])`. Add result status checks.
+- `admin-dashboard/src/pages/DataManagementPage.jsx` — Line 94: Same pattern.
+
+---
+
+### Fix 2.5 — H7: Rate limit timestamp fix
+
+**Problem**: `helpers.js:115` sets cooldown timestamp BEFORE action executes. If action fails, user is locked out for the cooldown period.
+
+**Solution**: Move timestamp set to AFTER successful action.
+
+**Files**:
+- `admin-dashboard/src/lib/helpers.js` — Move `localStorage.setItem('last_<action>_time', ...)` (line ~115) to after the `await` succeeds, inside the success path.
+
+---
+
+### Fix 2.6 — M22/NEW-3: RLS tightening
+
+**Problem**: (a) "Anon read unused tokens" (`012_devices.sql:25-26`) allows anyone with anon key to enumerate all active provisioning tokens. (b) "Users update own device config" (`012_devices.sql:82-84`) has no column restriction — users can UPDATE `hw_id`, `device_token`, `status`, etc.
+
+**Solution**:
+- (a) Restrict anon SELECT: require matching token ID via request header or remove blanket SELECT for anon.
+- (b) Replace unrestricted UPDATE policy with a column-restricted approach using a SECURITY DEFINER function that only allows updating `desired_config` and `device_name`.
+
+**Files**:
+- `database/migrations/012_devices.sql` — Edit existing policies.
+  - Replace "Anon read unused tokens" with: `FOR SELECT USING (id::text = current_setting('request.header.x-provisioning-token-id', true) AND used_at IS NULL AND expires_at > now())`
+  - Replace "Users update own device config" with a safer SECURITY DEFINER function `update_device_config(device_id, config, name)` that only touches `desired_config` and `device_name` columns, gated by `auth.uid() = user_id`.
+
+---
+
+### Fix 2.7 — NEW-2: config.json file permissions
+
+**Problem**: `provision.py:359-361` writes `config.json` (contains Supabase anon key) with default umask 0644 (world-readable), while `device_state.json` correctly uses `chmod 600`.
+
+**Solution**: Add `os.chmod(config_path, 0o600)` after writing config.json.
+
+**Files**:
+- `jetson/scripts/provision.py` — After line 361 (writing config.json): add `os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)`.
+
+---
+
+### Fix 2.8 — M5: Add device_id to API predictions
+
+**Problem**: `health_server.py:166` calls `save_prediction()` without `device_id` — API predictions can't be traced to a device.
+
+**Solution**: Pass `device_id` from the loaded device state.
+
+**Files**:
+- `jetson/app/health_server.py` — Add `_device_id = None` module global. Set in `start_health_server()`. Pass in `save_prediction(leaf_type, result, device_id=_device_id)` at line 166.
+- `jetson/app/main.py` — Pass `device_id=device_id` kwarg to `start_health_server()`.
+
+---
+
+## Phase 3: CI/CD & Hardening (5 fixes, 9 files)
+
+> **Goal**: Close CI gaps and improve observability.
+
+### Fix 3.1 — H9: Add admin dashboard tests to CI
+
+**Problem**: 30 vitest tests exist but are never executed in ci.yml.
+
+**Solution**: Add a `dashboard-test` job to ci.yml.
+
+**Files**:
+- `.github/workflows/ci.yml` — Add new job: `cd admin-dashboard && npm ci && npx vitest run --reporter=verbose`.
+
+---
+
+### Fix 3.2 — H10: Add Jetson Python linting to CI
+
+**Problem**: 8 Python modules in `jetson/app/` have zero linting or testing in CI.
+
+**Solution**: Add a `jetson-lint` job using `ruff` (fast, free Python linter).
+
+**Files**:
+- `.github/workflows/ci.yml` — Add new job: `pip install ruff && ruff check jetson/app/ jetson/scripts/`.
+- `jetson/ruff.toml` — Create minimal config (line-length=120, target Python 3.8+).
+
+---
+
+### Fix 3.3 — H11: Add permissions blocks to workflows
+
+**Problem**: 7 of 11 workflows missing explicit `permissions` block → inherit broad defaults.
+
+**Solution**: Add minimal `permissions: { contents: read }` (or appropriate) to each workflow.
+
+**Files** (add `permissions` block):
+- `.github/workflows/train.yml`
+- `.github/workflows/validate-model.yml`
+- `.github/workflows/dvc-pull.yml`
+- `.github/workflows/dvc-push.yml`
+- `.github/workflows/export-data.yml`
+- `.github/workflows/dataset-upload.yml`
+- `.github/workflows/model-pipeline.yml`
+
+---
+
+### Fix 3.4 — verify_rls_policies.sql update
+
+**Problem**: Verification script (`database/verify_rls_policies.sql:22-30`) doesn't cover `devices`, `provisioning_tokens`, or `dvc_operations` tables.
+
+**Files**:
+- `database/verify_rls_policies.sql` — Add `'devices'`, `'provisioning_tokens'`, `'dvc_operations'` to `_required_tables` array. Add their expected policies and indexes to the verification checks.
+
+---
+
+### Fix 3.5 — Documentation sync for remediation changes
+
+**Files**:
+- `docs/guides/jetson_deployment_guide.md` — Update architecture diagram to show InferenceWorkerPool. Update config reference (`host` default → `127.0.0.1`).
+- `docs/technical/project_context.md` — Update Jetson data flow diagram. Mention threading lock on SQLite. Note CI coverage for dashboard + Jetson lint.
+
+---
+
+## Execution Order
+
+```
+Phase 1 — Jetson (can be done as one batch, dependencies noted)
+  1.2  SQLite Lock (database.py) — FIRST, no dependencies
+  1.1  InferenceWorkerPool (inference.py → main.py → health_server.py)
+  1.3  Heartbeat timestamp (sync_engine.py)
+  1.5  Health server auth hardening (health_server.py, config.example.json)
+  1.7  Wake-Capture-Sleep (camera.py, main.py)
+  1.4  Active learning frame fix + orphan cleanup (gui_app.py, database.py)
+  1.6  Graceful shutdown (main.py, sync_engine.py) — touches main.py again, do AFTER 1.1/1.7
+  1.8  device_state.json read safety (sync_engine.py, gui_app.py, main.py) — LAST, touches multiple files
+  → Test: Run Jetson headless + curl /predict concurrently
+
+Phase 2 — Web Admin & Database (independent of Phase 1)
+  2.1  sessionStorage (SettingsPage.jsx, helpers.js)
+  2.2  Query limits (5 page files)
+  2.3  Null guards (DevicesPage.jsx)
+  2.4  Promise.allSettled (ModelsPage.jsx, DataManagementPage.jsx)
+  2.5  Rate limit timestamp (helpers.js)
+  2.6  RLS tightening (012_devices.sql)
+  2.7  config.json permissions (provision.py)
+  2.8  device_id on API predictions (health_server.py, main.py)
+  → Test: npx vitest run (30+ tests), manual dashboard smoke test
+
+Phase 3 — CI/CD (independent of Phases 1-2)
+  3.1  Dashboard tests in CI (ci.yml)
+  3.2  Jetson lint in CI (ci.yml, ruff.toml)
+  3.3  Workflow permissions (7 workflow files)
+  3.4  RLS verification (verify_rls_policies.sql)
+  3.5  Doc sync
+  → Test: Push branch, verify all CI jobs green
+```
+
+## Verification Checklist
+
+### Phase 1 — Jetson
+- [ ] InferenceWorkerPool: Start `main.py` in periodic mode + call `/predict` via curl simultaneously → no crash, correct results
+- [ ] SQLite Lock: Run concurrent `/predict` calls (4 parallel curl) + check no `ProgrammingError` in logs
+- [ ] Heartbeat: Check Supabase `devices` table → `last_seen_at` is a real timestamp (not "now()")
+- [ ] Active Learning: After GUI prediction, verify saved image matches the actual analyzed frame
+- [ ] Orphan cleanup: Run `cleanup_old_records()` → verify image files are deleted alongside DB rows
+- [ ] Auth: Start with empty api_key → console prints auto-generated key → curl without key → 401 → curl with key → 200
+- [ ] Wake-Capture-Sleep: In periodic mode, check logs show "Camera opened" + "Camera released" each cycle
+- [ ] Shutdown: `kill -TERM <pid>` → verify clean exit in logs, no error messages, sync thread drained
+- [ ] device_state read: Verify no crash if device_state.json temporarily missing during atomic replace
+
+### Phase 2 — Admin Dashboard
+- [ ] `npx vitest run` → 30+ tests pass
+- [ ] Open DashboardPage → DevTools Network tab shows queries with `.limit()` params
+- [ ] DevicesPage → search with null hostname → no crash
+- [ ] SettingsPage → set PAT → close tab → reopen → PAT is gone (sessionStorage)
+- [ ] Settings → trigger workflow → fail → try again immediately → NOT locked out (rate limit fix)
+
+### Phase 3 — CI/CD
+- [ ] Push to branch → CI runs dashboard tests + Jetson lint
+- [ ] All 11 workflows have explicit `permissions` block
+- [ ] Run `verify_rls_policies.sql` → includes devices, provisioning_tokens, dvc_operations
+
+## File Impact Summary (27 files total)
+
+| Phase | File | Action |
+|-------|------|--------|
+| 1.1 | `jetson/app/inference.py` | MODIFY — Add InferenceWorkerPool class |
+| 1.1 | `jetson/app/main.py` | MODIFY — Use pool instead of engines dict |
+| 1.1 | `jetson/app/health_server.py` | MODIFY — Use pool, remove _inference_lock |
+| 1.2 | `jetson/app/database.py` | MODIFY — Add threading.Lock to all methods |
+| 1.3 | `jetson/app/sync_engine.py` | MODIFY — Fix heartbeat timestamp |
+| 1.4 | `jetson/app/gui_app.py` | MODIFY — Fix frame variable, orphan cleanup |
+| 1.4 | `jetson/app/database.py` | MODIFY — Delete image files in cleanup |
+| 1.5 | `jetson/app/health_server.py` | MODIFY — hmac.compare_digest, auto-gen key, strict 401 |
+| 1.5 | `jetson/config/config.example.json` | MODIFY — Default host 127.0.0.1 |
+| 1.6 | `jetson/app/main.py` | MODIFY — try/finally, shutdown event |
+| 1.6 | `jetson/app/sync_engine.py` | MODIFY — Check shutdown event |
+| 1.7 | `jetson/app/camera.py` | MODIFY — Add capture_single() wake-capture-sleep |
+| 1.7 | `jetson/app/main.py` | MODIFY — Use capture_single() in periodic mode |
+| 1.8 | `jetson/app/sync_engine.py` | MODIFY — Read-retry helper for device_state |
+| 1.8 | `jetson/app/gui_app.py` | MODIFY — Read-retry for device_state |
+| 1.8 | `jetson/app/main.py` | MODIFY — Read-retry for device_state |
+| 2.1 | `admin-dashboard/src/pages/SettingsPage.jsx` | MODIFY — sessionStorage |
+| 2.1 | `admin-dashboard/src/lib/helpers.js` | MODIFY — sessionStorage |
+| 2.2 | `admin-dashboard/src/pages/DashboardPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/DataManagementPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/UsersPage.jsx` | MODIFY — Add .limit() |
+| 2.2 | `admin-dashboard/src/pages/DevicesPage.jsx` | MODIFY — Add .limit() + null guards |
+| 2.2 | `admin-dashboard/src/pages/ModelsPage.jsx` | MODIFY — Add .limit() + allSettled |
+| 2.5 | `admin-dashboard/src/lib/helpers.js` | MODIFY — Rate limit timestamp |
+| 2.6 | `database/migrations/012_devices.sql` | MODIFY — RLS tightening |
+| 2.7 | `jetson/scripts/provision.py` | MODIFY — chmod config.json |
+| 2.8 | `jetson/app/health_server.py` | MODIFY — Pass device_id |
+| 3.1-3.2 | `.github/workflows/ci.yml` | MODIFY — Add 2 jobs |
+| 3.2 | `jetson/ruff.toml` | CREATE — Linter config |
+| 3.3 | 7 workflow files | MODIFY — Add permissions |
+| 3.4 | `database/verify_rls_policies.sql` | MODIFY — Add 3 tables |
+| 3.5 | 2 doc files | MODIFY — Architecture + CI changes |
+
+

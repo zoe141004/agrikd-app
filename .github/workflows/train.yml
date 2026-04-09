@@ -8,6 +8,9 @@ on:
         default: 'all'
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   train:
     runs-on: ubuntu-latest

@@ -9,6 +9,7 @@ import 'package:app/providers/model_version_provider.dart';
 import 'package:app/providers/settings_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 import 'package:app/features/auth/presentation/screens/login_screen.dart';
+import 'package:app/features/devices/presentation/screens/devices_screen.dart';
 import 'benchmark_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -128,6 +129,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   await ref.read(syncProvider.notifier).syncNow();
                 },
               ),
+              if (authState.status == AuthStatus.authenticated) ...[
+                ListTile(
+                  leading: const Icon(Icons.devices),
+                  title: Text(S.get('my_devices')),
+                  subtitle: Text(S.get('my_devices_sub')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DevicesScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
               const Divider(),
               _SectionHeader(S.get('appearance')),
               ListTile(

@@ -294,6 +294,21 @@ class S {
     'model_version_label': 'Model version',
     'bundled': 'Bundled',
     'ota': 'OTA',
+
+    // Devices
+    'my_devices': 'My Devices',
+    'my_devices_sub': 'View and control Jetson devices',
+    'no_devices': 'No devices assigned',
+    'no_devices_sub': 'Contact your administrator to assign a device.',
+    'edit_schedule': 'Edit Schedule',
+    'capture_mode': 'Capture Mode',
+    'manual': 'Manual',
+    'periodic': 'Periodic',
+    'capture_interval': 'Capture Interval',
+    'config_synced': 'Synced',
+    'config_pending': 'Pending',
+    'error_loading': 'Failed to load data',
+    'retry': 'Retry',
   };
 
   static const _vi = <String, String>{
@@ -557,5 +572,20 @@ class S {
     'model_version_label': 'Phiên bản mô hình',
     'bundled': 'Tích hợp',
     'ota': 'OTA',
+
+    // Devices
+    'my_devices': 'Thiết bị của tôi',
+    'my_devices_sub': 'Xem và điều khiển thiết bị Jetson',
+    'no_devices': 'Chưa có thiết bị nào',
+    'no_devices_sub': 'Liên hệ quản trị viên để được gán thiết bị.',
+    'edit_schedule': 'Chỉnh lịch chụp',
+    'capture_mode': 'Chế độ chụp',
+    'manual': 'Thủ công',
+    'periodic': 'Định kỳ',
+    'capture_interval': 'Khoảng cách chụp',
+    'config_synced': 'Đã đồng bộ',
+    'config_pending': 'Đang chờ',
+    'error_loading': 'Không tải được dữ liệu',
+    'retry': 'Thử lại',
   };
 }

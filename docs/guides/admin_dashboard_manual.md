@@ -14,7 +14,7 @@ Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
 are configured in `vercel.json` for production. The Vite dev server mirrors
 a subset of these headers for local development.
 
-The application consists of ten pages, each described in detail below.
+The application consists of eleven pages, each described in detail below.
 
 ---
 
@@ -51,7 +51,7 @@ Replace `your@email.com` with the target user's registered email address.
 The landing page provides a high-level snapshot of the system:
 
 - **Stats cards** -- Total predictions processed, number of active models,
-  and registered user count.
+  registered user count, and active devices count.
 - **Area chart** -- Prediction volume over the last 30 days, rendered with Recharts.
 - **Leaf type split** -- Horizontal progress bars showing distribution of predictions by leaf type.
 
@@ -155,6 +155,33 @@ Application-level configuration with six tabs: **General**, **Integrations**,
 - **CI/CD** -- Quick-trigger buttons for common CI/CD workflows.
 - **Deployment** -- Trigger Vercel deployments and view deployment status.
 - **Audit Log** -- View recent audit log entries for admin actions.
+
+### Model Reports (`/reports`)
+
+User-submitted feedback on incorrect predictions.
+
+- Filter by leaf type and model version.
+- View report details: reason, linked prediction, timestamp.
+- Aggregated statistics showing report counts by leaf type and version.
+
+### Devices (`/devices`)
+
+Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
+
+#### Device Fleet Tab
+- View all registered Jetson devices with status, owner, config sync status.
+- Edit: rename device, assign/unassign user, change capture mode and interval.
+- Decommission: marks device inactive, unlinks user.
+
+#### Provisioning Tokens Tab
+- Generate one-time `agrikd://` provisioning tokens (24h expiry).
+- Copy token to send to field technician.
+- View token history: status (Active/Used/Expired), used_by hw_id.
+- Revoke unused tokens.
+
+#### Dashboard Stat Card
+- "Active Devices" card on main dashboard (counts online + assigned + offline
+  devices).
 
 ---
 

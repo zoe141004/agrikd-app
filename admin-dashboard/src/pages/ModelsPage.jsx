@@ -94,13 +94,17 @@ export default function ModelsPage() {
   const loadModels = async () => {
     setLoading(true)
     try {
-      const [{ data, error: err }, { data: benchData }, { data: verData }, { data: rpcLeafTypes }] = await Promise.all([
-        supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }).order('updated_at', { ascending: false }),
-        supabase.from('model_benchmarks').select('*').order('created_at', { ascending: false }),
-        supabase.from('model_versions').select('*').order('archived_at', { ascending: false }),
+      const [registryRes, benchRes, verRes, rpcRes] = await Promise.allSettled([
+        supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }).order('updated_at', { ascending: false }).limit(100),
+        supabase.from('model_benchmarks').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('model_versions').select('*').order('archived_at', { ascending: false }).limit(100),
         supabase.rpc('get_leaf_type_options'),
       ])
-      if (err) throw new Error(err.message)
+      const data = registryRes.status === 'fulfilled' ? registryRes.value?.data : null
+      const benchData = benchRes.status === 'fulfilled' ? benchRes.value?.data : null
+      const verData = verRes.status === 'fulfilled' ? verRes.value?.data : null
+      const rpcLeafTypes = rpcRes.status === 'fulfilled' ? rpcRes.value?.data : null
+      if (registryRes.status === 'fulfilled' && registryRes.value?.error) throw new Error(registryRes.value.error.message)
       setModels(data || [])
       setBenchmarks(benchData || [])
       setVersions(verData || [])

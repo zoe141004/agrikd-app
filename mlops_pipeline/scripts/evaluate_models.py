@@ -31,6 +31,8 @@ import gc
 import os
 import sys
 import time
+import tracemalloc
+import threading
 import psutil
 import torch
 import numpy as np
@@ -192,11 +194,21 @@ class ModelEvaluator:
         for i in range(warmup_iters):
             infer_fn(model_obj, self.test_data[i:i+1])
 
-        # 3. Inference loop
+        # 3. Inference loop — sample RSS every 50 ms in a background thread
+        #    to capture the *peak* allocation, not just the end-state.
         latencies = []
         all_probs = []
         process = psutil.Process(os.getpid())
-        mem_infer_start = process.memory_info().rss / (1024 * 1024)
+        _peak_rss = [process.memory_info().rss]
+        _stop_sampler = threading.Event()
+
+        def _rss_sampler():
+            while not _stop_sampler.is_set():
+                _peak_rss.append(process.memory_info().rss)
+                _stop_sampler.wait(0.05)  # 50 ms interval
+
+        sampler_thread = threading.Thread(target=_rss_sampler, daemon=True)
+        sampler_thread.start()
 
         for i in range(self.num_samples):
             inp = self.test_data[i:i+1]
@@ -206,8 +218,11 @@ class ModelEvaluator:
             latencies.append((end - start) * 1000)
             all_probs.append(probs)
 
-        mem_infer_end = process.memory_info().rss / (1024 * 1024)
-        mem_infer_peak = max(0.0, mem_infer_end - mem_infer_start)
+        _stop_sampler.set()
+        sampler_thread.join()
+
+        mem_infer_start_rss = _peak_rss[0]
+        mem_infer_peak = max(0.0, (max(_peak_rss) - mem_infer_start_rss) / (1024 * 1024))
         all_probs = np.vstack(all_probs)
 
         # 4. KL Divergence

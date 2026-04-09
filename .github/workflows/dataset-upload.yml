@@ -36,6 +36,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   upload-dataset:
@@ -284,7 +285,10 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Add dataset: ${LEAF_TYPE} via ${SOURCE}"
-            git push
+            if ! git push; then
+              echo "[ERROR] git push failed"
+              exit 1
+            fi
           fi
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}

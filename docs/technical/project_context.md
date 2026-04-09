@@ -107,6 +107,7 @@ agrikd/
 │   │   │   └── sync/                  # SyncQueue, SupabaseSyncService
 │   │   ├── features/
 │   │   │   ├── auth/                  # Login, Register, ForgotPassword, ResetPassword
+│   │   │   ├── devices/               # Device list, config editor (Jetson fleet)
 │   │   │   ├── diagnosis/             # Home, Camera, Result screens + TFLite service
 │   │   │   ├── history/               # History list, Detail, Stats screens
 │   │   │   └── settings/              # Settings, Benchmark screens
@@ -126,7 +127,7 @@ agrikd/
 │   └── src/
 │       ├── pages/                     # Dashboard, Users, Models, Predictions,
 │       │                              #   Releases, DataManagement, SystemHealth,
-│       │                              #   Settings, ModelReports, Login
+│       │                              #   Settings, ModelReports, Devices, Login
 │       ├── components/                # Layout, ConfirmDialog, CustomTooltip, ErrorBoundary
 │       └── lib/                       # Supabase client, helpers
 │   ├── vite.config.js                 # Security headers (X-Frame-Options, etc.)
@@ -135,6 +136,8 @@ agrikd/
 ├── jetson/                            # Edge inference station
 │   ├── app/                           # main.py, gui_app.py, inference.py, camera.py,
 │   │                                  #   database.py, sync_engine.py, health_server.py
+│   ├── scripts/
+│   │   └── provision.py               # Zero-Touch Provisioning CLI
 │   ├── config/
 │   │   ├── config.example.json        # Template (committed); fill and rename to config.json
 │   │   └── config.json                # Runtime config (gitignored, never committed)
@@ -171,11 +174,12 @@ agrikd/
 │   │   ├── 008_cleanup_and_realtime.sql
 │   │   ├── 009_security_hardening.sql
 │   │   ├── 010_fix_lifecycle_for_update.sql
-│   │   └── 011_dvc_operations.sql
+│   │   ├── 011_dvc_operations.sql
+│   │   └── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
-├── .github/workflows/                 # CI/CD (11 workflow files)
-│   ├── ci.yml                         # Lint, test, model conversion, build APK
+├── .github/workflows/                 # CI/CD (12 workflow files)
+│   ├── ci.yml                         # Lint, test, build APK, dashboard tests, Jetson lint
 │   ├── release.yml                    # Tagged release build + GitHub Release
 │   ├── model-pipeline.yml             # Full convert + validate + upload
 │   ├── model-rollback.yml             # Rollback model version in registry
@@ -185,7 +189,8 @@ agrikd/
 │   ├── dvc-pull.yml                   # Pull datasets from DVC remote
 │   ├── dvc-push.yml                   # Push datasets to DVC remote
 │   ├── export-data.yml                # Export prediction records
-│   └── dataset-upload.yml             # Upload datasets to storage (staging + DVC)
+│   ├── dataset-upload.yml             # Upload datasets to storage (staging + DVC)
+│   └── codeql.yml                     # SAST scanning (Python + JS/TS, weekly + PR)
 ├── .github/scripts/
 │   └── stage_dataset_to_storage.py    # Stage dataset ZIP to Supabase Storage
 │
@@ -276,20 +281,36 @@ reach parent directories).
 USB Camera / Image File
     |
     v
-TensorRT FP16 engine
+InferenceWorkerPool (TensorRT FP16, dedicated CUDA thread)
     |
     v
-PyQt5 GUI display + SQLite logging
+PyQt5 GUI display + SQLite logging (threading.Lock)  ← LOCAL-FIRST (never blocked by network)
     |
     v
-SyncEngine --> Supabase REST (when online)
+SyncEngine --> Supabase REST (when online, best-effort push, graceful shutdown)
+    |
+    v
+Device Config Poll --> Device Shadow (desired_config / reported_config)
 ```
+
+The Jetson edge device follows a **Local-First, Cloud-Sync** architecture:
+- Capture, inference, and SQLite save run on the main thread with **zero network dependency**.
+- **InferenceWorkerPool**: A single worker thread owns the CUDA context and all TensorRT buffers. All callers submit jobs via `queue.Queue`, receive results via `concurrent.futures.Future`. This eliminates CUDA context-affinity and shared-buffer race conditions.
+- **SQLite thread-safety**: A single `threading.Lock` serializes all DB operations on the shared connection.
+- **Wake-Capture-Sleep**: In periodic mode, camera opens/captures/releases per cycle to reduce heat and sensor wear.
+- The `SyncEngine` daemon thread handles cloud sync, device config polling, and heartbeats.
+- If no user is assigned (`user_id = NULL`), predictions queue in SQLite. On assignment, the full backlog is synced.
+- **Device Shadow**: Admin sets `desired_config` (mode, interval, leaf type) via the dashboard. The Jetson polls for config changes, applies them, and reports `reported_config` as acknowledgement. `config_version` auto-increments on each change.
+- **Zero-Touch Provisioning**: A single `agrikd://` token (generated by Admin) configures Supabase credentials, registers hardware identity (`hw_id = SHA-256(MAC:serial)`), and starts services automatically.
 
 The Jetson Flask API (`health_server.py`) enforces the following hardening measures:
 
-- **Rate limiting**: 30 requests per minute per IP (in-memory sliding window).
+- **Rate limiting**: 30 requests per minute per IP on all endpoints (in-memory sliding window).
 - **Upload size limit**: 10 MB maximum (`MAX_CONTENT_LENGTH`).
 - **MIME validation**: Only `jpg`, `jpeg`, `png`, `bmp`, `tiff` extensions accepted.
+- **API key authentication**: Optional `X-API-Key` header validated against `server.api_key` in config.
+- **Health endpoint auth**: `/health` is unauthenticated by default (monitoring-friendly). Set `health_auth_required=True` in `start_health_server()` to enforce API key even on `/health`.
+- **Camera capture timeout**: `capture_single()` enforces a hard `capture_timeout_seconds` (default 10 s) via `SIGALRM` to prevent indefinite hangs if the USB/CSI camera stalls.
 - **Error handler**: Returns structured JSON for 413 (entity too large) responses.
 
 Runtime configuration is loaded from `jetson/config/config.json`, which is gitignored.
@@ -371,7 +392,7 @@ alongside `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 
 ### Required CI Secrets
 
-Seven secrets must be configured in the GitHub repository settings across all
+Nine secrets must be configured in the GitHub repository settings across all
 workflows (the `GITHUB_TOKEN` is auto-provided and not counted):
 
 | Secret | Used By | Purpose |
@@ -383,6 +404,8 @@ workflows (the `GITHUB_TOKEN` is auto-provided and not counted):
 | `GOOGLE_WEB_CLIENT_ID` | ci.yml, release.yml | Google OAuth client ID for `--dart-define` |
 | `GDRIVE_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml | Google Drive service account JSON for DVC |
 | `VERCEL_DEPLOY_HOOK` | deploy.yml | Vercel deploy webhook URL |
+| `KAGGLE_USERNAME` | dataset-upload.yml | Kaggle API username for external dataset downloads |
+| `KAGGLE_KEY` | dataset-upload.yml | Kaggle API key for external dataset downloads |
 | `GITHUB_TOKEN` | release.yml | Auto-provided; used by `softprops/action-gh-release` |
 
 ### Build Command (CI and Release)
@@ -432,6 +455,8 @@ prevent key leakage in published APKs.
 | `model_reports` | id, user_id, model_version, leaf_type, prediction_id, reason, created_at | User feedback on wrong predictions |
 | `pipeline_runs` | id, leaf_type, version, status, github_run_id, triggered_by | CI/CD pipeline progress tracking (Realtime) |
 | `dvc_operations` | id, leaf_type, operation, source, status, metadata, github_run_id, triggered_by | DVC operation tracking: stage/push/pull/export with Realtime status updates |
+| `provisioning_tokens` | id, created_by, expires_at, used_at, used_by_hw_id, device_id, label | One-time tokens for Zero-Touch Provisioning (24h expiry) |
+| `devices` | id, hw_id, hostname, device_name, status, user_id, device_token, desired_config, reported_config, config_version, last_seen_at, hw_info | Jetson device registry with Device Shadow pattern |
 
 Row-Level Security (RLS) policies ensure that regular users can only access their own
 prediction records, while admin-role users have full read access through the dashboard.

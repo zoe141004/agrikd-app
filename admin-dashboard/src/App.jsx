@@ -13,6 +13,7 @@ import ReleasesPage from './pages/ReleasesPage'
 import SystemHealthPage from './pages/SystemHealthPage'
 import SettingsPage from './pages/SettingsPage'
 import ModelReportsPage from './pages/ModelReportsPage'
+import DevicesPage from './pages/DevicesPage'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/predictions" element={<PredictionsPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/devices" element={<DevicesPage />} />
           <Route path="/data" element={<DataManagementPage />} />
           <Route path="/releases" element={<ReleasesPage />} />
           <Route path="/health" element={<SystemHealthPage />} />

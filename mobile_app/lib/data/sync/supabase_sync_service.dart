@@ -106,7 +106,12 @@ class SupabaseSyncService {
         await _predictionDao.markSynced(entityId, serverId);
         await _syncQueue.markCompleted(queueId);
         synced++;
+      } on AuthException {
+        // Auth errors are permanent — mark failed immediately, don't retry
+        await _syncQueue.markFailed(queueId);
+        failed++;
       } catch (e) {
+        // Network/transient errors — increment retry counter
         await _syncQueue.incrementRetry(queueId);
         final retryCount = (item['retry_count'] as int) + 1;
         final maxRetries = item['max_retries'] as int;
@@ -199,7 +204,10 @@ class SupabaseSyncService {
   /// Download, verify, and apply a model update atomically.
   /// Uses temp file + rename for atomic writes, then promotes via ModelDao.
   /// Returns true if the model was successfully updated.
+  /// On web, always returns false (no local filesystem access).
   Future<bool> downloadModelUpdate(ModelUpdate update) async {
+    // Web platform has no local filesystem — OTA model updates not supported.
+    if (kIsWeb) return false;
     if (update.fileUrl == null || update.fileUrl!.isEmpty) return false;
 
     try {
