@@ -10,6 +10,7 @@ Reads the single-source-of-truth .env at the project root and generates:
 Usage:
     python sync_env.py
 
+If .env is missing, automatically copies from .env.development (committed to repo).
 The root .env is NEVER modified (read-only source of truth).
 Flutter reads mobile_app/.env via flutter_dotenv (local dev); CI uses --dart-define.
 This script has zero external dependencies (stdlib only).
@@ -97,11 +98,18 @@ def sync_mobile_app(env):
 
 def main():
     env_path = os.path.join(ROOT, ".env")
+    dev_path = os.path.join(ROOT, ".env.development")
+
     if not os.path.exists(env_path):
-        print("[ERROR] Root .env not found.")
-        print("  Copy .env.example to .env and fill in your values first:")
-        print("    cp .env.example .env")
-        sys.exit(1)
+        if os.path.exists(dev_path):
+            print("[INFO] .env not found — copying from .env.development")
+            import shutil
+            shutil.copy2(dev_path, env_path)
+        else:
+            print("[ERROR] Root .env not found.")
+            print("  Copy .env.development to .env first:")
+            print("    cp .env.development .env")
+            sys.exit(1)
 
     env = parse_env(env_path)
     print(f"Loaded {len(env)} variables from .env")

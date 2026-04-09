@@ -73,6 +73,7 @@ model_checkpoints_student/
 .env
 .env.*
 !.env.example
+!.env.development
 !admin-dashboard/.env.example
 supabase_info.md
 
