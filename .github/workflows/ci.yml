@@ -21,6 +21,7 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -42,6 +43,7 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: mobile_app
@@ -68,6 +70,7 @@ jobs:
   test:
     name: Flutter Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: lint
     defaults:
       run:
@@ -96,6 +99,7 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: test
     defaults:
       run:
@@ -146,6 +150,7 @@ jobs:
   dashboard-test:
     name: Dashboard Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: admin-dashboard
@@ -168,6 +173,7 @@ jobs:
   jetson-lint:
     name: Jetson Python Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 

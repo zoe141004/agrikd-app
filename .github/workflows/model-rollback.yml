@@ -26,6 +26,7 @@ permissions:
 jobs:
   rollback:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Validate inputs
         run: |

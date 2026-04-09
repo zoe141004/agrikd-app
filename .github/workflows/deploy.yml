@@ -8,6 +8,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Trigger Vercel deployment
         run: |
@@ -16,7 +17,7 @@ jobs:
             echo "Get your deploy hook URL from Vercel Dashboard → Project → Settings → Git → Deploy Hooks"
             exit 1
           fi
-          curl -sf -X POST "$VERCEL_DEPLOY_HOOK"
+          curl -sf -X POST "$VERCEL_DEPLOY_HOOK" || { echo "::error::Deploy hook failed"; exit 1; }
           echo "Deploy hook triggered successfully"
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
