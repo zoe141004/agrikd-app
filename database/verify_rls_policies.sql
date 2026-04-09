@@ -221,8 +221,53 @@ BEGIN
     RAISE NOTICE '';
 
     -- ═════════════════════════════════════════════════════════════════
-    -- SECTION 6: Storage bucket policies
+    -- SECTION 5b: Verify SECURITY DEFINER functions have SET search_path
     -- ═════════════════════════════════════════════════════════════════
+    RAISE NOTICE '── 5b. SECURITY DEFINER search_path AUDIT ─────────────────────────';
+
+    FOR _policy IN
+        SELECT p.proname AS policy_name,
+               CASE WHEN p.proconfig IS NOT NULL
+                    AND array_to_string(p.proconfig, ',') LIKE '%search_path%'
+                    THEN 'HAS_PATH' ELSE 'NO_PATH' END AS cmd
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'public' AND p.prosecdef = true
+    LOOP
+        IF _policy.cmd = 'HAS_PATH' THEN
+            RAISE NOTICE '[PASS] %() has SET search_path.', _policy.policy_name;
+            _pass_count := _pass_count + 1;
+        ELSE
+            RAISE NOTICE '[FAIL] %() SECURITY DEFINER but MISSING SET search_path!', _policy.policy_name;
+            _fail_count := _fail_count + 1;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE '';
+
+    -- ═════════════════════════════════════════════════════════════════
+    -- SECTION 5c: Verify Dashboard RPCs have admin guard (014)
+    -- ═════════════════════════════════════════════════════════════════
+    RAISE NOTICE '── 5c. DASHBOARD RPC ADMIN GUARDS (014) ───────────────────────────';
+
+    FOR _policy IN
+        SELECT p.proname AS policy_name, l.lanname AS cmd
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        JOIN pg_language l ON p.prolang = l.oid
+        WHERE n.nspname = 'public'
+          AND p.proname IN ('get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options')
+    LOOP
+        IF _policy.cmd = 'plpgsql' THEN
+            RAISE NOTICE '[PASS] %() uses plpgsql (admin guard present).', _policy.policy_name;
+            _pass_count := _pass_count + 1;
+        ELSE
+            RAISE NOTICE '[FAIL] %() uses % — missing admin guard! Run 014.', _policy.policy_name, _policy.cmd;
+            _fail_count := _fail_count + 1;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE '';
     RAISE NOTICE '── 6. STORAGE BUCKETS & POLICIES ────────────────────────────────';
 
     -- Check each required bucket
