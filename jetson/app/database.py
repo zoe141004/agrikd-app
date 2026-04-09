@@ -5,7 +5,6 @@ import logging
 import os
 import sqlite3
 import threading
-import time
 
 logger = logging.getLogger("database")
 
