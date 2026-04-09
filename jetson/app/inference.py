@@ -219,24 +219,41 @@ class InferenceWorkerPool:
             ", ".join(self._leaf_types),
         )
 
+        consecutive_errors = 0
         while True:
-            job = self._queue.get()
-            if job is _SHUTDOWN:
-                logger.info("Inference worker shutting down")
-                break
-
-            leaf_type, frame, fut = job
             try:
-                engine = self._engines.get(leaf_type)
-                if engine is None:
-                    fut.set_exception(
-                        ValueError(f"Unknown leaf type: {leaf_type}")
+                job = self._queue.get()
+                if job is _SHUTDOWN:
+                    logger.info("Inference worker shutting down")
+                    break
+
+                leaf_type, frame, fut = job
+                try:
+                    engine = self._engines.get(leaf_type)
+                    if engine is None:
+                        fut.set_exception(
+                            ValueError(f"Unknown leaf type: {leaf_type}")
+                        )
+                    else:
+                        result = engine.predict(frame)
+                        fut.set_result(result)
+                        consecutive_errors = 0
+                except Exception as exc:
+                    fut.set_exception(exc)
+                    consecutive_errors += 1
+                    logger.error(
+                        "Inference error (%d consecutive): %s",
+                        consecutive_errors, exc,
                     )
-                else:
-                    result = engine.predict(frame)
-                    fut.set_result(result)
-            except Exception as exc:
-                fut.set_exception(exc)
+                    if consecutive_errors >= 10:
+                        logger.critical(
+                            "10 consecutive inference failures — worker staying alive "
+                            "but CUDA state may be corrupt"
+                        )
+            except Exception as outer_exc:
+                logger.critical(
+                    "Unexpected error in inference worker loop: %s", outer_exc
+                )
 
     def _init_engines(self):
         """Load TensorRT engines ON the worker thread (CUDA-owner)."""

@@ -401,6 +401,15 @@ class SyncEngine:
             elif resp.status_code == 401:
                 logger.warning("Auth expired, re-authenticating...")
                 self._access_token = ""
+            elif resp.status_code >= 500:
+                logger.warning(
+                    "Server error during sync: HTTP %d — will retry next cycle",
+                    resp.status_code,
+                )
+                # Let outer run() loop handle backoff
+                raise requests.exceptions.HTTPError(
+                    f"Server error: {resp.status_code}"
+                )
             else:
                 logger.warning(
                     "Batch sync failed: HTTP %d %s",

@@ -109,15 +109,26 @@ def request_entity_too_large(error):
 @app.route("/health")
 @rate_limit(max_per_minute=30)
 def health():
-    """Health check endpoint."""
-    uptime = time.time() - _start_time if _start_time else 0
-    stats = _db.get_stats() if _db else {}
-    return jsonify({
-        "status": "healthy",
-        "uptime_seconds": int(uptime),
-        "models_loaded": _pool.available_engines() if _pool else [],
-        "database": stats,
-    })
+    """Health check endpoint.
+
+    Returns minimal info for unauthenticated requests (liveness probe).
+    Detailed info requires valid API key via X-API-Key header.
+    """
+    # Minimal liveness response (always unauthenticated)
+    resp = {"status": "healthy"}
+
+    # If valid API key provided, include detailed diagnostics
+    provided = request.headers.get("X-API-Key", "")
+    if _api_key and hmac.compare_digest(provided, _api_key):
+        uptime = time.time() - _start_time if _start_time else 0
+        stats = _db.get_stats() if _db else {}
+        resp.update({
+            "uptime_seconds": int(uptime),
+            "models_loaded": _pool.available_engines() if _pool else [],
+            "database": stats,
+        })
+
+    return jsonify(resp)
 
 
 @app.route("/predict", methods=["POST"])
@@ -157,11 +168,31 @@ def predict():
         }), 400
 
     try:
-        file_bytes = np.frombuffer(file.read(), np.uint8)
+        raw = file.read()
+
+        # Magic-bytes check: JPEG (FFD8FF), PNG (89504E47), BMP (424D), TIFF (4949/4D4D)
+        if len(raw) < 4:
+            return jsonify({"error": "File too small to be a valid image"}), 400
+        header = raw[:4]
+        valid_magic = (
+            header[:3] == b"\xff\xd8\xff"        # JPEG
+            or header[:4] == b"\x89PNG"           # PNG
+            or header[:2] == b"BM"                # BMP
+            or header[:2] in (b"II", b"MM")       # TIFF
+        )
+        if not valid_magic:
+            return jsonify({"error": "File content does not match a supported image format"}), 400
+
+        file_bytes = np.frombuffer(raw, np.uint8)
         frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
         if frame is None:
             return jsonify({"error": "Invalid image file"}), 400
+
+        # Reject excessively large images (prevent OOM)
+        h, w = frame.shape[:2]
+        if h > 4096 or w > 4096:
+            return jsonify({"error": f"Image too large ({w}x{h}), max 4096x4096"}), 400
 
         # Fix 1.1: Submit to InferenceWorkerPool (thread-safe, CUDA-owner)
         result = _pool.submit(leaf_type, frame).result(timeout=30)

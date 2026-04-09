@@ -212,7 +212,7 @@ def main():
         logger.info("AgriKD Jetson Edge Inference - Shutting down")
         # Signal sync engine to drain, then wait briefly
         shutdown_event.set()
-        sync_thread.join(timeout=5)
+        sync_thread.join(timeout=15)
         # Clean up resources
         pool.shutdown()
         camera.release()
