@@ -1,0 +1,12 @@
+# AgriKD Jetson — Python Dependencies
+# Install inside venv: pip install -r requirements.txt
+#
+# NOTE: TensorRT and PyCUDA are provided by the NVIDIA JetPack SDK.
+#       Do NOT add them here — they must be installed system-wide.
+# NOTE: PyQt5 is installed via apt (python3-pyqt5) for GPU acceleration.
+
+numpy==1.24.4
+opencv-python==4.8.1.78
+flask==3.0.3
+waitress==3.0.0
+requests==2.31.0
