@@ -784,7 +784,19 @@ BEGIN
 END $$;
 
 -- =====================================================================
--- OUTPUT: Final results
+-- OUTPUT 1: FAILURES ONLY (most important — check this first)
+-- =====================================================================
+SELECT
+    '❌ FAIL' AS result,
+    section,
+    item,
+    detail
+FROM _verify_results
+WHERE status = 'FAIL'
+ORDER BY section, item;
+
+-- =====================================================================
+-- OUTPUT 2: Full results
 -- =====================================================================
 SELECT
     section,
@@ -798,7 +810,9 @@ SELECT
 FROM _verify_results
 ORDER BY section, status DESC, item;
 
--- ── Summary ──
+-- =====================================================================
+-- OUTPUT 3: Summary
+-- =====================================================================
 SELECT
     COUNT(*) FILTER (WHERE status = 'PASS') AS passed,
     COUNT(*) FILTER (WHERE status = 'FAIL') AS failed,
