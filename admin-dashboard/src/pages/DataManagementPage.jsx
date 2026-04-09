@@ -91,22 +91,28 @@ export default function DataManagementPage() {
     setLoading(true)
     setError(null)
     try {
-      const [{ data: rpcStats }, { data: leafTypeOpts }] = await Promise.all([
+      const [statsRes, leafRes] = await Promise.allSettled([
         supabase.rpc('get_dashboard_stats', { p_leaf_type: null }),
         supabase.rpc('get_leaf_type_options'),
       ])
+      // Surface error if ALL critical queries failed
+      if (statsRes.status === 'rejected' && leafRes.status === 'rejected') {
+        throw statsRes.reason || new Error('Failed to load data')
+      }
+      const rpcStats = statsRes.status === 'fulfilled' ? statsRes.value?.data : null
+      const leafTypeOpts = leafRes.status === 'fulfilled' ? leafRes.value?.data : null
       const s = rpcStats || {}
       setStats({ total: s.total || 0 })
       const leafTypes = (leafTypeOpts || []).map(r => r.leaf_type).filter(Boolean)
       setLeafOptions(leafTypes)
 
-      const qualityResults = await Promise.all(
+      const qualityResults = (await Promise.allSettled(
         leafTypes.map(async lt => {
           const { data: ltStats } = await supabase.rpc('get_dashboard_stats', { p_leaf_type: lt })
           const ls = ltStats || {}
           return { name: lt, total: ls.total || 0 }
         })
-      )
+      )).filter(r => r.status === 'fulfilled').map(r => r.value)
       setQuality(qualityResults)
       fetchTrackedDatasets()
     } catch (err) { setError(err.message) }
@@ -574,7 +580,7 @@ export default function DataManagementPage() {
   // ── Preview predictions ───────────────────────────────────────────────────
   const previewPredictions = async () => {
     if (!dsLeafType) return
-    let query = supabase.from('predictions').select('predicted_class_name, confidence').eq('leaf_type', dsLeafType)
+    let query = supabase.from('predictions').select('predicted_class_name, confidence').eq('leaf_type', dsLeafType).limit(5000)
     const threshold = parseFloat(dsConfidence)
     if (!isNaN(threshold) && threshold > 0) query = query.gte('confidence', threshold)
     const { data, error } = await query

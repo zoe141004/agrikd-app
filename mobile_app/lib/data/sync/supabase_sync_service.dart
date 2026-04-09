@@ -106,7 +106,12 @@ class SupabaseSyncService {
         await _predictionDao.markSynced(entityId, serverId);
         await _syncQueue.markCompleted(queueId);
         synced++;
+      } on AuthException {
+        // Auth errors are permanent — mark failed immediately, don't retry
+        await _syncQueue.markFailed(queueId);
+        failed++;
       } catch (e) {
+        // Network/transient errors — increment retry counter
         await _syncQueue.incrementRetry(queueId);
         final retryCount = (item['retry_count'] as int) + 1;
         final maxRetries = item['max_retries'] as int;

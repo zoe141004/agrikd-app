@@ -28,12 +28,13 @@ BEGIN
 
         IF active_count >= 2 THEN
             -- Demote the lowest version to 'backup'
+            -- Use semantic version comparison (int array) instead of text sort
             SELECT id INTO lowest_version_id
             FROM public.model_registry
             WHERE leaf_type = NEW.leaf_type
               AND status = 'active'
               AND id IS DISTINCT FROM NEW.id
-            ORDER BY version ASC
+            ORDER BY string_to_array(version, '.')::int[] ASC
             LIMIT 1
             FOR UPDATE;
 

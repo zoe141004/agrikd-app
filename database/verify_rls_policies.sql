@@ -26,7 +26,10 @@ DECLARE
         'audit_log',
         'model_benchmarks',
         'model_versions',
-        'pipeline_runs'
+        'pipeline_runs',
+        'devices',
+        'provisioning_tokens',
+        'dvc_operations'
     ];
 BEGIN
     RAISE NOTICE '===================================================================';
@@ -287,7 +290,13 @@ BEGIN
         'idx_predictions_confidence',
         'idx_audit_log_created_at',
         'idx_model_benchmarks_leaf_type',
-        'idx_model_versions_leaf_type'
+        'idx_model_versions_leaf_type',
+        'idx_devices_hw_id',
+        'idx_devices_token',
+        'idx_devices_user',
+        'idx_devices_status',
+        'idx_predictions_device',
+        'idx_prov_tokens_unused'
     ]
     LOOP
         SELECT EXISTS (

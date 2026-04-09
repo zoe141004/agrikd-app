@@ -1,7 +1,9 @@
 """Health check and REST API server for Jetson edge inference."""
 
 import functools
+import hmac
 import logging
+import secrets
 import time
 from collections import defaultdict
 from threading import Lock
@@ -22,12 +24,10 @@ _ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "bmp", "tiff"}
 
 # These are set when the server starts
 _db = None
-_engines = None
+_pool = None          # InferenceWorkerPool (replaces old _engines dict)
 _start_time = None
 _api_key = ""
-
-# Inference lock: serialize GPU access across waitress threads
-_inference_lock = Lock()
+_device_id = None     # Fix 2.8: trace API predictions to device
 _prediction_count = 0
 
 
@@ -37,8 +37,12 @@ def _check_api_key():
     """Require X-API-Key header on all endpoints except /health."""
     if request.endpoint == "health":
         return  # Health check is unauthenticated
-    if _api_key and request.headers.get("X-API-Key") != _api_key:
+    # Fix 1.5: Always require key (no more empty-string bypass).
+    # Timing-safe comparison via hmac.compare_digest.
+    provided = request.headers.get("X-API-Key", "")
+    if not hmac.compare_digest(provided, _api_key):
         return jsonify({"error": "Unauthorized"}), 401
+
 
 # ── Simple in-memory rate limiter (no external deps) ──
 _rate_lock = Lock()
@@ -111,7 +115,7 @@ def health():
     return jsonify({
         "status": "healthy",
         "uptime_seconds": int(uptime),
-        "models_loaded": list(_engines.keys()) if _engines else [],
+        "models_loaded": _pool.available_engines() if _pool else [],
         "database": stats,
     })
 
@@ -127,8 +131,11 @@ def predict():
     """
     global _prediction_count
 
-    # H3: Guard — no engines loaded
-    if not _engines:
+    if not _pool:
+        return jsonify({"error": "No models loaded"}), 503
+
+    available = _pool.available_engines()
+    if not available:
         return jsonify({"error": "No models loaded"}), 503
 
     if "image" not in request.files:
@@ -142,11 +149,11 @@ def predict():
             "error": "Invalid file type. Allowed: jpg, jpeg, png, bmp, tiff",
         }), 400
 
-    leaf_type = request.form.get("leaf_type", list(_engines.keys())[0])
-    if leaf_type not in _engines:
+    leaf_type = request.form.get("leaf_type", available[0])
+    if leaf_type not in available:
         return jsonify({
             "error": f"Unknown leaf type: {leaf_type}",
-            "available": list(_engines.keys()),
+            "available": available,
         }), 400
 
     try:
@@ -156,14 +163,11 @@ def predict():
         if frame is None:
             return jsonify({"error": "Invalid image file"}), 400
 
-        engine = _engines[leaf_type]
+        # Fix 1.1: Submit to InferenceWorkerPool (thread-safe, CUDA-owner)
+        result = _pool.submit(leaf_type, frame).result(timeout=30)
 
-        # C3: Serialize GPU access across waitress threads
-        with _inference_lock:
-            result = engine.predict(frame)
-
-        # Save to DB
-        _db.save_prediction(leaf_type, result)
+        # Fix 2.8: Pass device_id so API predictions are traceable
+        _db.save_prediction(leaf_type, result, device_id=_device_id)
 
         # M4: Throttle cleanup to every 100 predictions
         _prediction_count += 1
@@ -175,7 +179,7 @@ def predict():
             "prediction": result,
         })
     except Exception as e:
-        app.logger.error(f"Prediction failed: {e}")
+        app.logger.error("Prediction failed: %s", e)
         return jsonify({"error": "Internal server error"}), 500
 
 
@@ -186,18 +190,28 @@ def stats():
     return jsonify(_db.get_stats() if _db else {})
 
 
-def start_health_server(host, port, db, engines, api_key=""):
-    """Start the Flask health/API server."""
-    global _db, _engines, _start_time, _api_key
-    _db = db
-    _engines = engines
-    _start_time = time.time()
-    _api_key = api_key
+def start_health_server(host, port, db, pool, api_key="", device_id=None):
+    """Start the Flask health/API server.
 
-    if not _api_key:
+    Args:
+        pool: InferenceWorkerPool instance (thread-safe).
+    """
+    global _db, _pool, _start_time, _api_key, _device_id
+    _db = db
+    _pool = pool
+    _start_time = time.time()
+    _device_id = device_id
+
+    # Fix 1.5: If no api_key configured, auto-generate an ephemeral one.
+    # Stored in-memory only — never written to config.json.
+    if api_key:
+        _api_key = api_key
+    else:
+        _api_key = secrets.token_hex(16)
         logger.warning(
-            "No API key configured — all endpoints are unauthenticated"
+            "No API key in config — generated ephemeral key: %s", _api_key,
         )
+        print(f"\n*** Health Server API Key (ephemeral): {_api_key} ***\n")
 
     from waitress import serve
 

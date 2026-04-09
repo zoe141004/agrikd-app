@@ -8,7 +8,7 @@ import { cleanLabel } from '../lib/helpers'
 import CustomTooltip from '../components/CustomTooltip'
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ total: 0, users: 0, models: 0 })
+  const [stats, setStats] = useState({ total: 0, users: 0, models: 0, devices: 0 })
   const [diseaseData, setDiseaseData] = useState([])
   const [dailyData, setDailyData] = useState([])
   const [recentPreds, setRecentPreds] = useState([])
@@ -39,13 +39,15 @@ export default function DashboardPage() {
       modelsRes,
       dailyRowsRes,
       recentRes,
+      devicesRes,
     ] = await Promise.allSettled([
       supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_leaf_type_options'),
       supabase.from('model_registry').select('*', { count: 'exact', head: true }),
-      addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true })),
+      addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true }).limit(10000)),
       addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, created_at').order('created_at', { ascending: false }).limit(8)),
+      supabase.from('devices').select('*', { count: 'exact', head: true }).in('status', ['online', 'assigned', 'offline']),
     ])
 
     const rpcStats = rpcStatsRes.status === 'fulfilled' ? rpcStatsRes.value?.data : null
@@ -54,6 +56,7 @@ export default function DashboardPage() {
     const models = modelsRes.status === 'fulfilled' ? modelsRes.value?.count : 0
     const dailyRows = dailyRowsRes.status === 'fulfilled' ? dailyRowsRes.value?.data : null
     const recent = recentRes.status === 'fulfilled' ? recentRes.value?.data : null
+    const activeDevices = devicesRes.status === 'fulfilled' ? devicesRes.value?.count : 0
 
     // Leaf type options for dropdown
     if (leafTypeOpts) {
@@ -66,6 +69,7 @@ export default function DashboardPage() {
       total: s.total || 0,
       users: s.unique_users || 0,
       models: models || 0,
+      devices: activeDevices || 0,
     })
 
     // Disease distribution from RPC
@@ -107,6 +111,8 @@ export default function DashboardPage() {
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> },
     { label: 'Registered Models', value: stats.models, accent: '#7c3aed', iconColor: '#7c3aed', iconBg: '#ede9fe',
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> },
+    { label: 'Active Devices', value: stats.devices, accent: '#e97319', iconColor: '#e97319', iconBg: '#fff7ed',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg> },
   ]
 
   return (
@@ -123,7 +129,7 @@ export default function DashboardPage() {
         </select>
       </div>
 
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         {statCards.map(s => (
           <div key={s.label} className="stat-card">
             <div className="stat-card-accent" style={{ background: s.accent }} />

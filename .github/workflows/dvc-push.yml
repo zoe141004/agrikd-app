@@ -8,6 +8,9 @@ on:
         type: string
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   dvc-push:
     runs-on: ubuntu-latest

@@ -87,6 +87,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   void _init() {
+    if (!SupabaseConfig.isInitialized) {
+      // Supabase not initialized (offline cold start).
+      // Stay in 'unknown' so the app shows a loading/splash screen
+      // instead of prematurely showing the login page.
+      // retryInit() will be called when connectivity restores.
+      return;
+    }
+
     try {
       final client = SupabaseConfig.client;
       final currentUser = client.auth.currentUser;
@@ -108,17 +116,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
         }
       });
     } catch (_) {
-      // Supabase not initialized (offline startup) — stay unauthenticated
-      state = const AuthState(status: AuthStatus.unauthenticated);
+      // Unexpected error accessing Supabase — stay unknown for retry
     }
   }
 
   /// Re-attempt auth initialization after Supabase becomes available.
   /// Called when connectivity restores after an offline cold start.
   void retryInit() {
-    if (SupabaseConfig.isInitialized &&
-        state.status == AuthStatus.unauthenticated &&
-        _authSub == null) {
+    if (SupabaseConfig.isInitialized && _authSub == null) {
       _init();
     }
   }

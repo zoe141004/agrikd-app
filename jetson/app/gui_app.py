@@ -166,6 +166,12 @@ class MainWindow(QMainWindow):
         self._load_engines()
         self._build_ui()
         self._update_status()
+
+        # Auto-refresh status bar every 30 seconds
+        self._status_timer = QTimer()
+        self._status_timer.timeout.connect(self._update_status)
+        self._status_timer.start(30000)
+
         logger.info("GUI initialized — %d engines loaded", len(self.engines))
 
     # ── Engine loading ─────────────────────────────────────────────────
@@ -400,11 +406,14 @@ class MainWindow(QMainWindow):
             self.conf_table.setItem(i, 1, item)
 
         # Show analyzed image thumbnail
-        if self.current_frame is not None:
-            self._display_frame(self.current_frame, self.analyzed_preview)
+        # Fix 1.4: Use the inference worker's frozen frame copy, NOT
+        # self.current_frame which may have advanced during inference
+        analyzed_frame = self._inference_worker.frame
+        if analyzed_frame is not None:
+            self._display_frame(analyzed_frame, self.analyzed_preview)
 
-        # Active Learning: save image
-        image_path = self._save_image(leaf_type, self.current_frame)
+        # Active Learning: save the actually-analyzed frame
+        image_path = self._save_image(leaf_type, analyzed_frame)
 
         # Save to database
         self.db.save_prediction(leaf_type, result, image_path=image_path)
@@ -463,11 +472,53 @@ class MainWindow(QMainWindow):
     def _update_status(self):
         stats = self.db.get_stats()
         models_loaded = ", ".join(self.engines.keys()) or "none"
+        device_status = self._get_device_status()
         self.status_bar.showMessage(
+            f"{device_status}  |  "
             f"Models: {models_loaded}  |  "
             f"Predictions: {stats['total_predictions']}  |  "
             f"Unsynced: {stats['unsynced']}"
         )
+
+    def _get_device_status(self):
+        """Read device state (READ-ONLY) and return status string.
+
+        Correction C: Uses shared file lock for safe reading.
+        Correction D: Compares desired_config vs reported_config for
+        pending status detection.
+        Fix 1.8: Retry once after 50ms for atomic-replace window safety.
+        """
+        state_path = os.path.join("data", "device_state.json")
+        for attempt in range(2):
+            try:
+                with open(state_path, "r") as f:
+                    # Shared lock for read-only access (sync_engine is single writer)
+                    try:
+                        import fcntl
+                        fcntl.flock(f, fcntl.LOCK_SH)
+                    except ImportError:
+                        pass  # Windows dev: no fcntl
+                    try:
+                        state = json.load(f)
+                    finally:
+                        try:
+                            import fcntl
+                            fcntl.flock(f, fcntl.LOCK_UN)
+                        except ImportError:
+                            pass
+
+                    if state.get("user_id"):
+                        # Correction D: check if config is pending
+                        desired = state.get("desired_config")
+                        reported = state.get("reported_config")
+                        if desired and desired != reported:
+                            return "Device: Online (config pending)"
+                        return "Device: Online (syncing)"
+                    return "Device: Registered (waiting for assignment)"
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                if attempt == 0:
+                    time.sleep(0.05)
+        return "Device: Standalone (local only)"
 
     def closeEvent(self, event):
         self._stop_camera()

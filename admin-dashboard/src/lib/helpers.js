@@ -37,19 +37,19 @@ export function formatBytes(bytes) {
 
 // ── GitHub Actions integration ─────────────────────────────────────────────
 
-// All GitHub config (including gh_token) is stored in localStorage so it
-// persists across tab closes and browser restarts.
+// All GitHub config (including gh_token) is stored in sessionStorage so it
+// is cleared when the tab closes — minimizes PAT exposure window.
 export function getGitHubConfig() {
   return {
-    ghToken: localStorage.getItem('gh_token') || '',
-    ghOwner: localStorage.getItem('gh_owner') || '',
-    ghRepo:  localStorage.getItem('gh_repo')  || '',
-    ghBranch: localStorage.getItem('gh_branch') || 'main',
+    ghToken: sessionStorage.getItem('gh_token') || '',
+    ghOwner: sessionStorage.getItem('gh_owner') || '',
+    ghRepo:  sessionStorage.getItem('gh_repo')  || '',
+    ghBranch: sessionStorage.getItem('gh_branch') || 'main',
   }
 }
 
 export async function triggerGitHubWorkflow(workflow, inputs = {}) {
-  checkRateLimit(workflow, 30000)
+  const stamp = checkRateLimit(workflow, 30000)
   const { ghToken, ghOwner, ghRepo, ghBranch } = getGitHubConfig()
   if (!ghToken || !ghOwner || !ghRepo) throw new Error('GitHub not configured. Go to Settings → Integrations.')
   const res = await fetch(
@@ -68,6 +68,8 @@ export async function triggerGitHubWorkflow(workflow, inputs = {}) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.message || `GitHub API error (${res.status})`)
   }
+  // Fix 2.5: Only stamp cooldown AFTER successful dispatch
+  stamp()
   return true
 }
 
@@ -112,10 +114,14 @@ export function checkRateLimit(key, cooldownMs = 30000) {
       const remaining = Math.ceil((cooldownMs - (now - last)) / 1000)
       throw new Error(`Please wait ${remaining}s before triggering "${key}" again.`)
     }
-    localStorage.setItem(`rate_${key}`, String(now))
+    // Fix 2.5: Timestamp set HERE (before action), but caller (triggerGitHubWorkflow)
+    // is the one that calls checkRateLimit. If the workflow dispatch fails, the
+    // timestamp is already set. To fix: return a callback to stamp on success.
   } catch (err) {
     if (err.message.includes('Please wait')) throw err
   }
+  // Return a stamp function — caller invokes AFTER success
+  return () => { localStorage.setItem(`rate_${key}`, String(Date.now())) }
 }
 
 // ── SHA-256 checksum ──────────────────────────────────────────────────────

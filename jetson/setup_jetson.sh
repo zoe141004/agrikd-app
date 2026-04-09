@@ -23,28 +23,28 @@ echo "========================================"
 
 # 1. Create user
 if ! id "$SERVICE_USER" &>/dev/null; then
-    echo "[1/10] Creating service user: $SERVICE_USER"
+    echo "[1/11] Creating service user: $SERVICE_USER"
     useradd -m -s /bin/bash "$SERVICE_USER"
 else
-    echo "[1/10] User $SERVICE_USER already exists"
+    echo "[1/11] User $SERVICE_USER already exists"
 fi
 
 # 2. Create directories
-echo "[2/10] Creating directories..."
+echo "[2/11] Creating directories..."
 mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,logs}
 
 # 3. Copy files
-echo "[3/10] Copying application files..."
+echo "[3/11] Copying application files..."
 cp -r app/* "$INSTALL_DIR/app/"
 cp -r config/* "$INSTALL_DIR/config/"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 # 4. Install Python dependencies (full OpenCV with GUI support)
-echo "[4/10] Installing Python dependencies..."
+echo "[4/11] Installing Python dependencies..."
 pip3 install --no-cache-dir numpy==1.24.4 opencv-python==4.8.1.78 requests==2.31.0 flask==3.0.3 waitress==3.0.0
 
 # 5. Install GUI dependencies (PyQt5 + camera tools)
-echo "[5/10] Installing GUI dependencies..."
+echo "[5/11] Installing GUI dependencies..."
 apt-get update
 apt-get install -y --no-install-recommends \
     python3-pyqt5 \
@@ -54,7 +54,7 @@ apt-get install -y --no-install-recommends \
 echo "  [OK] PyQt5, v4l-utils, OpenGL libraries installed."
 
 # 6. Convert ONNX models to TensorRT
-echo "[6/10] Converting models to TensorRT..."
+echo "[6/11] Converting models to TensorRT..."
 for model_dir in "$SCRIPT_DIR/../models"/*/; do
     leaf_type=$(basename "$model_dir")
     onnx_file="$model_dir/${leaf_type}_student.onnx"
@@ -103,7 +103,7 @@ except Exception as e:
 done
 
 # 7. Install systemd services (headless + GUI)
-echo "[7/10] Installing systemd services..."
+echo "[7/11] Installing systemd services..."
 cp agrikd.service /etc/systemd/system/
 if [ -f agrikd-gui.service ]; then
     cp agrikd-gui.service /etc/systemd/system/
@@ -113,13 +113,13 @@ systemctl enable agrikd.service
 echo "  [OK] Headless service enabled. GUI service available (manual start)."
 
 # 8. Camera permissions
-echo "[8/10] Setting up camera permissions..."
+echo "[8/11] Setting up camera permissions..."
 usermod -aG video "$SERVICE_USER"
 echo "  [OK] User $SERVICE_USER added to 'video' group."
 echo "  Verify camera with: v4l2-ctl --list-devices"
 
 # 9. Create desktop shortcut for GUI
-echo "[9/10] Creating GUI desktop shortcut..."
+echo "[9/11] Creating GUI desktop shortcut..."
 cat > /usr/share/applications/agrikd-gui.desktop << 'DESKTOP'
 [Desktop Entry]
 Name=AgriKD Plant Disease Detection
@@ -133,14 +133,31 @@ DESKTOP
 chmod 644 /usr/share/applications/agrikd-gui.desktop
 echo "  [OK] Desktop shortcut created."
 
-# 10. Update config with Supabase credentials (optional)
-echo "[10/10] Configuration..."
-if [ -z "$(grep -o '"supabase_url": ""' $INSTALL_DIR/config/config.json)" ]; then
-    echo "  Supabase already configured"
+# 10. Copy provisioning script
+echo "[10/11] Copying provisioning scripts..."
+mkdir -p "$INSTALL_DIR/scripts"
+cp -r scripts/* "$INSTALL_DIR/scripts/" 2>/dev/null || true
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts"
+
+# 11. Zero-Touch Provisioning
+echo "[11/11] Zero-Touch Provisioning..."
+echo ""
+echo "  Get a provisioning token from Admin Dashboard:"
+echo "    Dashboard -> Devices -> Provisioning Tokens -> Generate Token"
+echo ""
+read -p "  Paste provisioning token (or path to .token file, or 'skip'): " PROVISION_INPUT
+
+if [ "$PROVISION_INPUT" = "skip" ] || [ -z "$PROVISION_INPUT" ]; then
+    echo "  Skipped provisioning. Device will run in local-only mode."
+    echo "  To provision later:  cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+elif [ -f "$PROVISION_INPUT" ]; then
+    cd "$INSTALL_DIR"
+    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
+    cd -
 else
-    echo "  Supabase not configured. Edit $INSTALL_DIR/config/config.json to add:"
-    echo '    "supabase_url": "https://your-project.supabase.co"'
-    echo '    "supabase_key": "your-anon-key"'
+    cd "$INSTALL_DIR"
+    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
+    cd -
 fi
 
 echo ""
@@ -166,4 +183,7 @@ echo ""
 echo "── Camera Check ──"
 echo "  v4l2-ctl --list-devices            # List available cameras"
 echo "  ls /dev/video*                      # Check video device nodes"
+echo ""
+echo "── Provisioning (if skipped) ──"
+echo "  cd $INSTALL_DIR && python3 scripts/provision.py <token>"
 echo ""
