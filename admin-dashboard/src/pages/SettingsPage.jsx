@@ -24,6 +24,9 @@ export default function SettingsPage() {
   const [auditLogs, setAuditLogs] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState(null)
+  const [auditPage, setAuditPage] = useState(0)
+  const [auditHasMore, setAuditHasMore] = useState(true)
+  const AUDIT_PAGE_SIZE = 50
   const [ghTesting, setGhTesting] = useState(false)
 
   useEffect(() => {
@@ -401,6 +404,11 @@ export default function SettingsPage() {
                 </tbody>
               </table>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <button className="btn btn-sm" disabled={auditPage === 0 || auditLoading} onClick={() => loadAuditLogs(null, auditPage - 1)}>← Previous</button>
+              <span style={{ color: '#94a3b8', fontSize: 13 }}>Page {auditPage + 1}</span>
+              <button className="btn btn-sm" disabled={!auditHasMore || auditLoading} onClick={() => loadAuditLogs(null, auditPage + 1)}>Next →</button>
+            </div>
           ) : (
             <div className="empty-state"><p>No audit log entries yet. Actions like model uploads, edits, and deletions will appear here.</p></div>
           )}
@@ -411,16 +419,20 @@ export default function SettingsPage() {
     </>
   )
 
-  async function loadAuditLogs(signal) {
+  async function loadAuditLogs(signal, page = 0) {
     setAuditLoading(true)
     setAuditError(null)
     try {
+      const from = page * AUDIT_PAGE_SIZE
+      const to = from + AUDIT_PAGE_SIZE - 1
       const { data, error: err } = await supabase
         .from('audit_log').select('*')
-        .order('created_at', { ascending: false }).limit(50)
+        .order('created_at', { ascending: false }).range(from, to)
       if (signal?.aborted) return
       if (err) throw err
       setAuditLogs(data || [])
+      setAuditHasMore((data || []).length >= AUDIT_PAGE_SIZE)
+      setAuditPage(page)
     } catch (err) {
       if (err.name !== 'AbortError' && !signal?.aborted) {
         setAuditError(err.message || 'Failed to load audit logs')

@@ -637,13 +637,25 @@ export default function DataManagementPage() {
 
   const exportAll = async (fmt) => {
     try {
-      const { data } = await supabase.from('predictions').select('*').order('created_at', { ascending: false }).limit(50000)
-      if (!data?.length) { setCsvMsg({ type: 'error', text: 'No data to export.' }); return }
+      // Chunked export: fetch in pages of 2000 to avoid memory/timeout issues
+      const chunkSize = 2000
+      const maxRecords = 10000
+      let allData = []
+      let offset = 0
+      while (offset < maxRecords) {
+        const { data, error } = await supabase.from('predictions').select('*').order('created_at', { ascending: false }).range(offset, offset + chunkSize - 1)
+        if (error) throw error
+        if (!data?.length) break
+        allData = allData.concat(data)
+        if (data.length < chunkSize) break
+        offset += chunkSize
+      }
+      if (!allData.length) { setCsvMsg({ type: 'error', text: 'No data to export.' }); return }
       const name = `agrikd-data-${new Date().toISOString().slice(0, 10)}`
       if (fmt === 'csv') {
-        const h = Object.keys(data[0])
-        downloadFile([h.join(','), ...data.map(r => h.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n'), `${name}.csv`, 'text/csv')
-      } else downloadFile(JSON.stringify(data, null, 2), `${name}.json`, 'application/json')
+        const h = Object.keys(allData[0])
+        downloadFile([h.join(','), ...allData.map(r => h.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n'), `${name}.csv`, 'text/csv')
+      } else downloadFile(JSON.stringify(allData, null, 2), `${name}.json`, 'application/json')
     } catch (err) { setCsvMsg({ type: 'error', text: 'Export failed: ' + err.message }) }
   }
 
