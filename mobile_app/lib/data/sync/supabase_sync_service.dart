@@ -122,13 +122,18 @@ class SupabaseSyncService {
         final maxRetries = item['max_retries'] as int;
         if (retryCount >= maxRetries) {
           await _syncQueue.markFailed(queueId);
+          failed++;
         }
-        failed++;
+        // Items still being retried are NOT counted as 'failed'
       }
     }
 
-    // Clean up old completed/failed entries
-    await _syncQueue.cleanup();
+    // Clean up old completed/failed entries (always, even on partial failure)
+    try {
+      await _syncQueue.cleanup();
+    } catch (e) {
+      debugPrint('[SyncService] Sync queue cleanup failed: $e');
+    }
 
     return SyncResult(
       synced: synced,
@@ -138,12 +143,20 @@ class SupabaseSyncService {
   }
 
   /// Upload and compress image to Supabase Storage.
+  /// Returns null if upload fails — caller logs this as a partial sync.
   Future<String?> _uploadImage(String imagePath, int localId) async {
-    try {
-      final userId = _userId;
-      if (userId == null) return null;
+    final userId = _userId;
+    if (userId == null) return null;
 
+    try {
       final compressed = await compute(compressImageSync, imagePath);
+      if (compressed.isEmpty) {
+        debugPrint(
+          '[SyncService] Image compression returned empty for localId=$localId',
+        );
+        return null;
+      }
+
       final path =
           '$userId/${DateTime.now().millisecondsSinceEpoch}_$localId.jpg';
 
@@ -157,7 +170,8 @@ class SupabaseSyncService {
 
       return _client.storage.from('prediction-images').getPublicUrl(path);
     } catch (e) {
-      // Image upload failure should not block prediction sync
+      // Image upload failure is logged but does not block prediction sync.
+      // The prediction will be synced without an image URL.
       debugPrint('[SyncService] Image upload failed for localId=$localId: $e');
       return null;
     }

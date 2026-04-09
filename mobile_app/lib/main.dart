@@ -72,7 +72,8 @@ Future<void> _startApp() async {
   await AppDatabase.database;
 
   // 2. Initialize Supabase in background (non-blocking: app works offline)
-  SupabaseConfig.initialize().catchError((_) {
+  SupabaseConfig.initialize().catchError((e) {
+    debugPrint('[Main] Supabase init failed (offline?): $e');
     _showOfflineNotification = true;
   });
 

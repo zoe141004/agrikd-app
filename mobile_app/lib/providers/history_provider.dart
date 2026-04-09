@@ -67,6 +67,7 @@ class HistoryState {
 class HistoryNotifier extends StateNotifier<HistoryState> {
   final Ref _ref;
   static const int _pageSize = 20;
+  static const int _maxInMemory = 500;
   bool _isLoadingMore = false;
 
   HistoryNotifier(this._ref) : super(const HistoryState());
@@ -102,10 +103,17 @@ class HistoryNotifier extends StateNotifier<HistoryState> {
       );
       final newPredictions = rows.map((r) => Prediction.fromMap(r)).toList();
 
+      final combined = [...state.predictions, ...newPredictions];
+      // Cap in-memory list to prevent unbounded memory growth
+      final hasMore =
+          newPredictions.length >= _pageSize && combined.length < _maxInMemory;
+
       state = state.copyWith(
-        predictions: [...state.predictions, ...newPredictions],
+        predictions: combined.length > _maxInMemory
+            ? combined.sublist(0, _maxInMemory)
+            : combined,
         isLoading: false,
-        hasMore: newPredictions.length >= _pageSize,
+        hasMore: hasMore,
       );
     } catch (e) {
       debugPrint('[HistoryProvider] Failed to load page: $e');
