@@ -52,6 +52,7 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 10 | `database/migrations/010_fix_lifecycle_for_update.sql` | Fix enforce_version_lifecycle trigger for UPDATE operations |
 | 11 | `database/migrations/011_dvc_operations.sql` | DVC operations tracking table (stage/push/pull/export with status lifecycle) |
 | 12 | `database/migrations/012_devices.sql` | Device management: provisioning_tokens, devices table with Device Shadow, RLS, config_version trigger, device_id on predictions |
+| 13 | `database/migrations/013_model_engines.sql` | ONNX URL columns on model_registry + model_engines table for hardware-specific TensorRT engines |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning

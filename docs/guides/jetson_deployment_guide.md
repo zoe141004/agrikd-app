@@ -52,14 +52,12 @@ Supported models:
 
 ### 2.3 ONNX Model Files
 
-ONNX model files produced by the AgriKD MLOps pipeline are required:
+ONNX models are produced by the AgriKD MLOps pipeline and stored on
+**Supabase Storage** (not in the git repository). The setup script
+automatically downloads them and converts to TensorRT engines on-device.
 
-- `models/tomato/tomato_student.onnx`
-- `models/burmese_grape_leaf/burmese_grape_leaf_student.onnx`
-
-These are generated after running the pipeline and are stored in the
-`models/<leaf_type>/` directory. The setup script converts them to TensorRT
-engines on the target device.
+If no Supabase credentials are configured, you can place ONNX files
+manually at `/opt/agrikd/models/<leaf_type>_student.onnx`.
 
 ---
 
@@ -67,8 +65,8 @@ engines on the target device.
 
 ```bash
 # Clone the repository
-git clone https://github.com/<owner>/agrikd.git
-cd agrikd/jetson
+git clone https://github.com/zoe141004/agrikd-app.git
+cd agrikd-app/jetson
 
 # Create config.json from the template (config.json is gitignored)
 cp config/config.example.json config/config.json
@@ -125,8 +123,13 @@ All files from the repository's `app/` and `config/` directories are copied into
 
 ### Step 4 -- Install Python Dependencies
 
+The setup script creates a Python virtual environment at `/opt/agrikd/venv`
+with `--system-site-packages` to access JetPack's TensorRT and PyCUDA.
+
 ```bash
-pip3 install --no-cache-dir numpy==1.24.4 opencv-python==4.8.1.78 requests==2.31.0 flask==3.0.3 waitress==3.0.0
+python3 -m venv --system-site-packages /opt/agrikd/venv
+source /opt/agrikd/venv/bin/activate
+pip install -r requirements.txt
 ```
 
 OpenCV is installed with GUI support (`opencv-python`, not

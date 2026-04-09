@@ -2,28 +2,37 @@
 
 AI-powered plant disease detection using Knowledge Distillation (ViT-Base teacher to MobileNetV2 student). Supports **Tomato** (10 classes) and **Burmese Grape Leaf** (5 classes) with offline-first, zero-cost design.
 
+## Quick Start (30 seconds)
+
+```bash
+git clone https://github.com/zoe141004/agrikd-app.git && cd agrikd-app
+
+# Linux/macOS
+chmod +x setup_dev.sh && ./setup_dev.sh
+
+# Windows
+setup_windows_dev.bat
+```
+
+That's it. The script installs all dependencies, creates `.env` from `.env.development`, and syncs configs to all sub-projects.
+
 ## Components
 
 | Component | Technology | Description |
 |-----------|-----------|-------------|
 | Mobile App | Flutter + Riverpod + TFLite + Sentry | Offline diagnosis with cloud sync |
 | Admin Dashboard | React + Vite + Supabase + Sentry | Management console (models, users, data) |
-| MLOps Pipeline | Python + DVC + GitHub Actions | Model conversion & evaluation |
+| MLOps Pipeline | Python + DVC + GitHub Actions | 4-format model conversion & evaluation |
 | Jetson Edge | TensorRT + PyQt5 GUI + Flask API | Edge inference with camera & Active Learning |
 | Database (IaC) | Supabase PostgreSQL + RLS | Schema, policies & verification scripts |
 
-## Quick Start
+## Model Pipeline (4-Format)
 
-```bash
-# Windows development setup (recommended)
-setup_windows_dev.bat
-
-# Or manual setup
-cp .env.example .env              # Edit with your credentials
-python sync_env.py                 # Sync env to mobile_app/, admin-dashboard/, jetson/
-cd mobile_app && flutter pub get   # Install Flutter dependencies
-cd mobile_app && flutter run       # Loads .env via flutter_dotenv
 ```
+.pth (checkpoint) → .onnx (intermediate) → .tflite fp16 (mobile) → .engine (Jetson TensorRT)
+```
+
+All formats uploaded to Supabase Storage. Jetson devices auto-detect hardware (SM arch) and share pre-built engines.
 
 ## Documentation
 
