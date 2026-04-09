@@ -26,6 +26,7 @@ DECLARE
         'audit_log',
         'model_benchmarks',
         'model_versions',
+        'model_reports',
         'pipeline_runs',
         'devices',
         'provisioning_tokens',
@@ -297,7 +298,9 @@ BEGIN
         'idx_devices_user',
         'idx_devices_status',
         'idx_predictions_device',
-        'idx_prov_tokens_unused'
+        'idx_prov_tokens_unused',
+        'idx_audit_log_user_id',
+        'idx_model_engines_lookup'
     ]
     LOOP
         SELECT EXISTS (

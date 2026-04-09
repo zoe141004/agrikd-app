@@ -62,14 +62,14 @@ CREATE POLICY "Service role manages engines"
     ON public.model_engines FOR INSERT
     WITH CHECK (
         public.is_admin_role()
-        OR current_setting('role', true) = 'service_role'
+        OR (auth.jwt() ->> 'role') = 'service_role'
     );
 
 CREATE POLICY "Service role updates engines"
     ON public.model_engines FOR UPDATE
     USING (
         public.is_admin_role()
-        OR current_setting('role', true) = 'service_role'
+        OR (auth.jwt() ->> 'role') = 'service_role'
     );
 
 CREATE POLICY "Admins delete engines"
