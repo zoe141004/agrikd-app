@@ -95,10 +95,18 @@ CREATE TABLE IF NOT EXISTS public.devices (
     created_at       TIMESTAMPTZ DEFAULT now()
 );
 
--- FK from provisioning_tokens to devices (deferred to avoid ordering issues)
-ALTER TABLE public.provisioning_tokens
-    ADD CONSTRAINT fk_prov_device FOREIGN KEY (device_id)
-    REFERENCES public.devices(id) ON DELETE SET NULL;
+-- FK from provisioning_tokens to devices (idempotent)
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_prov_device'
+          AND conrelid = 'public.provisioning_tokens'::regclass
+    ) THEN
+        ALTER TABLE public.provisioning_tokens
+            ADD CONSTRAINT fk_prov_device FOREIGN KEY (device_id)
+            REFERENCES public.devices(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- 3. Link predictions to device (nullable, backward-compatible)
 ALTER TABLE public.predictions
