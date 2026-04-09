@@ -116,18 +116,20 @@ BEGIN
 END;
 $$;
 
--- ── DB-M1: audit_log — add user_id index for query performance ────────────
--- Only apply if audit_log table has user_id column.
+-- ── DB-M1: audit_log — ensure user_id column + index for query performance ──
+-- The audit_log table may have been created manually (with actor_email instead
+-- of user_id). This block adds user_id if missing, then creates the index.
 DO $$
 BEGIN
-    IF EXISTS (
+    IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'audit_log' AND column_name = 'user_id'
     ) THEN
-        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON public.audit_log (user_id)';
-        RAISE NOTICE 'audit_log: idx_audit_log_user_id created';
-    ELSE
-        RAISE NOTICE 'SKIP: audit_log.user_id column not found — check migration 001';
+        EXECUTE 'ALTER TABLE public.audit_log ADD COLUMN user_id UUID REFERENCES auth.users(id)';
+        RAISE NOTICE 'audit_log: added missing user_id column';
     END IF;
+
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON public.audit_log (user_id)';
+    RAISE NOTICE 'audit_log: idx_audit_log_user_id ensured';
 END;
 $$;
