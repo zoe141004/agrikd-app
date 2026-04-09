@@ -96,17 +96,38 @@ CREATE POLICY "Users update own profile"
     WITH CHECK (auth.uid() = id);
 
 -- ── DB-H4: model_reports — allow users to SELECT their own reports ────────
--- Currently: users can INSERT own reports, admins can SELECT all.
--- Missing: users cannot read back their own submitted reports.
-
-DROP POLICY IF EXISTS "Users read own reports" ON public.model_reports;
-CREATE POLICY "Users read own reports"
-    ON public.model_reports FOR SELECT
-    USING (auth.uid() = user_id OR public.is_admin_role());
+-- Only apply if model_reports table exists (created in migration 006).
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'model_reports'
+    ) THEN
+        EXECUTE 'DROP POLICY IF EXISTS "Users read own reports" ON public.model_reports';
+        EXECUTE $policy$
+            CREATE POLICY "Users read own reports"
+                ON public.model_reports FOR SELECT
+                USING (auth.uid() = user_id OR public.is_admin_role())
+        $policy$;
+        RAISE NOTICE 'model_reports: "Users read own reports" policy created';
+    ELSE
+        RAISE NOTICE 'SKIP: model_reports table not found — run migration 006 first';
+    END IF;
+END;
+$$;
 
 -- ── DB-M1: audit_log — add user_id index for query performance ────────────
--- audit_log already has idx_audit_log_created_at (from 004).
--- Missing: user_id index for filtering audit entries by user.
-
-CREATE INDEX IF NOT EXISTS idx_audit_log_user_id
-    ON public.audit_log (user_id);
+-- Only apply if audit_log table has user_id column.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'audit_log' AND column_name = 'user_id'
+    ) THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON public.audit_log (user_id)';
+        RAISE NOTICE 'audit_log: idx_audit_log_user_id created';
+    ELSE
+        RAISE NOTICE 'SKIP: audit_log.user_id column not found — check migration 001';
+    END IF;
+END;
+$$;

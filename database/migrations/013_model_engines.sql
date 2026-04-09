@@ -3,8 +3,8 @@
 -- Adds hardware-specific TensorRT engine tracking and
 -- ONNX intermediate format URL to model_registry
 -- ============================================================
-
-BEGIN;
+-- Safe to re-run: IF NOT EXISTS, CREATE OR REPLACE, DROP IF EXISTS.
+-- ============================================================
 
 -- ============================================================
 -- 1. Add ONNX columns to model_registry
@@ -52,12 +52,14 @@ COMMENT ON TABLE public.model_engines IS 'Hardware-specific TensorRT engine file
 ALTER TABLE public.model_engines ENABLE ROW LEVEL SECURITY;
 
 -- Public read: Jetson devices and apps can query available engines
+DROP POLICY IF EXISTS "Anyone can read engines" ON public.model_engines;
 CREATE POLICY "Anyone can read engines"
     ON public.model_engines FOR SELECT
     USING (true);
 
 -- Only admins and service_role can insert/update/delete engines
 -- (Jetson uses service_role key for engine upload)
+DROP POLICY IF EXISTS "Service role manages engines" ON public.model_engines;
 CREATE POLICY "Service role manages engines"
     ON public.model_engines FOR INSERT
     WITH CHECK (
@@ -65,6 +67,7 @@ CREATE POLICY "Service role manages engines"
         OR (auth.jwt() ->> 'role') = 'service_role'
     );
 
+DROP POLICY IF EXISTS "Service role updates engines" ON public.model_engines;
 CREATE POLICY "Service role updates engines"
     ON public.model_engines FOR UPDATE
     USING (
@@ -72,6 +75,7 @@ CREATE POLICY "Service role updates engines"
         OR (auth.jwt() ->> 'role') = 'service_role'
     );
 
+DROP POLICY IF EXISTS "Admins delete engines" ON public.model_engines;
 CREATE POLICY "Admins delete engines"
     ON public.model_engines FOR DELETE
     USING (public.is_admin_role());
@@ -132,5 +136,3 @@ AS $$
       AND me.hardware_tag = p_hardware_tag
     LIMIT 1;
 $$;
-
-COMMIT;
