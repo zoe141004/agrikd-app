@@ -76,6 +76,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       debugPrint('[Camera] Init failed: $e');
       setState(() => _isInitializing = false);
     }
+  }
 
   Future<void> _startCamera(int cameraIndex) async {
     if (_cameras == null || _cameras!.isEmpty) return;
