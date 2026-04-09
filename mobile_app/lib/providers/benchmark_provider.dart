@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/config/supabase_config.dart';
@@ -82,7 +83,8 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
       }
 
       state = BenchmarkState(benchmarks: result);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[BenchmarkProvider] Failed to load benchmarks: $e');
       state = BenchmarkState(benchmarks: state.benchmarks);
     }
   }

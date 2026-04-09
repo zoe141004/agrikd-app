@@ -323,8 +323,11 @@ class ModelEvaluator:
             in_det = interp.get_input_details()[0]
             out_det = interp.get_output_details()[0]
             expected_shape = in_det['shape']
-            if list(expected_shape) == [1, 224, 224, 3]:
+            # TFLite expects NHWC; PyTorch provides NCHW — transpose if layout differs
+            if len(expected_shape) == 4 and expected_shape[-1] != inp.shape[-1]:
                 inp = np.transpose(inp, (0, 2, 3, 1))
+            if list(inp.shape) != list(expected_shape):
+                inp = np.resize(inp, expected_shape)
             interp.set_tensor(in_det['index'], inp)
             interp.invoke()
             logits = interp.get_tensor(out_det['index'])

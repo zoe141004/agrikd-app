@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -115,7 +116,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           state = const AuthState(status: AuthStatus.unauthenticated);
         }
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Auth] Supabase init failed: $e');
       // Unexpected error accessing Supabase — stay unknown for retry
     }
   }
@@ -287,7 +289,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> signOut() async {
     try {
       await SupabaseConfig.client.auth.signOut();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Auth] SignOut failed (possibly offline): $e');
       // Supabase may fail if offline — still clear local state
     }
     await _clearLocalUserData();
@@ -298,7 +301,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final db = await AppDatabase.database;
       await db.delete('sync_queue');
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Auth] Sync queue cleanup failed: $e');
       // Best-effort cleanup
     }
   }

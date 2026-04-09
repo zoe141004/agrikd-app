@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { cleanLabel, downloadFile } from '../lib/helpers'
@@ -17,7 +17,11 @@ export default function PredictionsPage() {
   const [summary, setSummary] = useState({ topDisease: '—', uniqueUsers: 0 })
   const [classDist, setClassDist] = useState([])
 
-  useEffect(() => { loadPredictions() }, [page, filters])
+  useEffect(() => {
+    const controller = new AbortController()
+    loadPredictions(controller.signal)
+    return () => controller.abort()
+  }, [page, filters])
 
   const applyFilters = (query) => {
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
@@ -26,7 +30,7 @@ export default function PredictionsPage() {
     return query
   }
 
-  const loadPredictions = async () => {
+  const loadPredictions = async (signal) => {
     setLoading(true)
     setError(null)
     try {
@@ -62,8 +66,10 @@ export default function PredictionsPage() {
       setSummary({ topDisease: '—', uniqueUsers: 0 })
       setClassDist([])
     }
-    } catch (err) { setError(err.message) }
-    setLoading(false)
+    } catch (err) {
+      if (err.name !== 'AbortError') setError(err.message)
+    }
+    if (!signal?.aborted) setLoading(false)
   }
 
   const setFilter = (key, val) => { setPage(0); setFilters(f => ({ ...f, [key]: val })) }

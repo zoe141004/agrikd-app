@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/diagnosis/domain/models/prediction.dart';
@@ -106,7 +107,8 @@ class HistoryNotifier extends StateNotifier<HistoryState> {
         isLoading: false,
         hasMore: newPredictions.length >= _pageSize,
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[HistoryProvider] Failed to load page: $e');
       state = state.copyWith(isLoading: false, hasMore: false);
     }
   }

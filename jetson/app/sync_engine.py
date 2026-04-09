@@ -189,6 +189,7 @@ class SyncEngine:
                 "Content-Type": "application/json",
             },
             timeout=15,
+            verify=True,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -215,7 +216,7 @@ class SyncEngine:
         )
 
         try:
-            resp = requests.get(url, headers=self._get_headers(), timeout=10)
+            resp = requests.get(url, headers=self._get_headers(), timeout=10, verify=True)
         except requests.RequestException as e:
             logger.warning("Config poll failed (network): %s", e)
             return
@@ -290,6 +291,7 @@ class SyncEngine:
                     "status": "online",
                 },
                 timeout=10,
+                verify=True,
             )
             if resp.status_code in (200, 204):
                 with self._state_lock:
@@ -322,7 +324,7 @@ class SyncEngine:
         headers["Prefer"] = "return=minimal"
 
         try:
-            requests.patch(url, headers=headers, json=body, timeout=10)
+            requests.patch(url, headers=headers, json=body, timeout=10, verify=True)
         except requests.RequestException:
             pass  # Heartbeat is best-effort
 
@@ -392,7 +394,7 @@ class SyncEngine:
             payload_list.append(payload)
 
         try:
-            resp = requests.post(url, headers=headers, json=payload_list, timeout=30)
+            resp = requests.post(url, headers=headers, json=payload_list, timeout=30, verify=True)
             if resp.status_code in (200, 201):
                 for pred in unsynced:
                     self.db.mark_synced(pred["id"])

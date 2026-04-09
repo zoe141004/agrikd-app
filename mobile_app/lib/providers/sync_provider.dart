@@ -120,7 +120,8 @@ class SyncNotifier extends StateNotifier<SyncState>
       for (final update in updates) {
         await _syncService.downloadModelUpdate(update);
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[SyncProvider] Model update check failed: $e');
       // Model update check is best-effort; don't fail the sync
     }
   }

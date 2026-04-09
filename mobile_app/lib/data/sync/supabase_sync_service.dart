@@ -264,6 +264,7 @@ class SupabaseSyncService {
 
       return true;
     } catch (e) {
+      debugPrint('[SyncService] Model download failed: $e');
       return false;
     }
   }

@@ -32,7 +32,8 @@ Future<void> main() async {
   // Load .env for local dev; silently skip in production (no .env in release APK)
   try {
     await dotenv.load(fileName: '.env');
-  } catch (_) {
+  } catch (e) {
+    debugPrint('[Main] .env not loaded (expected in production): $e');
     // Production build: .env not bundled, --dart-define values used instead
   }
 

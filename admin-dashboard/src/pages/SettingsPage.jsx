@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [auditLogs, setAuditLogs] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState(null)
+  const [ghTesting, setGhTesting] = useState(false)
 
   useEffect(() => {
     supabase.from('model_registry').select('leaf_type, version, model_url, status').then(({ data }) => setModels(data || []))
@@ -54,6 +55,7 @@ export default function SettingsPage() {
   const testGitHub = async () => {
     const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
     if (!ghToken) { setCiMsg({ type: 'error', text: 'Save GitHub config first.' }); return }
+    setGhTesting(true)
     try {
       const ghController = new AbortController()
       const timeoutId = setTimeout(() => ghController.abort(), 10000)
@@ -64,6 +66,8 @@ export default function SettingsPage() {
       else setCiMsg({ type: 'error', text: `Error: ${data.message}` })
     } catch (err) {
       setCiMsg({ type: 'error', text: err.message })
+    } finally {
+      setGhTesting(false)
     }
   }
 
@@ -216,7 +220,7 @@ export default function SettingsPage() {
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" onClick={saveGitHub}>{ghSaved ? '✓ Saved' : 'Save Config'}</button>
-              <button className="btn" onClick={testGitHub}>Test Connection</button>
+              <button className="btn" onClick={testGitHub} disabled={ghTesting}>{ghTesting ? 'Testing…' : 'Test Connection'}</button>
             </div>
           </div>
         </div>

@@ -95,7 +95,9 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
               record['num_classes'] as int? ?? _loadedClassLabels!.length;
           return;
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[DiagnosisRepo] Failed to decode class labels: $e');
+      }
     }
     // Fallback to bundled constants
     final modelInfo = ModelConstants.getModel(leafType);

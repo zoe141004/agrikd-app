@@ -273,7 +273,7 @@ export default function ModelsPage() {
       if (error) throw new Error(error.message)
       setEditModal(null); loadModels(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version })
     } catch (err) {
-      alert('Save failed: ' + err.message)
+      setError('Save failed: ' + err.message)
     }
     setSaving(false)
   }
@@ -314,7 +314,7 @@ export default function ModelsPage() {
   const activateModel = async (m) => {
     const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
     if (!hasBench || !m.model_url || !m.sha256_checksum || m.sha256_checksum === 'pending') {
-      alert('Cannot activate: model must have benchmarks, a valid URL, and SHA-256 checksum.')
+      setError('Cannot activate: model must have benchmarks, a valid URL, and SHA-256 checksum.')
       return
     }
     setConfirmAction({
@@ -342,7 +342,7 @@ export default function ModelsPage() {
         }
         const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
-        else alert(error.message)
+        else setError(error.message)
       }
     })
   }
@@ -363,7 +363,7 @@ export default function ModelsPage() {
         }, { onConflict: 'leaf_type,version' })
         const { error } = await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); logAudit(supabase, 'model_deactivated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
-        else alert(error.message)
+        else setError(error.message)
       }
     })
   }
@@ -375,7 +375,7 @@ export default function ModelsPage() {
 
     // Guard: prevent deleting the last active model
     if (isActive && activeCount <= 1) {
-      alert(`Cannot delete the last active model for "${m.leaf_type}". Deactivate first or activate another version.`)
+      setError(`Cannot delete the last active model for "${m.leaf_type}". Deactivate first or activate another version.`)
       return
     }
 
@@ -405,7 +405,7 @@ export default function ModelsPage() {
           if (error) throw new Error(error.message)
           loadModels()
           logAudit(supabase, 'model_deleted', 'model', m.id, { leaf_type: m.leaf_type, version: m.version })
-        } catch (err) { alert('Delete failed: ' + err.message) }
+        } catch (err) { setError('Delete failed: ' + err.message) }
       }
     })
   }

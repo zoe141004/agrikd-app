@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env_config.dart';
@@ -43,7 +44,8 @@ class SupabaseConfig {
     try {
       await initialize();
       return true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[SupabaseConfig] ensureInitialized failed: $e');
       return false;
     }
   }

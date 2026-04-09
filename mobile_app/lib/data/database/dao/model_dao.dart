@@ -1,5 +1,6 @@
 import 'dart:io' show File;
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../app_database.dart';
@@ -118,7 +119,9 @@ class ModelDao {
     for (final path in filesToDelete) {
       try {
         await File(path).delete();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[ModelDao] Failed to delete file $path: $e');
+      }
     }
   }
 
@@ -173,7 +176,9 @@ class ModelDao {
     for (final path in filesToDelete) {
       try {
         await File(path).delete();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[ModelDao] Failed to delete file $path: $e');
+      }
     }
     return success;
   }

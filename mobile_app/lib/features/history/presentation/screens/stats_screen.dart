@@ -303,7 +303,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                               rawName,
                               S.locale,
                             );
-                          } catch (_) {
+                          } catch (e) {
+                            debugPrint(
+                              '[StatsScreen] Label localization failed: $e',
+                            );
                             displayName = LeafModelInfo.cleanLabel(rawName);
                           }
                         }

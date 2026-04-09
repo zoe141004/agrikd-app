@@ -2,6 +2,7 @@ import 'dart:io' show File;
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 import 'package:app/core/utils/model_integrity.dart';
@@ -93,7 +94,8 @@ class TfliteInferenceService {
       _interpreter = await _loadFromFileWithDelegateFallback(filePath);
       _currentLeafType = leafType;
       return true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[TFLite] Failed to load model for $leafType: $e');
       _interpreter = null;
       _currentLeafType = null;
       return false;
@@ -108,25 +110,37 @@ class TfliteInferenceService {
     if (preferred == 'GPU') {
       try {
         return await _tryGpu(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU delegate failed: $e');
+      }
       try {
         return await _tryXnnpack(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack delegate failed: $e');
+      }
     } else if (preferred == 'XNNPack') {
       try {
         return await _tryXnnpack(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack delegate failed: $e');
+      }
       try {
         return await _tryGpu(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU delegate failed: $e');
+      }
     } else {
       // No preference or CPU: try GPU -> XNNPack
       try {
         return await _tryGpu(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU delegate failed: $e');
+      }
       try {
         return await _tryXnnpack(assetPath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack delegate failed: $e');
+      }
     }
 
     // Fallback to CPU
@@ -192,24 +206,36 @@ class TfliteInferenceService {
     if (preferred == 'GPU') {
       try {
         return await _tryGpuFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU file delegate failed: $e');
+      }
       try {
         return await _tryXnnpackFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack file delegate failed: $e');
+      }
     } else if (preferred == 'XNNPack') {
       try {
         return await _tryXnnpackFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack file delegate failed: $e');
+      }
       try {
         return await _tryGpuFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU file delegate failed: $e');
+      }
     } else {
       try {
         return await _tryGpuFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] GPU file delegate failed: $e');
+      }
       try {
         return await _tryXnnpackFile(filePath, preferred);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TFLite] XNNPack file delegate failed: $e');
+      }
     }
 
     // Fallback to CPU

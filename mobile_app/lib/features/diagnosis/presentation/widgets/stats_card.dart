@@ -104,7 +104,8 @@ class _StatsCardState extends ConsumerState<StatsCard> {
       try {
         final m = ModelConstants.getModel(leafType);
         return m.localizedClassName(rawName, S.locale);
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[StatsCard] Label localization failed: $e');
         return LeafModelInfo.cleanLabel(rawName);
       }
     }

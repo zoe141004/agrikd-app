@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/config/supabase_config.dart';
@@ -58,7 +59,8 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
       }
 
       state = ModelVersionState(versions: result);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[ModelVersion] Failed to load versions: $e');
       state = ModelVersionState(versions: state.versions, isLoading: false);
     }
   }
@@ -68,7 +70,8 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
     try {
       await _modelDao.selectVersion(leafType, version);
       await load();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[ModelVersion] Failed to select version: $e');
       await load();
     }
   }
@@ -101,7 +104,8 @@ Future<bool> submitModelReport({
       'reason': reason,
     });
     return true;
-  } catch (_) {
+  } catch (e) {
+    debugPrint('[ModelVersion] Failed to submit report: $e');
     return false;
   }
 }

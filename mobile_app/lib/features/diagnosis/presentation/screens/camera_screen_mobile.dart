@@ -73,9 +73,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
       await _startCamera(_selectedCameraIndex);
     } catch (e) {
+      debugPrint('[Camera] Init failed: $e');
       setState(() => _isInitializing = false);
     }
-  }
 
   Future<void> _startCamera(int cameraIndex) async {
     if (_cameras == null || _cameras!.isEmpty) return;
@@ -102,6 +102,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
         });
       }
     } catch (e) {
+      debugPrint('[Camera] Start camera failed: $e');
       if (mounted) {
         setState(() => _isInitializing = false);
       }
