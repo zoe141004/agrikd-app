@@ -1,0 +1,15 @@
+{
+  "leaf_type": "potato_dataset",
+  "display_name": "Potato Leaf Disease",
+  "data_dir": "data/potato_dataset",
+  "num_classes": 7,
+  "class_names": [
+    "Bacteria",
+    "Fungi",
+    "Healthy",
+    "Nematode",
+    "Pest",
+    "Phytopthora",
+    "Virus"
+  ]
+}
