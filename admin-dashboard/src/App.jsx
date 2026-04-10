@@ -1,6 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
+import { DataProvider } from './lib/DataContext'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
@@ -104,23 +105,25 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <Layout session={session} profile={profile} onSignOut={() => supabase.auth.signOut()}>
-        <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}><div className="spinner" /></div>}>
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/predictions" element={<PredictionsPage />} />
-            <Route path="/models" element={<ModelsPage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/devices" element={<DevicesPage />} />
-            <Route path="/data" element={<DataManagementPage />} />
-            <Route path="/releases" element={<ReleasesPage />} />
-            <Route path="/health" element={<SystemHealthPage />} />
-            <Route path="/reports" element={<ModelReportsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </Layout>
+      <DataProvider>
+        <Layout session={session} profile={profile} onSignOut={() => supabase.auth.signOut()}>
+          <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}><div className="spinner" /></div>}>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/predictions" element={<PredictionsPage />} />
+              <Route path="/models" element={<ModelsPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/devices" element={<DevicesPage />} />
+              <Route path="/data" element={<DataManagementPage />} />
+              <Route path="/releases" element={<ReleasesPage />} />
+              <Route path="/health" element={<SystemHealthPage />} />
+              <Route path="/reports" element={<ModelReportsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </Layout>
+      </DataProvider>
     </ErrorBoundary>
   )
 }

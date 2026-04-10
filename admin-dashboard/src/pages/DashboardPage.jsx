@@ -4,10 +4,12 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import { cleanLabel } from '../lib/helpers'
 import CustomTooltip from '../components/CustomTooltip'
 
 export default function DashboardPage() {
+  const { leafTypeOptions } = useData()
   const [stats, setStats] = useState({ total: 0, users: 0, models: 0, devices: 0 })
   const [diseaseData, setDiseaseData] = useState([])
   const [dailyData, setDailyData] = useState([])
@@ -16,7 +18,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [leafFilter, setLeafFilter] = useState('')
-  const [leafOptions, setLeafOptions] = useState([])
 
   // Ref to track latest leafFilter inside interval callback (avoids stale closure)
   const leafFilterRef = useRef(leafFilter)
@@ -49,7 +50,6 @@ export default function DashboardPage() {
     const [
       rpcStatsRes,
       diseaseDistRes,
-      leafTypeOptsRes,
       modelsRes,
       dailyRowsRes,
       recentRes,
@@ -57,7 +57,6 @@ export default function DashboardPage() {
     ] = await Promise.allSettled([
       supabase.rpc('get_dashboard_stats', { p_leaf_type: rpcFilter }),
       supabase.rpc('get_disease_distribution', { p_leaf_type: rpcFilter }),
-      supabase.rpc('get_leaf_type_options'),
       supabase.from('model_registry').select('*', { count: 'exact', head: true }),
       addFilter(supabase.from('predictions').select('created_at').gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()).order('created_at', { ascending: true }).limit(10000)),
       addFilter(supabase.from('predictions').select('id, leaf_type, predicted_class_name, created_at').order('created_at', { ascending: false }).limit(8)),
@@ -69,16 +68,10 @@ export default function DashboardPage() {
 
     const rpcStats = rpcStatsRes.status === 'fulfilled' ? rpcStatsRes.value?.data : null
     const diseaseDist = diseaseDistRes.status === 'fulfilled' ? diseaseDistRes.value?.data : null
-    const leafTypeOpts = leafTypeOptsRes.status === 'fulfilled' ? leafTypeOptsRes.value?.data : null
     const models = modelsRes.status === 'fulfilled' ? modelsRes.value?.count : 0
     const dailyRows = dailyRowsRes.status === 'fulfilled' ? dailyRowsRes.value?.data : null
     const recent = recentRes.status === 'fulfilled' ? recentRes.value?.data : null
     const activeDevices = devicesRes.status === 'fulfilled' ? devicesRes.value?.count : 0
-
-    // Leaf type options for dropdown
-    if (leafTypeOpts) {
-      setLeafOptions(leafTypeOpts.map(r => r.leaf_type).filter(Boolean).sort())
-    }
 
     // Stats from RPC
     const s = rpcStats || {}
@@ -144,7 +137,7 @@ export default function DashboardPage() {
         </div>
         <select value={leafFilter} onChange={e => setLeafFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', fontSize: 13, fontWeight: 500, background: 'white', color: '#3d4f62', minWidth: 180 }}>
           <option value="">All Leaf Types</option>
-          {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
+          {leafTypeOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
         </select>
       </div>
 

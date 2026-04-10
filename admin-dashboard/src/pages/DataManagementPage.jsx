@@ -1,21 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import { downloadFile, formatBytes, formatDateTime, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, validateGitHubSlugs, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const DTABS = ['Overview', 'Stage Data', 'DVC Operations', 'Prediction Data', 'Storage Files']
 
 export default function DataManagementPage() {
+  const { leafTypeOptions: leafOptions, dvcDatasets, setDvcDatasets, dvcDatasetsLoading: sharedDvcLoading, dvcDatasetsSource, refreshLeafTypes, refreshDvcDatasets, triggerRefresh } = useData()
   const [dtab, setDtab] = useState('Overview')
   const [stats, setStats] = useState({ total: 0 })
   const [quality, setQuality] = useState([])
   const [loading, setLoading] = useState(true)
-  const [leafOptions, setLeafOptions] = useState([])
-
-  // DVC datasets (from dvc_operations metadata or GitHub .dvc files fallback)
-  const [dvcDatasets, setDvcDatasets] = useState([])
-  const [dvcDatasetsLoading, setDvcDatasetsLoading] = useState(false)
-  const [dvcDatasetsSource, setDvcDatasetsSource] = useState(null) // 'db' | 'github' | null
 
   // DVC Operations tracking (DB-backed, mirrors ModelsPage pipeline_runs pattern)
   const [dvcOps, setDvcOps] = useState([])
@@ -70,7 +66,12 @@ export default function DataManagementPage() {
   const [editingLabel, setEditingLabel] = useState(null) // prediction id being edited
   const [editLabelValue, setEditLabelValue] = useState('')
 
-  useEffect(() => { loadData(); loadDvcOperations() }, [])
+  useEffect(() => { loadData(); loadDvcOperations() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-load quality breakdown when leafOptions change from context
+  useEffect(() => {
+    if (leafOptions.length > 0) loadData()
+  }, [leafOptions]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (dtab === 'Storage Files') {
@@ -82,6 +83,7 @@ export default function DataManagementPage() {
   useEffect(() => {
     return () => {
       if (ghPollRef.current) clearInterval(ghPollRef.current)
+      if (dbPollRef.current) clearInterval(dbPollRef.current)
       if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current)
     }
   }, [])
@@ -91,30 +93,20 @@ export default function DataManagementPage() {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, leafRes] = await Promise.allSettled([
-        supabase.rpc('get_dashboard_stats', { p_leaf_type: null }),
-        supabase.rpc('get_leaf_type_options'),
-      ])
-      // Surface error if ALL critical queries failed
-      if (statsRes.status === 'rejected' && leafRes.status === 'rejected') {
-        throw statsRes.reason || new Error('Failed to load data')
-      }
-      const rpcStats = statsRes.status === 'fulfilled' ? statsRes.value?.data : null
-      const leafTypeOpts = leafRes.status === 'fulfilled' ? leafRes.value?.data : null
+      const { data: rpcStats, error: statsErr } = await supabase.rpc('get_dashboard_stats', { p_leaf_type: null })
+      if (statsErr) throw statsErr
       const s = rpcStats || {}
       setStats({ total: s.total || 0 })
-      const leafTypes = (leafTypeOpts || []).map(r => r.leaf_type).filter(Boolean)
-      setLeafOptions(leafTypes)
 
+      // Use leafOptions from context for quality breakdown
       const qualityResults = (await Promise.allSettled(
-        leafTypes.map(async lt => {
+        leafOptions.map(async lt => {
           const { data: ltStats } = await supabase.rpc('get_dashboard_stats', { p_leaf_type: lt })
           const ls = ltStats || {}
           return { name: lt, total: ls.total || 0 }
         })
       )).filter(r => r.status === 'fulfilled').map(r => r.value)
       setQuality(qualityResults)
-      fetchTrackedDatasets()
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
@@ -151,6 +143,9 @@ export default function DataManagementPage() {
         } else if (latest.status === 'staged') {
           setDvcOpStatus('staged')
           setDvcOpDismissed(false)
+        } else {
+          // Terminal state reached — update banner accordingly
+          setDvcOpStatus(latest.status)
         }
       }
     } catch (err) {
@@ -158,10 +153,19 @@ export default function DataManagementPage() {
     }
   }
 
+  // Helper to handle operation completion: refresh shared context data
+  const onOperationComplete = () => {
+    loadDvcOperations()
+    refreshDvcDatasets()
+    refreshLeafTypes()
+  }
+
   // ── Realtime subscription (mirrors subscribeToPipelineRun) ────────────────
   const subscribeToDvcOp = (opId) => {
     if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current)
-    startGitHubPolling()
+    startGitHubPolling(opId)
+    // Also start DB polling as a final fallback (in case both Realtime and GitHub fail)
+    startDbPolling(opId)
     const channel = supabase
       .channel(`dvc-op-${opId}`)
       .on('postgres_changes', {
@@ -176,24 +180,45 @@ export default function DataManagementPage() {
           supabase.removeChannel(channel)
           realtimeChannelRef.current = null
           if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-          fetchTrackedDatasets()
-          loadDvcOperations()
+          if (dbPollRef.current) { clearInterval(dbPollRef.current); dbPollRef.current = null }
+          onOperationComplete()
         }
       })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
+          console.warn('Realtime subscription failed — relying on polling fallback')
         }
       })
     realtimeChannelRef.current = channel
   }
 
+  // ── DB polling fallback (most reliable — polls dvc_operations table directly) ──
+  const dbPollRef = useRef(null)
+  const startDbPolling = (opId) => {
+    if (dbPollRef.current) clearInterval(dbPollRef.current)
+    dbPollRef.current = setInterval(async () => {
+      try {
+        const { data } = await supabase.from('dvc_operations').select('*').eq('id', opId).single()
+        if (!data) return
+        const newStatus = data.status
+        setDvcOpStatus(newStatus)
+        setDvcOps(prev => prev.map(o => o.id === opId ? { ...o, ...data } : o))
+        if (['completed', 'failed', 'staged'].includes(newStatus)) {
+          clearInterval(dbPollRef.current)
+          dbPollRef.current = null
+          if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
+          if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+          onOperationComplete()
+        }
+      } catch { /* ignore */ }
+    }, 10000)
+  }
+
   // ── GitHub polling fallback ───────────────────────────────────────────────
-  const startGitHubPolling = () => {
+  const startGitHubPolling = (trackingOpId) => {
     if (ghPollRef.current) clearInterval(ghPollRef.current)
     ghPollRef.current = setInterval(async () => {
       try {
-        // Poll multiple DVC-related workflows
         for (const wf of ['dataset-upload.yml', 'dvc-pull.yml', 'dvc-push.yml', 'export-data.yml']) {
           const data = await getGitHubWorkflowRuns(wf)
           if (!data?.workflow_runs?.length) continue
@@ -202,11 +227,9 @@ export default function DataManagementPage() {
           if (runAge > 30 * 60 * 1000) continue
 
           if (latest.status === 'completed') {
-            // Refresh from DB to get the actual status set by the workflow
-            loadDvcOperations()
             clearInterval(ghPollRef.current)
             ghPollRef.current = null
-            fetchTrackedDatasets()
+            // DB poll will handle the final state update
             return
           } else {
             const mapped = latest.status === 'queued' ? 'pending' : latest.status === 'in_progress' ? 'staging' : null
@@ -220,10 +243,16 @@ export default function DataManagementPage() {
     }, 15000)
   }
 
+  // Helper: clean up all active tracking (polling, realtime)
+  const cleanupTracking = () => {
+    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
+    if (dbPollRef.current) { clearInterval(dbPollRef.current); dbPollRef.current = null }
+    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+  }
+
   // ── Trigger staging (two-stage step 1) ────────────────────────────────────
   const triggerStaging = async (source, inputs) => {
-    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+    cleanupTracking()
     setDsUploading(true); setDsMsg(null)
     try {
       const { ghToken } = getGitHubConfig()
@@ -265,8 +294,7 @@ export default function DataManagementPage() {
 
   // ── Trigger DVC push (two-stage step 2) ───────────────────────────────────
   const triggerDvcPush = async (stagedOp) => {
-    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+    cleanupTracking()
     try {
       const { ghToken } = getGitHubConfig()
       if (!ghToken) throw new Error('GitHub not configured.')
@@ -301,8 +329,7 @@ export default function DataManagementPage() {
 
   // ── Trigger DVC pull/verify ───────────────────────────────────────────────
   const triggerDvcPull = async (leafType = '') => {
-    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+    cleanupTracking()
     setDvcRunning(true); setDvcLog([])
     const ts = () => new Date().toLocaleTimeString()
     try {
@@ -343,8 +370,7 @@ export default function DataManagementPage() {
 
   // ── Trigger DVC push all ──────────────────────────────────────────────────
   const triggerDvcPushAll = async () => {
-    if (ghPollRef.current) { clearInterval(ghPollRef.current); ghPollRef.current = null }
-    if (realtimeChannelRef.current) { supabase.removeChannel(realtimeChannelRef.current); realtimeChannelRef.current = null }
+    cleanupTracking()
     setDvcRunning(true); setDvcLog([])
     const ts = () => new Date().toLocaleTimeString()
     try {
@@ -421,104 +447,6 @@ export default function DataManagementPage() {
     } catch (err) {
       console.warn('Discard failed:', err.message)
     }
-  }
-
-  // ── Fetch DVC datasets from GitHub ────────────────────────────────────────
-  const fetchTrackedDatasets = async () => {
-    setDvcDatasetsLoading(true)
-    try {
-      // Primary: get latest completed pull/push/stage per leaf_type from dvc_operations
-      const { data: ops } = await supabase
-        .from('dvc_operations')
-        .select('leaf_type, metadata, completed_at')
-        .in('operation', ['pull', 'push', 'stage'])
-        .eq('status', 'completed')
-        .not('metadata', 'is', null)
-        .order('completed_at', { ascending: false })
-        .limit(50)
-
-      if (ops && ops.length > 0) {
-        const seen = new Set()
-        const datasets = []
-        for (const op of ops) {
-          const md = op.metadata
-          if (md?.datasets) {
-            for (const [dsName, dsInfo] of Object.entries(md.datasets)) {
-              if (seen.has(dsName)) continue
-              seen.add(dsName)
-              datasets.push({
-                name: dsName,
-                file: `data_${dsName}.dvc`,
-                size: dsInfo.total_size || null,
-                nfiles: dsInfo.file_count || null,
-                md5: dsInfo.dvc_md5 || null,
-                num_classes: dsInfo.num_classes || (dsInfo.classes ? Object.keys(dsInfo.classes).length : null),
-                classes: dsInfo.classes || null,
-                lastUpdated: op.completed_at,
-              })
-            }
-          } else if (md?.file_count != null && !seen.has(op.leaf_type)) {
-            seen.add(op.leaf_type)
-            datasets.push({
-              name: op.leaf_type,
-              file: `data_${op.leaf_type}.dvc`,
-              size: md.total_size || null,
-              nfiles: md.file_count || null,
-              md5: md.dvc_md5 || null,
-              num_classes: md.num_classes || (md.classes ? Object.keys(md.classes).length : null),
-              classes: md.classes || null,
-              lastUpdated: op.completed_at,
-            })
-          }
-        }
-        if (datasets.length > 0) {
-          setDvcDatasets(datasets)
-          setDvcDatasetsSource('db')
-          setDvcDatasetsLoading(false)
-          return
-        }
-      }
-
-      // Fallback: read .dvc files from GitHub repo
-      const { ghToken, ghOwner, ghRepo, ghBranch } = getGitHubConfig()
-      if (!ghToken || !ghOwner || !ghRepo) {
-        setDvcDatasetsSource(null)
-        setDvcDatasetsLoading(false)
-        return
-      }
-      // Validate slugs before URL construction (SSRF prevention)
-      validateGitHubSlugs(ghOwner, ghRepo)
-      const res = await fetch(
-        `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents?ref=${ghBranch}`,
-        { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }
-      )
-      if (!res.ok) throw new Error(`GitHub API ${res.status}`)
-      const files = await res.json()
-      const dvcFiles = files.filter(f => f.name.endsWith('.dvc') && f.name.startsWith('data_'))
-      const datasets = []
-      for (const df of dvcFiles) {
-        // Validate download_url is from GitHub raw content (SSRF prevention)
-        if (!df.download_url?.startsWith('https://raw.githubusercontent.com/')) continue
-        const contentRes = await fetch(df.download_url)
-        const content = await contentRes.text()
-        const leafType = df.name.replace('data_', '').replace('.dvc', '')
-        const sizeMatch = content.match(/size:\s*(\d+)/)
-        const nfilesMatch = content.match(/nfiles:\s*(\d+)/)
-        const md5Match = content.match(/md5:\s*(\S+)/)
-        datasets.push({
-          name: leafType, file: df.name,
-          size: sizeMatch ? parseInt(sizeMatch[1]) : null,
-          nfiles: nfilesMatch ? parseInt(nfilesMatch[1]) : null,
-          md5: md5Match ? md5Match[1] : null,
-          num_classes: null, classes: null, lastUpdated: null,
-        })
-      }
-      setDvcDatasets(datasets)
-      setDvcDatasetsSource('github')
-    } catch (err) {
-      console.warn('Failed to fetch tracked datasets:', err.message)
-    }
-    setDvcDatasetsLoading(false)
   }
 
   // ── Prediction Images browser ────────────────────────────────────────────
@@ -695,7 +623,7 @@ export default function DataManagementPage() {
           )}
           {isFailed && latest?.error_message && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{latest.error_message}</div>}
         </div>
-        {!isActive && onDismiss && (
+        {onDismiss && (
           <button onClick={onDismiss} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#94a3b8', padding: '0 4px' }}>×</button>
         )}
       </div>
@@ -733,7 +661,7 @@ export default function DataManagementPage() {
           <div className="stats-grid" style={{ marginBottom: 16 }}>
             {[
               { label: 'Total Predictions', value: stats.total.toLocaleString(), accent: '#16a34a' },
-              { label: 'DVC Datasets', value: dvcDatasetsLoading ? '…' : String(dvcDatasets.length), accent: '#0284c7' },
+              { label: 'DVC Datasets', value: sharedDvcLoading ? '…' : String(dvcDatasets.length), accent: '#0284c7' },
               { label: 'Operations', value: String(dvcOps.length), accent: '#8b5cf6' },
             ].map(s => (
               <div key={s.label} className="stat-card" style={{ padding: '14px 16px' }}>
@@ -759,8 +687,8 @@ export default function DataManagementPage() {
             <div className="card">
               <div className="card-header">
                 <div><div className="card-label">Training Data (DVC)</div><div className="card-title">Tracked Datasets</div></div>
-                <button className="btn btn-sm" onClick={fetchTrackedDatasets} disabled={dvcDatasetsLoading}>
-                  {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
+                <button className="btn btn-sm" onClick={refreshDvcDatasets} disabled={sharedDvcLoading}>
+                  {sharedDvcLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
                 </button>
               </div>
               {dvcDatasets.length > 0 ? (
@@ -779,7 +707,7 @@ export default function DataManagementPage() {
                     ))}
                   </tbody>
                 </table>
-              ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
+              ) : <div className="empty-state"><p>{sharedDvcLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
               {dvcDatasetsSource && <div style={{ fontSize: 11, color: '#94a3b8', padding: '6px 16px' }}>Source: {dvcDatasetsSource === 'db' ? 'DVC operations history' : 'GitHub .dvc files'}</div>}
             </div>
           </div>
@@ -1018,8 +946,8 @@ export default function DataManagementPage() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div><div className="card-label">DVC Remote</div><div className="card-title">Tracked Datasets</div></div>
-              <button className="btn btn-sm" onClick={fetchTrackedDatasets} disabled={dvcDatasetsLoading}>
-                {dvcDatasetsLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
+              <button className="btn btn-sm" onClick={refreshDvcDatasets} disabled={sharedDvcLoading}>
+                {sharedDvcLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading…</> : 'Refresh'}
               </button>
             </div>
             {dvcDatasets.length > 0 ? (
@@ -1055,7 +983,7 @@ export default function DataManagementPage() {
                   ))}
                 </tbody>
               </table>
-            ) : <div className="empty-state"><p>{dvcDatasetsLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
+            ) : <div className="empty-state"><p>{sharedDvcLoading ? 'Loading…' : 'No tracked datasets yet. Run a DVC Pull or Push to populate.'}</p></div>}
             {dvcDatasetsSource && <div style={{ fontSize: 11, color: '#94a3b8', padding: '6px 16px' }}>Source: {dvcDatasetsSource === 'db' ? 'DVC operations history' : 'GitHub .dvc files'}</div>}
           </div>
 

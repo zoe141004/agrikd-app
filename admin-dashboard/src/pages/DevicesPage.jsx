@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -26,13 +26,15 @@ export default function DevicesPage() {
   const [tokenLabel, setTokenLabel] = useState('')
   const [generatedToken, setGeneratedToken] = useState('')
 
+  const mountedRef = useRef(true)
+
   useEffect(() => {
-    const controller = new AbortController()
-    loadData(controller.signal)
-    return () => controller.abort()
+    mountedRef.current = true
+    loadData()
+    return () => { mountedRef.current = false }
   }, [])
 
-  const loadData = async (signal) => {
+  const loadData = async () => {
     setLoading(true)
     setError(null)
     try {
@@ -41,13 +43,15 @@ export default function DevicesPage() {
         supabase.from('provisioning_tokens').select('*').order('created_at', { ascending: false }).limit(50),
         supabase.from('profiles').select('id, email, role').eq('role', 'user').order('email').limit(200),
       ])
+      if (!mountedRef.current) return
       if (devRes.status === 'fulfilled' && devRes.value.data) setDevices(devRes.value.data)
+      else if (devRes.status === 'fulfilled' && devRes.value.error) setError(devRes.value.error.message)
       if (tokRes.status === 'fulfilled' && tokRes.value.data) setTokens(tokRes.value.data)
       if (usersRes.status === 'fulfilled' && usersRes.value.data) setUsers(usersRes.value.data)
     } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message)
+      if (mountedRef.current) setError(err.message)
     }
-    if (!signal?.aborted) setLoading(false)
+    if (mountedRef.current) setLoading(false)
   }
 
   // ── Fleet Tab ──────────────────────────────────────────────────

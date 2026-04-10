@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 
 export default function SystemHealthPage() {
   const [checks, setChecks] = useState({})
-  const [dbStats, setDbStats] = useState({ predictions: 0, models: 0, uptime: null })
+  const [dbStats, setDbStats] = useState({ predictions: 0, models: 0, dvcOps: 0, pipelineRuns: 0, uptime: null })
   const [latencyData, setLatencyData] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
@@ -34,9 +34,11 @@ export default function SystemHealthPage() {
       results.database = { ok: !error, label: error ? 'Error' : 'Connected', latency }
 
       const { count: models } = await supabase.from('model_registry').select('*', { count: 'exact', head: true })
+      const { count: dvcOps } = await supabase.from('dvc_operations').select('*', { count: 'exact', head: true })
+      const { count: pipelineRuns } = await supabase.from('pipeline_runs').select('*', { count: 'exact', head: true })
       const { data: earliest } = await supabase.from('predictions').select('created_at').order('created_at', { ascending: true }).limit(1)
       const uptime = earliest?.[0]?.created_at ? Math.floor((Date.now() - new Date(earliest[0].created_at).getTime()) / 86400000) : null
-      setDbStats({ predictions: count || 0, models: models || 0, uptime })
+      setDbStats({ predictions: count || 0, models: models || 0, dvcOps: dvcOps || 0, pipelineRuns: pipelineRuns || 0, uptime })
     } catch (e) {
       results.database = { ok: false, label: 'Unreachable', latency: null }
     }
@@ -47,10 +49,14 @@ export default function SystemHealthPage() {
       results.auth = { ok: !!session, label: session ? 'Active' : 'No session' }
     } catch { results.auth = { ok: false, label: 'Error' } }
 
-    // Storage check
+    // Storage check — probe known buckets individually (listBuckets needs service role key)
     try {
-      const { data, error } = await supabase.storage.listBuckets()
-      results.storage = { ok: !error, label: error ? 'Error' : `${(data || []).length} buckets` }
+      const knownBuckets = ['models', 'datasets', 'prediction-images']
+      const bucketResults = await Promise.allSettled(
+        knownBuckets.map(b => supabase.storage.from(b).list('', { limit: 1 }))
+      )
+      const activeBuckets = knownBuckets.filter((_, i) => bucketResults[i].status === 'fulfilled' && !bucketResults[i].value.error)
+      results.storage = { ok: activeBuckets.length > 0, label: `${activeBuckets.length}/${knownBuckets.length} buckets OK`, detail: activeBuckets }
     } catch { results.storage = { ok: false, label: 'Unavailable' } }
 
     // Real latency measurements (3 sequential pings)
@@ -129,12 +135,14 @@ export default function SystemHealthPage() {
         </div>
 
         <div className="card">
-          <div className="card-header"><div><div className="card-label">Database</div><div className="card-title">Storage Overview</div></div></div>
+          <div className="card-header"><div><div className="card-label">Database</div><div className="card-title">Data Overview</div></div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {[
-              { label: 'Predictions table', value: dbStats.predictions.toLocaleString(), icon: '📊' },
+              { label: 'Predictions', value: dbStats.predictions.toLocaleString(), icon: '📊' },
               { label: 'Model registry', value: dbStats.models.toLocaleString(), icon: '🧠' },
-              { label: 'Auth users', value: 'Via Supabase', icon: '🔐' },
+              { label: 'DVC operations', value: dbStats.dvcOps.toLocaleString(), icon: '📦' },
+              { label: 'Pipeline runs', value: dbStats.pipelineRuns.toLocaleString(), icon: '⚙️' },
+              { label: 'Storage buckets', value: checks.storage?.detail ? checks.storage.detail.join(', ') : '—', icon: '🗄️' },
             ].map(item => (
               <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: '#f8fafb', borderRadius: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#3d4f62' }}>

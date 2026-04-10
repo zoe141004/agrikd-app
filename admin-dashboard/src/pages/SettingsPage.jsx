@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import { maskUrl, triggerGitHubWorkflow, getGitHubConfig, validateGitHubSlugs, formatDateTime, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
 
 export default function SettingsPage() {
+  const { ghConnectionStatus, setGhConnectionStatus } = useData()
   const [stab, setStab] = useState('General')
   const [models, setModels] = useState([])
   const [envInfo, setEnvInfo] = useState({})
@@ -17,6 +19,7 @@ export default function SettingsPage() {
 
   // GitHub config (all fields stored in sessionStorage — cleared on tab close)
   const [ghForm, setGhForm] = useState({ ghOwner: '', ghRepo: '', ghToken: '', ghBranch: 'main' })
+  const [ghTestMsg, setGhTestMsg] = useState(null)
 
   // CI/CD trigger
   const [ciMsg, setCiMsg] = useState(null)
@@ -30,11 +33,27 @@ export default function SettingsPage() {
   const [ghTesting, setGhTesting] = useState(false)
 
   useEffect(() => {
-    supabase.from('model_registry').select('leaf_type, version, model_url, status').then(({ data }) => setModels(data || []))
-    setEnvInfo({
-      supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
-      env: import.meta.env.MODE || 'production',
-    })
+    const loadSystemInfo = async () => {
+      const [modelsRes, predsRes, dvcRes, usersRes] = await Promise.allSettled([
+        supabase.from('model_registry').select('leaf_type, version, model_url, status'),
+        supabase.from('predictions').select('*', { count: 'exact', head: true }),
+        supabase.from('dvc_operations').select('*', { count: 'exact', head: true }),
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
+      ])
+      setModels(modelsRes.status === 'fulfilled' ? modelsRes.value?.data || [] : [])
+      const predCount = predsRes.status === 'fulfilled' ? predsRes.value?.count || 0 : 0
+      const dvcCount = dvcRes.status === 'fulfilled' ? dvcRes.value?.count || 0 : 0
+      const userCount = usersRes.status === 'fulfilled' ? usersRes.value?.count || 0 : 0
+      setEnvInfo({
+        supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
+        env: import.meta.env.MODE || 'production',
+        predCount,
+        dvcCount,
+        userCount,
+        modelCount: modelsRes.status === 'fulfilled' ? (modelsRes.value?.data || []).length : 0,
+      })
+    }
+    loadSystemInfo()
     const cfg = getGitHubConfig()
     setGhForm({ ghOwner: cfg.ghOwner, ghRepo: cfg.ghRepo, ghToken: cfg.ghToken, ghBranch: cfg.ghBranch })
   }, [])
@@ -57,20 +76,25 @@ export default function SettingsPage() {
 
   const testGitHub = async () => {
     const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
-    if (!ghToken) { setCiMsg({ type: 'error', text: 'Save GitHub config first.' }); return }
-    setGhTesting(true)
+    if (!ghToken) { setGhTestMsg({ type: 'error', text: 'Save GitHub config first.' }); setGhConnectionStatus('error'); return }
+    setGhTesting(true); setGhTestMsg(null)
     try {
-      // Validate slugs before URL construction (SSRF prevention)
       validateGitHubSlugs(ghOwner, ghRepo)
       const ghController = new AbortController()
       const timeoutId = setTimeout(() => ghController.abort(), 10000)
       const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })
       clearTimeout(timeoutId)
       const data = await res.json()
-      if (res.ok) setCiMsg({ type: 'success', text: `✓ Connected to ${data.full_name} (${data.private ? 'private' : 'public'}). ${data.open_issues_count} open issues.` })
-      else setCiMsg({ type: 'error', text: `Error: ${data.message}` })
+      if (res.ok) {
+        setGhTestMsg({ type: 'success', text: `✓ Connected to ${data.full_name} (${data.private ? 'private' : 'public'}). ${data.open_issues_count} open issues.` })
+        setGhConnectionStatus('connected')
+      } else {
+        setGhTestMsg({ type: 'error', text: `Error: ${data.message}` })
+        setGhConnectionStatus('error')
+      }
     } catch (err) {
-      setCiMsg({ type: 'error', text: err.message })
+      setGhTestMsg({ type: 'error', text: err.name === 'AbortError' ? 'Connection timed out (10s).' : err.message })
+      setGhConnectionStatus('error')
     } finally {
       setGhTesting(false)
     }
@@ -153,13 +177,16 @@ export default function SettingsPage() {
           </div>
 
           <div className="card">
-            <div className="card-header"><div><div className="card-label">Runtime</div><div className="card-title">Environment</div></div></div>
+            <div className="card-header"><div><div className="card-label">Runtime</div><div className="card-title">Environment & Stats</div></div></div>
             {[
               ['Mode', envInfo.env],
               ['Supabase URL', maskUrl(envInfo.supabaseUrl)],
               ['Auth Provider', 'Supabase Auth (email/pw)'],
               ['File Storage', 'Supabase Storage (models, datasets)'],
-              ['Hosting', 'Vercel (Edge, 24/7)'],
+              ['Total Predictions', (envInfo.predCount ?? 0).toLocaleString()],
+              ['Registered Models', (envInfo.modelCount ?? 0).toLocaleString()],
+              ['DVC Operations', (envInfo.dvcCount ?? 0).toLocaleString()],
+              ['Registered Users', (envInfo.userCount ?? 0).toLocaleString()],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
                 <span style={{ color: '#64748b' }}>{k}</span>
@@ -197,7 +224,13 @@ export default function SettingsPage() {
               <div>
                 <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   GitHub
-                  {ghConfigured ? <span className="badge badge-green">Connected</span> : <span className="badge badge-red">Not configured</span>}
+                  {ghConnectionStatus === 'connected'
+                    ? <span className="badge badge-green">Connected</span>
+                    : ghConnectionStatus === 'error'
+                      ? <span className="badge badge-red">Connection Failed</span>
+                      : ghConfigured
+                        ? <span className="badge badge-yellow">Not Tested</span>
+                        : <span className="badge badge-red">Not configured</span>}
                 </div>
                 <div className="card-title">GitHub Actions Integration</div>
               </div>
@@ -227,6 +260,12 @@ export default function SettingsPage() {
               <button className="btn btn-primary" onClick={saveGitHub}>{ghSaved ? '✓ Saved' : 'Save Config'}</button>
               <button className="btn" onClick={testGitHub} disabled={ghTesting}>{ghTesting ? 'Testing…' : 'Test Connection'}</button>
             </div>
+            {ghTestMsg && (
+              <div className={`alert ${ghTestMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginTop: 12 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {ghTestMsg.text}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -440,6 +479,7 @@ export default function SettingsPage() {
     } catch (err) {
       if (err.name !== 'AbortError' && !signal?.aborted) {
         setAuditError(err.message || 'Failed to load audit logs')
+        setAuditHasMore(false)
       }
     }
     if (!signal?.aborted) setAuditLoading(false)

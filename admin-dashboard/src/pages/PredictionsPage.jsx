@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import { cleanLabel, downloadFile } from '../lib/helpers'
 import CustomTooltip from '../components/CustomTooltip'
 
 const PAGE_SIZE = 25
 
 export default function PredictionsPage() {
+  const { leafTypeOptions } = useData()
   const [predictions, setPredictions] = useState([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -150,8 +152,7 @@ export default function PredictionsPage() {
         <div className="filters">
           <select value={filters.leafType} onChange={e => setFilter('leafType', e.target.value)}>
             <option value="">All Leaf Types</option>
-            <option value="tomato">Tomato</option>
-            <option value="burmese_grape_leaf">Burmese Grape Leaf</option>
+            {leafTypeOptions.map(lt => <option key={lt} value={lt}>{cleanLabel(lt)}</option>)}
           </select>
           <input type="date" value={filters.startDate} onChange={e => setFilter('startDate', e.target.value)} />
           <input type="date" value={filters.endDate} onChange={e => setFilter('endDate', e.target.value)} />
@@ -202,7 +203,7 @@ export default function PredictionsPage() {
             <button className="btn btn-sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹ Prev</button>
             <span style={{ padding: '4px 10px', fontSize: 13, color: '#64748b' }}>Page {page + 1} of {totalPages || 1}</span>
             <button className="btn btn-sm" disabled={page + 1 >= totalPages} onClick={() => setPage(p => p + 1)}>Next ›</button>
-            <button className="btn btn-sm" disabled={page + 1 >= totalPages} onClick={() => setPage(totalPages - 1)}>»</button>
+            <button className="btn btn-sm" disabled={page + 1 >= totalPages} onClick={() => setPage(Math.max(0, totalPages - 1))}>»</button>
           </div>
         </div>
       </div>

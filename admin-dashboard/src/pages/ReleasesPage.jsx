@@ -17,10 +17,19 @@ export default function ReleasesPage() {
   const [versionTag, setVersionTag] = useState('')
   const [creating, setCreating] = useState(false)
 
-  const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
+  // Read config fresh each render so updates from Settings take effect
+  const ghConfig = getGitHubConfig()
+  const { ghToken, ghOwner, ghRepo } = ghConfig
   const configured = !!(ghToken && ghOwner && ghRepo)
 
-  useEffect(() => { if (configured) loadData(); else setLoading(false) }, [])
+  useEffect(() => { if (configured) loadData(); else setLoading(false) }, [configured])
+
+  // Auto-clear action messages after 6s
+  useEffect(() => {
+    if (!actionMsg) return
+    const timer = setTimeout(() => setActionMsg(null), 6000)
+    return () => clearTimeout(timer)
+  }, [actionMsg])
 
   const ghFetch = async (path) => {
     // Validate slugs before URL construction (SSRF prevention)

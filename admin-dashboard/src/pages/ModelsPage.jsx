@@ -1,5 +1,6 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -28,6 +29,7 @@ const KNOWN_DATASETS = {
 }
 
 export default function ModelsPage() {
+  const { leafTypeOptions: sharedLeafTypes, refreshLeafTypes, triggerRefresh } = useData()
   const [tab, setTab] = useState('Registry')
   const [models, setModels] = useState([])
   const [loading, setLoading] = useState(true)
@@ -74,9 +76,6 @@ export default function ModelsPage() {
   const realtimeChannelRef = useRef(null)
   const ghPollRef = useRef(null)
 
-  // Leaf type options (from predictions RPC + model_registry)
-  const [leafTypeOptions, setLeafTypeOptions] = useState([])
-
   // Cleanup realtime + polling on unmount
   useEffect(() => () => {
     if (realtimeChannelRef.current) {
@@ -94,24 +93,19 @@ export default function ModelsPage() {
   const loadModels = async () => {
     setLoading(true)
     try {
-      const [registryRes, benchRes, verRes, rpcRes] = await Promise.allSettled([
+      const [registryRes, benchRes, verRes] = await Promise.allSettled([
         supabase.from('model_registry').select('*').order('leaf_type', { ascending: true }).order('updated_at', { ascending: false }).limit(100),
         supabase.from('model_benchmarks').select('*').order('created_at', { ascending: false }).limit(100),
         supabase.from('model_versions').select('*').order('archived_at', { ascending: false }).limit(100),
-        supabase.rpc('get_leaf_type_options'),
       ])
       const data = registryRes.status === 'fulfilled' ? registryRes.value?.data : null
       const benchData = benchRes.status === 'fulfilled' ? benchRes.value?.data : null
       const verData = verRes.status === 'fulfilled' ? verRes.value?.data : null
-      const rpcLeafTypes = rpcRes.status === 'fulfilled' ? rpcRes.value?.data : null
       if (registryRes.status === 'fulfilled' && registryRes.value?.error) throw new Error(registryRes.value.error.message)
       setModels(data || [])
       setBenchmarks(benchData || [])
       setVersions(verData || [])
-      // Merge leaf types from predictions RPC + model_registry
-      const registryLeafTypes = [...new Set((data || []).map(m => m.leaf_type))]
-      const rpcLeafs = (rpcLeafTypes || []).map(r => r.leaf_type)
-      setLeafTypeOptions([...new Set([...rpcLeafs, ...registryLeafTypes])].sort())
+      // Leaf types now come from shared DataContext (includes predictions + registry + dvc_operations)
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
@@ -528,6 +522,7 @@ export default function ModelsPage() {
       setUploadFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadModels()
+      refreshLeafTypes()
     } catch (err) {
       setUploadMsg({ type: 'error', text: err.message })
     } finally {
@@ -630,6 +625,10 @@ export default function ModelsPage() {
   }
 
   const pipelineRunning = ['pending', 'converting', 'evaluating', 'uploading'].includes(pipelineStatus)
+
+  // Merged leaf type options: shared context + registry-local types
+  const registryLeafTypes = [...new Set(models.map(m => m.leaf_type))].filter(Boolean)
+  const leafTypeOptions = [...new Set([...sharedLeafTypes, ...registryLeafTypes])].sort()
 
   // Registry / OTA — derived filter values
   const regLeafTypes = [...new Set(models.map(m => m.leaf_type))].sort()
