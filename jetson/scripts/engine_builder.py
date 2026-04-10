@@ -42,7 +42,7 @@ def get_hardware_tag():
         if result.returncode == 0:
             cap = result.stdout.strip().split("\n")[0].replace(".", "")
             return f"sm{cap}"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired):  # nvidia-smi not found
         pass
 
     # Fallback: check /proc/device-tree for Jetson model
@@ -57,7 +57,7 @@ def get_hardware_tag():
             return "sm53"
         elif "tx2" in model:
             return "sm62"
-    except FileNotFoundError:
+    except FileNotFoundError:  # /proc/device-tree/model not found
         pass
 
     log.warning("Could not detect GPU architecture, using 'unknown'")

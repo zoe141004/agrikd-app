@@ -257,11 +257,9 @@ class ModelEvaluator:
             f, p = self.flops_macs
             flops_m = f"{f / 1e6:.1f}"
             params_m = f"{p / 1e6:.2f}"
-            params_total = f"{int(p):,}"
         else:
             flops_m = "-"
             params_m = "-"
-            params_total = "-"
 
         logger.info(f"  Size:    {size_mb:.2f} MB")
         logger.info(f"  Params:  {params_m} M | FLOPs: {flops_m} M")

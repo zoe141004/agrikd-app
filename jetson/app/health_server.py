@@ -3,6 +3,7 @@
 import functools
 import hmac
 import logging
+import os
 import secrets
 import time
 from collections import defaultdict
@@ -36,12 +37,13 @@ _prediction_count = 0
 def _check_api_key():
     """Require X-API-Key header on all endpoints except /health."""
     if request.endpoint == "health":
-        return  # Health check is unauthenticated
+        return None  # Health check is unauthenticated
     # Fix 1.5: Always require key (no more empty-string bypass).
     # Timing-safe comparison via hmac.compare_digest.
     provided = request.headers.get("X-API-Key", "")
     if not hmac.compare_digest(provided, _api_key):
         return jsonify({"error": "Unauthorized"}), 401
+    return None
 
 
 # ── Simple in-memory rate limiter (no external deps) ──
@@ -239,10 +241,20 @@ def start_health_server(host, port, db, pool, api_key="", device_id=None):
         _api_key = api_key
     else:
         _api_key = secrets.token_hex(16)
+        masked = _api_key[:4] + "***" + _api_key[-4:]
         logger.warning(
-            "No API key in config — generated ephemeral key: %s", _api_key,
+            "No API key in config — generated ephemeral key: %s", masked,
         )
-        print(f"\n*** Health Server API Key (ephemeral): {_api_key} ***\n")
+        # Write full key to a local file (not logged) so operator can retrieve it.
+        _key_path = os.path.join(os.path.dirname(__file__), "..", "data", "ephemeral_api_key")
+        try:
+            os.makedirs(os.path.dirname(_key_path), exist_ok=True)
+            with open(_key_path, "w") as _kf:
+                _kf.write(_api_key)
+            os.chmod(_key_path, 0o600)
+        except OSError:
+            pass
+        print(f"\n*** Ephemeral API key written to data/ephemeral_api_key ({masked}) ***\n")
 
     from waitress import serve
 

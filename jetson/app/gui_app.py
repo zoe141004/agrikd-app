@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
                         try:
                             import fcntl
                             fcntl.flock(f, fcntl.LOCK_UN)
-                        except ImportError:
+                        except ImportError:  # fcntl unavailable on Windows
                             pass
 
                     if state.get("user_id"):

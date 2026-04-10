@@ -44,7 +44,7 @@ def _notify_watchdog():
             addr = "\0" + addr[1:]
         sock.sendto(b"WATCHDOG=1", addr)
         sock.close()
-    except OSError:
+    except OSError:  # systemd watchdog socket unavailable
         pass
 
 

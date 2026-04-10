@@ -149,17 +149,14 @@ class TensorRTInference:
             if buf is not None:
                 try:
                     buf.free()
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001 — best-effort CUDA cleanup
+                    logger.debug("Failed to free CUDA buffer %s", attr)
                 setattr(self, attr, None)
 
         for attr in ("stream", "context", "engine"):
             obj = getattr(self, attr, None)
             if obj is not None:
-                try:
-                    del obj
-                except Exception:
-                    pass
+                del obj
                 setattr(self, attr, None)
 
         self.h_input = None
@@ -205,7 +202,7 @@ class InferenceWorkerPool:
         self._engines = {}          # Populated by worker thread
         self._queue = queue.Queue()
         self._ready = threading.Event()
-        self._error = None          # Propagate init errors to main thread
+        self._error: BaseException | None = None  # Propagate init errors to main thread
         self._leaf_types = []       # Available engines after init
 
         self._thread = threading.Thread(
@@ -216,7 +213,7 @@ class InferenceWorkerPool:
         # Block until engines are loaded (or worker reports an error)
         self._ready.wait()
         if self._error is not None:
-            raise self._error
+            raise RuntimeError(f"Engine init failed: {self._error}") from self._error
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -292,7 +289,7 @@ class InferenceWorkerPool:
                         import torch
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
-                    except ImportError:
+                    except ImportError:  # torch not installed on this device
                         pass
                     if consecutive_errors >= 10:
                         logger.critical(

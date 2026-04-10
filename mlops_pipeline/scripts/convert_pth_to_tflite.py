@@ -18,8 +18,6 @@ import os
 import time
 
 import torch
-import torchvision
-import numpy as np
 import logging
 
 # Suppress annoying TF/Torch logs

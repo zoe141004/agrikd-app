@@ -80,7 +80,7 @@ def _get_serial():
         disk_uuid = result.stdout.strip()
         if disk_uuid:
             return disk_uuid
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):  # blkid unavailable
         pass
 
     # 4. Fatal: cannot generate unique hw_id
@@ -232,8 +232,10 @@ def provision(token_data, force=False):
     # 2. Detect hardware
     print("[2/6] Detecting hardware...")
     hw_id, hostname, hw_info = get_hardware_info()
+    # Mask hardware fingerprint in output (CodeQL: private data)
+    hw_id_masked = hw_id[:8] + "..." + hw_id[-4:]
     print(f"  Hostname: {hostname}")
-    print(f"  HW ID:    {hw_id}")
+    print(f"  HW ID:    {hw_id_masked}")
     print(f"  Platform: {hw_info['platform']}")
 
     # 3. Check existing device
@@ -381,7 +383,7 @@ def provision(token_data, force=False):
 
     print()
     print("=" * 40)
-    print(f"Provisioned as '{hostname}' (hw_id: {hw_id[:12]}...)")
+    print(f"Provisioned as '{hostname}' (hw_id: {hw_id_masked})")
     print(f"Device ID: {device_id}")
     print()
     print("Next steps:")

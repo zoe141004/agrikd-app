@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
-import CustomTooltip from '../components/CustomTooltip'
 
 export default function SystemHealthPage() {
   const [checks, setChecks] = useState({})

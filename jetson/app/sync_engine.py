@@ -139,7 +139,7 @@ class SyncEngine:
             if tmp_path:
                 try:
                     os.unlink(tmp_path)
-                except OSError:
+                except OSError:  # temp file already gone
                     pass
 
     def get_device_state(self):
