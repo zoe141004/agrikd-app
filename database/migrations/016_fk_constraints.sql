@@ -7,16 +7,21 @@
 -- ============================================================================
 
 -- Step 0: Ensure model_registry.leaf_type has a UNIQUE constraint
--- (001_tables.sql defines it as UNIQUE, but guard in case of schema drift)
+-- Uses pg_constraint (more reliable than information_schema for this check)
 DO $$ BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints tc
-        JOIN information_schema.constraint_column_usage ccu
-          ON tc.constraint_name = ccu.constraint_name
-        WHERE tc.table_schema = 'public'
-          AND tc.table_name = 'model_registry'
-          AND tc.constraint_type = 'UNIQUE'
-          AND ccu.column_name = 'leaf_type'
+        SELECT 1 FROM pg_constraint c
+        JOIN pg_class r ON c.conrelid = r.oid
+        JOIN pg_namespace n ON r.relnamespace = n.oid
+        WHERE n.nspname = 'public'
+          AND r.relname = 'model_registry'
+          AND c.contype IN ('u', 'p')
+          AND EXISTS (
+              SELECT 1 FROM pg_attribute a
+              WHERE a.attrelid = r.oid
+                AND a.attnum = ANY(c.conkey)
+                AND a.attname = 'leaf_type'
+          )
     ) THEN
         ALTER TABLE public.model_registry
             ADD CONSTRAINT model_registry_leaf_type_key UNIQUE (leaf_type);
