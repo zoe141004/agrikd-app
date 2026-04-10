@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
 import CustomTooltip from '../components/CustomTooltip'
@@ -9,8 +9,13 @@ export default function SystemHealthPage() {
   const [latencyData, setLatencyData] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
+  const mountedRef = useRef(true)
 
-  useEffect(() => { runHealthChecks() }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    runHealthChecks()
+    return () => { mountedRef.current = false }
+  }, [])
 
   // Auto-refresh every 120 seconds
   useEffect(() => {
@@ -57,6 +62,7 @@ export default function SystemHealthPage() {
       latencyResults.push({ time: `#${i + 1}`, ms: Date.now() - t1 })
     }
     setLatencyData(latencyResults)
+    if (!mountedRef.current) return
     setChecks(results)
     setLastChecked(new Date())
     setLoading(false)

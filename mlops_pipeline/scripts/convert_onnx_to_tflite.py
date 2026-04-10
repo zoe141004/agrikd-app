@@ -111,7 +111,7 @@ def convert_onnx_to_tflite(input_path, output_path):
             interp.allocate_tensors()
             print(f"    [OK] {variant} validated ({fsize / (1024*1024):.2f} MB, loadable)")
         except ImportError:
-            print(f"    [OK] {variant} size check passed ({fsize / (1024*1024):.2f} MB, skipped load test)")
+            print(f"    [WARN] {variant} size OK ({fsize / (1024*1024):.2f} MB) but load test skipped — ai_edge_litert not installed")
         except Exception as e:
             raise RuntimeError(f"TFLite {variant} failed load test: {e}")
 

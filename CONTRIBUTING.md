@@ -47,6 +47,7 @@ python3 -m venv venv_mlops                                  # MLOps venv
 source venv_mlops/bin/activate                              # Win: venv_mlops\Scripts\activate
 pip install -r mlops_pipeline/requirements-convert.txt
 pip install -r mlops_pipeline/requirements-evaluate.txt
+pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu
 cd admin-dashboard && npm install && cd ..                   # Admin dashboard
 cp .env.development .env && python3 sync_env.py             # Env vars
 ```
@@ -147,7 +148,7 @@ agrikd-app/
 │   │   └── config.example.json  # Template (commit this)
 │   └── requirements.txt         # Jetson Python dependencies
 ├── database/
-│   ├── migrations/              # 13 SQL migration files (001-013)
+│   ├── migrations/              # 15 SQL migration files (001-015)
 │   └── verify_rls_policies.sql  # RLS verification queries
 ├── dvc/                         # DVC tracking files
 │   ├── data_tomato.dvc

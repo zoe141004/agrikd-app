@@ -334,7 +334,10 @@ class ModelEvaluator:
             if len(expected_shape) == 4 and expected_shape[-1] != inp.shape[-1]:
                 inp = np.transpose(inp, (0, 2, 3, 1))
             if list(inp.shape) != list(expected_shape):
-                inp = np.resize(inp, expected_shape)
+                raise ValueError(
+                    f"TFLite input shape mismatch after transpose: "
+                    f"got {list(inp.shape)}, expected {list(expected_shape)}"
+                )
             interp.set_tensor(in_det['index'], inp)
             interp.invoke()
             logits = interp.get_tensor(out_det['index'])

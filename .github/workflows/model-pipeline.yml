@@ -28,6 +28,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: model-build-${{ inputs.leaf_type }}
+  cancel-in-progress: false
+
 jobs:
   pipeline:
     runs-on: ubuntu-latest

@@ -57,13 +57,13 @@ def run_tflite_inference(tflite_path: str, input_data: np.ndarray) -> np.ndarray
     tflite_input_shape = input_details[0]['shape']
     
     # If TFLite expects NHWC (batch, H, W, C) but our input is NCHW (batch, C, H, W)
-    if len(tflite_input_shape) == 4 and tflite_input_shape[-1] == 3:
+    if len(tflite_input_shape) == 4 and tflite_input_shape[-1] != input_data.shape[-1]:
         # Convert NCHW -> NHWC
         tflite_input = np.transpose(input_data, (0, 2, 3, 1))
     else:
         tflite_input = input_data
     
-    # Resize input tensor if needed
+    # Resize input tensor if needed (batch dimension may differ)
     if not np.array_equal(tflite_input.shape, tflite_input_shape):
         interpreter.resize_tensor_input(input_details[0]['index'], list(tflite_input.shape))
         interpreter.allocate_tensors()

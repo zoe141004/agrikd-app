@@ -53,6 +53,8 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 11 | `database/migrations/011_dvc_operations.sql` | DVC operations tracking table (stage/push/pull/export with status lifecycle) |
 | 12 | `database/migrations/012_devices.sql` | Device management: provisioning_tokens, devices table with Device Shadow, RLS, config_version trigger, device_id on predictions |
 | 13 | `database/migrations/013_model_engines.sql` | ONNX URL columns on model_registry + model_engines table for hardware-specific TensorRT engines |
+| 14 | `database/migrations/014_audit_fixes.sql` | Admin-only guards on dashboard RPCs, profiles UPDATE policy for users, model_reports SELECT policy, audit_log user_id index |
+| 15 | `database/migrations/015_audit_log_cleanup.sql` | Migrates legacy audit_log schema (BIGINT id, actor_email) to correct UUID-based schema, preserves existing data |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning
@@ -81,9 +83,12 @@ Expected output: All checks should show `[PASS]`. The script verifies:
 - Storage buckets exist (models, datasets, prediction-images)
 - All indexes exist
 
-> **Note:** The verification script does not yet cover `provisioning_tokens` and
-> `devices` tables from migration 012. Verify their RLS manually:
-> `SELECT tablename, policyname FROM pg_policies WHERE tablename IN ('provisioning_tokens', 'devices');`
+> **Note:** The verification script does not yet cover `provisioning_tokens`,
+> `devices`, and `model_engines` tables from migrations 012–013. Verify their RLS manually:
+> ```sql
+> SELECT tablename, policyname FROM pg_policies
+> WHERE tablename IN ('provisioning_tokens', 'devices', 'model_engines');
+> ```
 
 **Migration 011** auto-enables Realtime for `dvc_operations`. If it fails
 due to insufficient privileges, run manually in the SQL Editor:
