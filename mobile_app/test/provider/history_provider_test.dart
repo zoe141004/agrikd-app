@@ -149,7 +149,7 @@ void main() {
       dao = PredictionDao();
     });
 
-    Future<void> _seedPredictions(int count) async {
+    Future<void> seedPredictions(int count) async {
       for (var i = 0; i < count; i++) {
         await dao.insert({
           'image_path': '/test/photo_$i.jpg',
@@ -165,7 +165,7 @@ void main() {
     }
 
     test('loadInitial loads first page of data', () async {
-      await _seedPredictions(25);
+      await seedPredictions(25);
 
       final container = ProviderContainer();
       addTearDown(container.dispose);
@@ -179,7 +179,7 @@ void main() {
     });
 
     test('loadMore appends next page', () async {
-      await _seedPredictions(50);
+      await seedPredictions(50);
 
       final container = ProviderContainer();
       addTearDown(container.dispose);
@@ -192,7 +192,7 @@ void main() {
     });
 
     test('deletePrediction removes from state', () async {
-      await _seedPredictions(5);
+      await seedPredictions(5);
 
       final container = ProviderContainer();
       addTearDown(container.dispose);

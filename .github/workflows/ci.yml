@@ -37,7 +37,7 @@ jobs:
         working-directory: mlops_pipeline
         run: |
           pip install pip-audit --quiet
-          pip-audit -r requirements.txt --desc
+          pip-audit -r requirements-convert.txt --desc
 
   # ── Stage 1: Lint & Static Analysis ──
   lint:

@@ -19,7 +19,7 @@ void main() {
   });
 
   /// Helper to insert a prediction with sensible defaults.
-  Future<int> _insert({
+  Future<int> insert({
     String leafType = 'tomato',
     String className = 'Tomato___Bacterial_spot',
     double confidence = 0.85,
@@ -42,8 +42,8 @@ void main() {
 
   group('getAll filter combinations', () {
     test('searchQuery matches predicted_class_name', () async {
-      await _insert(className: 'Tomato___Late_blight');
-      await _insert(className: 'Tomato___Bacterial_spot');
+      await insert(className: 'Tomato___Late_blight');
+      await insert(className: 'Tomato___Bacterial_spot');
 
       final results = await dao.getAll(searchQuery: 'Late_blight');
       expect(results, hasLength(1));
@@ -51,8 +51,8 @@ void main() {
     });
 
     test('searchQuery matches notes field', () async {
-      await _insert(notes: 'Found in greenhouse');
-      await _insert(notes: 'Outdoor sample');
+      await insert(notes: 'Found in greenhouse');
+      await insert(notes: 'Outdoor sample');
 
       final results = await dao.getAll(searchQuery: 'greenhouse');
       expect(results, hasLength(1));
@@ -60,9 +60,9 @@ void main() {
     });
 
     test('date range filter', () async {
-      await _insert(createdAt: '2026-01-10T12:00:00.000Z');
-      await _insert(createdAt: '2026-02-15T12:00:00.000Z');
-      await _insert(createdAt: '2026-03-20T12:00:00.000Z');
+      await insert(createdAt: '2026-01-10T12:00:00.000Z');
+      await insert(createdAt: '2026-02-15T12:00:00.000Z');
+      await insert(createdAt: '2026-03-20T12:00:00.000Z');
 
       final results = await dao.getAll(
         startDate: '2026-02-01T00:00:00.000Z',
@@ -72,9 +72,9 @@ void main() {
     });
 
     test('combined leafType + minConfidence', () async {
-      await _insert(leafType: 'tomato', confidence: 0.95);
-      await _insert(leafType: 'tomato', confidence: 0.50);
-      await _insert(leafType: 'burmese_grape_leaf', confidence: 0.99);
+      await insert(leafType: 'tomato', confidence: 0.95);
+      await insert(leafType: 'tomato', confidence: 0.50);
+      await insert(leafType: 'burmese_grape_leaf', confidence: 0.99);
 
       final results = await dao.getAll(leafType: 'tomato', minConfidence: 0.80);
       expect(results, hasLength(1));
@@ -82,17 +82,17 @@ void main() {
     });
 
     test('combined leafType + searchQuery + minConfidence', () async {
-      await _insert(
+      await insert(
         leafType: 'tomato',
         className: 'Tomato___Late_blight',
         confidence: 0.92,
       );
-      await _insert(
+      await insert(
         leafType: 'tomato',
         className: 'Tomato___Late_blight',
         confidence: 0.40,
       );
-      await _insert(
+      await insert(
         leafType: 'burmese_grape_leaf',
         className: 'Healthy',
         confidence: 0.95,
@@ -108,9 +108,9 @@ void main() {
     });
 
     test('orderBy confidence DESC', () async {
-      await _insert(confidence: 0.50);
-      await _insert(confidence: 0.99);
-      await _insert(confidence: 0.75);
+      await insert(confidence: 0.50);
+      await insert(confidence: 0.99);
+      await insert(confidence: 0.75);
 
       final results = await dao.getAll(orderBy: 'confidence DESC');
       final confidences = results
@@ -121,9 +121,7 @@ void main() {
 
     test('limit and offset pagination', () async {
       for (var i = 0; i < 10; i++) {
-        await _insert(
-          createdAt: DateTime.utc(2026, 1, i + 1).toIso8601String(),
-        );
+        await insert(createdAt: DateTime.utc(2026, 1, i + 1).toIso8601String());
       }
 
       final page1 = await dao.getAll(
@@ -148,8 +146,8 @@ void main() {
 
   group('getUnsynced', () {
     test('returns only unsynced predictions', () async {
-      final syncedId = await _insert(isSynced: 1);
-      final unsyncedId = await _insert(isSynced: 0);
+      final syncedId = await insert(isSynced: 1);
+      final unsyncedId = await insert(isSynced: 0);
 
       final unsynced = await dao.getUnsynced();
       final ids = unsynced.map((r) => r['id']).toList();
@@ -160,9 +158,9 @@ void main() {
 
   group('getStatistics', () {
     test('returns correct counts by leaf type', () async {
-      await _insert(leafType: 'tomato', isSynced: 1);
-      await _insert(leafType: 'tomato', isSynced: 0);
-      await _insert(leafType: 'burmese_grape_leaf', isSynced: 1);
+      await insert(leafType: 'tomato', isSynced: 1);
+      await insert(leafType: 'tomato', isSynced: 0);
+      await insert(leafType: 'burmese_grape_leaf', isSynced: 1);
 
       final tomatoStats = await dao.getStatistics(leafType: 'tomato');
       expect(tomatoStats['total'], 2);
@@ -173,9 +171,9 @@ void main() {
 
   group('getDetailedStatistics', () {
     test('returns by_leaf_type and top_diseases aggregates', () async {
-      await _insert(leafType: 'tomato', className: 'Tomato___Late_blight');
-      await _insert(leafType: 'tomato', className: 'Tomato___Late_blight');
-      await _insert(leafType: 'burmese_grape_leaf', className: 'Healthy');
+      await insert(leafType: 'tomato', className: 'Tomato___Late_blight');
+      await insert(leafType: 'tomato', className: 'Tomato___Late_blight');
+      await insert(leafType: 'burmese_grape_leaf', className: 'Healthy');
 
       final stats = await dao.getDetailedStatistics();
       expect(stats['total'], 3);
