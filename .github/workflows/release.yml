@@ -77,4 +77,4 @@ jobs:
         with:
           name: release-debug-symbols
           path: mobile_app/build/debug-info/
-          retention-days: 90
+          retention-days: 30

@@ -204,10 +204,14 @@ def main():
                         )
                 except Exception as e:
                     logger.error("Capture/inference error: %s", e)
-                time.sleep(interval)
+                shutdown_event.wait(timeout=interval)
+                if shutdown_event.is_set():
+                    break
             else:
                 # Manual mode — predictions triggered via REST API /predict
-                time.sleep(5)
+                shutdown_event.wait(timeout=5)
+                if shutdown_event.is_set():
+                    break
     finally:
         logger.info("AgriKD Jetson Edge Inference - Shutting down")
         # Signal sync engine to drain, then wait briefly

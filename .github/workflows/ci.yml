@@ -144,7 +144,7 @@ jobs:
         with:
           name: debug-symbols
           path: mobile_app/build/debug-info/
-          retention-days: 90
+          retention-days: 14
 
   # ── Stage 4: Dashboard Tests ──
   dashboard-test:
