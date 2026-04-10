@@ -35,6 +35,13 @@ jobs:
           pip install -r mlops_pipeline/requirements-evaluate.txt
           pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
+      - name: Setup GCS credentials
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_DATA" > /tmp/gcs-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-sa.json" >> $GITHUB_ENV
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
+
       - name: Pull training data via DVC
         run: |
           for attempt in 1 2 3; do
@@ -49,14 +56,10 @@ jobs:
             fi
             sleep 10
           done
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
-
-      - name: Cleanup DVC credentials
+      - name: Cleanup GCS credentials
         if: always()
         run: |
-          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
-          unset GOOGLE_APPLICATION_CREDENTIALS_DATA 2>/dev/null || true
+          rm -f /tmp/gcs-sa.json ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
 
       - name: Run training pipeline
         run: |

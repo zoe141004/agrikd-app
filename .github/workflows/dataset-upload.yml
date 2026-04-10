@@ -55,6 +55,13 @@ jobs:
       - name: Install dependencies
         run: pip install dvc dvc-gs gdown kaggle
 
+      - name: Setup GCS credentials
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_DATA" > /tmp/gcs-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-sa.json" >> $GITHUB_ENV
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
+
       # ── Report status: staging ──────────────────────────────────────────
       - name: Report status — staging
         if: inputs.dvc_operation_id != ''
@@ -269,14 +276,12 @@ jobs:
             sleep 10
           done
         env:
-          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
-      - name: Cleanup DVC credentials
+      - name: Cleanup GCS credentials
         if: always()
         run: |
-          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
-          unset GOOGLE_APPLICATION_CREDENTIALS_DATA 2>/dev/null || true
+          rm -f /tmp/gcs-sa.json ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
 
       - name: Commit DVC tracking files
         run: |

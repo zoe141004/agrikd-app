@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: pip install dvc dvc-gs requests
 
+      - name: Setup GCS credentials
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_DATA" > /tmp/gcs-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-sa.json" >> $GITHUB_ENV
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
+
       - name: Report status — exporting
         if: inputs.dvc_operation_id != ''
         continue-on-error: true
@@ -74,14 +81,10 @@ jobs:
         run: |
           dvc add data/exports/predictions_snapshot.json
           dvc push
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
-
-      - name: Cleanup DVC credentials
+      - name: Cleanup GCS credentials
         if: always()
         run: |
-          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
-          unset GOOGLE_APPLICATION_CREDENTIALS_DATA 2>/dev/null || true
+          rm -f /tmp/gcs-sa.json ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
 
       - name: Commit DVC tracking file
         run: |
