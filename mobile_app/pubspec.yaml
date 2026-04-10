@@ -52,7 +52,7 @@ dependencies:
   flutter_dotenv: ^5.2.1
 
   # Error Tracking
-  sentry_flutter: ^9.0.0
+  sentry_flutter: ^9.16.1
 
 dev_dependencies:
   flutter_test:
