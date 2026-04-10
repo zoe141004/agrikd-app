@@ -154,7 +154,7 @@ export default function DataManagementPage() {
         }
       }
     } catch (err) {
-      import.meta.env.DEV && console.warn('dvc_operations load failed:', err.message)
+      console.warn('dvc_operations load failed:', err.message)
     }
   }
 
@@ -182,7 +182,7 @@ export default function DataManagementPage() {
       })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          import.meta.env.DEV && console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
+          console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
         }
       })
     realtimeChannelRef.current = channel
@@ -419,7 +419,7 @@ export default function DataManagementPage() {
       }).eq('id', op.id)
       loadDvcOperations()
     } catch (err) {
-      import.meta.env.DEV && console.warn('Discard failed:', err.message)
+      console.warn('Discard failed:', err.message)
     }
   }
 
@@ -516,7 +516,7 @@ export default function DataManagementPage() {
       setDvcDatasets(datasets)
       setDvcDatasetsSource('github')
     } catch (err) {
-      import.meta.env.DEV && console.warn('Failed to fetch tracked datasets:', err.message)
+      console.warn('Failed to fetch tracked datasets:', err.message)
     }
     setDvcDatasetsLoading(false)
   }

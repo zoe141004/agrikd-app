@@ -114,7 +114,7 @@ export async function ensureBucket(supabase, bucket) {
   const { error } = await supabase.storage.createBucket(bucket, { public: true })
   // Ignore "already exists" error
   if (error && !(typeof error?.message === 'string' && error.message.includes('already'))) {
-    import.meta.env.DEV && console.warn('Bucket:', error?.message ?? error)
+    console.warn('Bucket:', error?.message ?? error)
   }
 }
 
@@ -160,6 +160,6 @@ export async function logAudit(supabase, action, entityType, entityId, details =
       details,
     })
   } catch (err) {
-    import.meta.env.DEV && console.warn('Audit log failed:', err.message)
+    console.warn('Audit log failed:', err.message)
   }
 }

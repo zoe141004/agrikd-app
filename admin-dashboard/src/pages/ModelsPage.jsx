@@ -152,7 +152,7 @@ export default function ModelsPage() {
         }
       }
     } catch (err) {
-      import.meta.env.DEV && console.warn('pipeline_runs load failed:', err.message)
+      console.warn('pipeline_runs load failed:', err.message)
     }
   }
 
@@ -237,7 +237,7 @@ export default function ModelsPage() {
       })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          import.meta.env.DEV && console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
+          console.warn('Realtime subscription failed — relying on GitHub API polling fallback')
         }
       })
     realtimeChannelRef.current = channel
@@ -498,12 +498,12 @@ export default function ModelsPage() {
               leaf_type, version, status: 'pending', triggered_by: user?.id
             }).select().single()
             if (runErr) {
-              import.meta.env.DEV && console.warn('pipeline_runs insert failed:', runErr.message)
+              console.warn('pipeline_runs insert failed:', runErr.message)
               pipelineMsg += ' (Pipeline tracking limited — pipeline_runs table may need setup)'
             }
             runId = run?.id
           } catch (prErr) {
-            import.meta.env.DEV && console.warn('pipeline_runs insert error:', prErr.message)
+            console.warn('pipeline_runs insert error:', prErr.message)
           }
 
           await triggerGitHubWorkflow('model-pipeline.yml', {
@@ -563,10 +563,10 @@ export default function ModelsPage() {
         const { data: run, error: runErr } = await supabase.from('pipeline_runs').insert({
           leaf_type: valTarget, version: targetModel.version, status: 'pending', triggered_by: user?.id
         }).select().single()
-        if (runErr) import.meta.env.DEV && console.warn('pipeline_runs insert failed:', runErr.message)
+        if (runErr) console.warn('pipeline_runs insert failed:', runErr.message)
         runId = run?.id
       } catch (prErr) {
-        import.meta.env.DEV && console.warn('pipeline_runs insert error:', prErr.message)
+        console.warn('pipeline_runs insert error:', prErr.message)
       }
 
       await triggerGitHubWorkflow('model-pipeline.yml', {
