@@ -245,6 +245,13 @@ class InferenceWorkerPool:
                         "Inference error (%d consecutive): %s",
                         consecutive_errors, exc,
                     )
+                    # Attempt CUDA memory cleanup to prevent leaks
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except ImportError:
+                        pass
                     if consecutive_errors >= 10:
                         logger.critical(
                             "10 consecutive inference failures — worker staying alive "

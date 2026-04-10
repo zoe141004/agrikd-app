@@ -346,13 +346,17 @@ class ModelEvaluator:
 
     def run_all(self):
         self.eval_pytorch()
-        # Delete PyTorch model before ONNX benchmark
+        # Release PyTorch model + GPU memory before ONNX benchmark
         if hasattr(self, '_last_model'):
             del self._last_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
         self.eval_onnx()
-        # Delete ONNX session before TFLite benchmarks
+        # Release ONNX session before TFLite benchmarks
         if hasattr(self, '_last_model'):
             del self._last_model
+        gc.collect()
         self.eval_tflite(self.tflite_path, "TFLite (float16)")
         self.generate_report()
 
