@@ -130,6 +130,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // instead of prematurely showing the login page.
       // retryInit() will replace with real session when connectivity restores.
       _loadCachedUser().then((cached) {
+        // `mounted` is defined on StateNotifier (state_notifier package) — not Widget-only.
         if (cached != null && mounted) {
           state = AuthState(status: AuthStatus.authenticated, user: cached);
           debugPrint('[Auth] Restored cached session for ${cached.email}');

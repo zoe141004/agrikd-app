@@ -153,11 +153,6 @@ jobs:
         run: python mlops_pipeline/scripts/validate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}
-        continue-on-error: true
-
-      - name: 'Log validation result'
-        if: steps.validation.outcome == 'failure'
-        run: echo "::warning::Cross-format validation failed (non-blocking — known random-noise issue with fresh model instances)"
 
       - name: Update pipeline status — evaluating
         if: inputs.pipeline_run_id != ''

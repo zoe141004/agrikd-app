@@ -25,6 +25,22 @@ both the Flutter app and the admin dashboard, Dart code obfuscation in release b
 rate-limited and MIME-validated Jetson API endpoints, security headers on the admin
 dashboard, and an Infrastructure-as-Code RLS audit script for the Supabase database.
 
+Phase 3 (production audit round 2) applied targeted fixes across all components:
+- **Flutter**: corrected `StateNotifier.mounted` usage in `AuthNotifier`; added RGBA→RGB
+  and grayscale→RGB channel normalisation in `ImagePreprocessor` using `image.convert()`;
+  bumped Android `targetSdk` to 35.
+- **MLOps pipeline**: replaced bulk `np.vstack` preload with lazy per-sample access to
+  eliminate OOM risk on large datasets; added `model_metadata.json` emission (SHA-256
+  checksums, accuracy, size) after each evaluation run; set global random seeds
+  (`random`, `numpy`, `torch`) in `evaluate_models.py` and `validate_models.py` for
+  reproducible results; removed `continue-on-error: true` from the CI cross-format
+  validation step to make it a hard gate.
+- **Admin Dashboard**: added Google and GitHub OAuth sign-in buttons to `LoginPage.jsx`
+  via `supabase.auth.signInWithOAuth()`.
+- **Jetson**: added sync-thread liveness check in the main loop with automatic restart;
+  added composite `(is_synced, id)` index on the SQLite predictions table for efficient
+  unsynced-row queries.
+
 ---
 
 ## 2. System Architecture

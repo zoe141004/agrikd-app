@@ -18,6 +18,7 @@ Usage (CLI args):
 import argparse
 import logging
 import os
+import random
 import sys
 
 import numpy as np
@@ -201,6 +202,12 @@ def main():
     )
 
     args = parser.parse_args()
+    # Fix all random seeds for reproducible validation.
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
 
     tflite_float32 = None
 

@@ -49,6 +49,7 @@ class JetsonDatabase:
                     synced_at       TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_pred_synced ON predictions(is_synced);
+                CREATE INDEX IF NOT EXISTS idx_pred_synced_id ON predictions(is_synced, id);
             """)
             self.conn.commit()
 

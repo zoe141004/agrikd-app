@@ -225,7 +225,7 @@ def main():
         models_config=config.get("models", {}),
         shutdown_event=shutdown_event,
     )
-    sync_thread = threading.Thread(target=sync.run, daemon=True)
+    sync_thread = threading.Thread(target=sync.run, daemon=True, name="sync-engine")
     sync_thread.start()
     logger.info("Sync engine started (interval=%ds)", config["sync"]["interval_seconds"])
 
@@ -286,6 +286,13 @@ def main():
                 logger.warning("Config check failed, keeping current: %s", e)
 
             if mode == "periodic":
+                # Crash-guard: restart sync thread if it died unexpectedly.
+                if not sync_thread.is_alive() and not shutdown_event.is_set():
+                    logger.error("Sync thread died — restarting")
+                    sync_thread = threading.Thread(
+                        target=sync.run, daemon=True, name="sync-engine"
+                    )
+                    sync_thread.start()
                 try:
                     # Fix 1.7: Wake-Capture-Sleep — open camera, capture,
                     # release each cycle to reduce heat and sensor wear.
@@ -307,6 +314,13 @@ def main():
                     break
             else:
                 # Manual mode — predictions triggered via REST API /predict
+                # Crash-guard: restart sync thread if it died unexpectedly.
+                if not sync_thread.is_alive() and not shutdown_event.is_set():
+                    logger.error("Sync thread died — restarting")
+                    sync_thread = threading.Thread(
+                        target=sync.run, daemon=True, name="sync-engine"
+                    )
+                    sync_thread.start()
                 _notify_watchdog()
                 shutdown_event.wait(timeout=5)
                 if shutdown_event.is_set():
