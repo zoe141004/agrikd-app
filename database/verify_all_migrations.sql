@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–009)
+-- AgriKD — Comprehensive Migration Verification (001–014)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 9 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 14 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -15,7 +15,8 @@ DECLARE
     _tbl TEXT;
     _required_tables TEXT[] := ARRAY[
         'profiles', 'predictions', 'model_registry', 'audit_log',
-        'model_benchmarks', 'model_versions', 'model_reports', 'pipeline_runs'
+        'model_benchmarks', 'model_versions', 'model_reports', 'pipeline_runs',
+        'dvc_operations', 'devices', 'provisioning_tokens', 'model_engines'
     ];
 
     -- ── Helper: check column ──
@@ -25,7 +26,9 @@ DECLARE
     _fn TEXT;
     _required_functions TEXT[] := ARRAY[
         'is_admin_role', 'handle_new_user', 'enforce_version_lifecycle',
-        'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options'
+        'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options',
+        'claim_provisioning_token', 'update_device_config', 'increment_config_version',
+        'get_latest_onnx_url', 'get_engine_for_hardware'
     ];
 
     -- ── Helper: check trigger ──
@@ -39,20 +42,26 @@ DECLARE
         'idx_audit_log_created_at', 'idx_model_benchmarks_leaf_type',
         'idx_model_versions_leaf_type', 'idx_predictions_user_local_dedup',
         'idx_model_registry_active', 'idx_model_registry_status',
-        'idx_pipeline_runs_leaf_version'
+        'idx_pipeline_runs_leaf_version',
+        'idx_dvc_operations_leaf_type', 'idx_dvc_operations_active',
+        'idx_devices_hw_id', 'idx_devices_token', 'idx_devices_user',
+        'idx_devices_status', 'idx_predictions_device', 'idx_prov_tokens_unused',
+        'idx_model_engines_lookup', 'idx_audit_log_user_id'
     ];
 
     -- ── Helper: check RLS policy ──
     _pol TEXT;
     _required_policies TEXT[] := ARRAY[
-        -- predictions (4)
+        -- predictions (4 from 003 + 1 from 012)
         'Users read own predictions', 'Users insert own predictions',
         'Admins update predictions', 'Admins delete predictions',
+        'Device insert predictions',
         -- model_registry (4)
         'Anyone can read models', 'Admins insert models',
         'Admins update models', 'Admins delete models',
-        -- profiles (2)
+        -- profiles (3: 003 + 014)
         'Users read own profile', 'Admins manage profiles',
+        'Users update own profile',
         -- audit_log (2)
         'Admins read audit log', 'Admins insert audit log',
         -- model_benchmarks (4)
@@ -60,10 +69,22 @@ DECLARE
         'Admins update benchmarks', 'Admins delete benchmarks',
         -- model_versions (2)
         'Anyone can read model versions', 'Admins manage model versions',
-        -- model_reports (2)
+        -- model_reports (3: 006 + 014)
         'Users insert own reports', 'Admins read reports',
+        'Users read own reports',
         -- pipeline_runs (2)
-        'Anyone can view pipeline runs', 'Admins manage pipeline runs'
+        'Anyone can view pipeline runs', 'Admins manage pipeline runs',
+        -- dvc_operations (2 from 011)
+        'Anyone can view dvc operations', 'Admins manage dvc operations',
+        -- devices (7 from 012)
+        'Admin manage all devices', 'Users read own devices',
+        'Users update own device config', 'Device self-read',
+        'Device update reported', 'Device self-register',
+        -- provisioning_tokens (3 from 012)
+        'Admin manage tokens', 'Anon read unused tokens', 'Anon claim token',
+        -- model_engines (4 from 013)
+        'Anyone can read engines', 'Service role manages engines',
+        'Service role updates engines', 'Admins delete engines'
     ];
 
     -- ── Helper: check storage bucket ──
@@ -190,6 +211,51 @@ BEGIN
         CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING' END
     );
 
+    -- predictions.device_id (012 — links prediction to device)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'predictions'
+          AND column_name = 'device_id'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '02. Columns',
+        'predictions.device_id',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 012' END
+    );
+
+    -- model_registry.onnx_url (013)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'model_registry'
+          AND column_name = 'onnx_url'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '02. Columns',
+        'model_registry.onnx_url',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 013' END
+    );
+
+    -- devices.device_token (012)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'devices'
+          AND column_name = 'device_token'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '02. Columns',
+        'devices.device_token',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 012' END
+    );
+
     -- =====================================================================
     -- SECTION 3: Functions (002 + 006 + 007 + 008)
     -- =====================================================================
@@ -238,7 +304,8 @@ BEGIN
           AND p.proname IN (
               'is_admin_role', 'handle_new_user', 'sync_model_urls',
               'enforce_version_lifecycle',
-              'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options'
+              'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options',
+              'claim_provisioning_token', 'update_device_config'
           )
     LOOP
         IF _col_check.is_secdef THEN
@@ -318,6 +385,22 @@ BEGIN
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN NOT _exists THEN 'dropped by 007 (correct)'
              ELSE 'still exists — 007 should have dropped them' END
+    );
+
+    -- trg_config_version (012 — auto-increment config on desired_config change)
+    SELECT EXISTS (
+        SELECT 1 FROM pg_trigger t
+        JOIN pg_class c ON t.tgrelid = c.oid
+        JOIN pg_namespace n ON c.relnamespace = n.oid
+        WHERE t.tgname = 'trg_config_version'
+          AND n.nspname = 'public' AND c.relname = 'devices'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '05. Triggers',
+        'trg_config_version ON devices',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'TRIGGER MISSING — run 012' END
     );
 
     -- =====================================================================
@@ -618,7 +701,7 @@ BEGIN
     );
 
     -- =====================================================================
-    -- SECTION 14: Realtime publication (008)
+    -- SECTION 14: Realtime publication (008 + 011)
     -- =====================================================================
     SELECT EXISTS (
         SELECT 1 FROM pg_publication_tables
@@ -627,17 +710,93 @@ BEGIN
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
-        '14. Realtime (008)',
+        '14. Realtime',
         'pipeline_runs in supabase_realtime publication',
         CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
         CASE WHEN _exists THEN 'enabled'
              ELSE 'not in publication — add manually in Dashboard → Database → Replication' END
     );
 
+    SELECT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND tablename = 'dvc_operations'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '14. Realtime',
+        'dvc_operations in supabase_realtime publication',
+        CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _exists THEN 'enabled'
+             ELSE 'not in publication — add manually in Dashboard → Database → Replication' END
+    );
+
+    -- =====================================================================
+    -- SECTION 15: Migration 014 — Admin guards on RPCs
+    -- =====================================================================
+
+    -- Check that get_dashboard_stats uses PL/pgSQL (not SQL) — indicates admin guard
+    SELECT l.lanname INTO _text_val
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    JOIN pg_language l ON p.prolang = l.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_dashboard_stats';
+
+    INSERT INTO _verify_results VALUES (
+        '15. Admin Guards (014)',
+        'get_dashboard_stats() language',
+        CASE WHEN _text_val = 'plpgsql' THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _text_val = 'plpgsql' THEN 'plpgsql (has admin guard)'
+             WHEN _text_val = 'sql' THEN 'sql — missing admin guard! Run 014'
+             ELSE COALESCE(_text_val, 'function not found') END
+    );
+
+    -- FK constraint from provisioning_tokens to devices (012)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_prov_device'
+          AND table_schema = 'public'
+          AND table_name = 'provisioning_tokens'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '15. Constraints (012)',
+        'fk_prov_device on provisioning_tokens',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'FK MISSING — run 012' END
+    );
+
+    -- FK constraint from model_engines to model_registry (013)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_model_engines_registry'
+          AND table_schema = 'public'
+          AND table_name = 'model_engines'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '15. Constraints (013)',
+        'fk_model_engines_registry on model_engines',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'FK MISSING — run 013' END
+    );
+
 END $$;
 
 -- =====================================================================
--- OUTPUT: Final results
+-- OUTPUT 1: FAILURES ONLY (most important — check this first)
+-- =====================================================================
+SELECT
+    '❌ FAIL' AS result,
+    section,
+    item,
+    detail
+FROM _verify_results
+WHERE status = 'FAIL'
+ORDER BY section, item;
+
+-- =====================================================================
+-- OUTPUT 2: Full results
 -- =====================================================================
 SELECT
     section,
@@ -651,7 +810,9 @@ SELECT
 FROM _verify_results
 ORDER BY section, status DESC, item;
 
--- ── Summary ──
+-- =====================================================================
+-- OUTPUT 3: Summary
+-- =====================================================================
 SELECT
     COUNT(*) FILTER (WHERE status = 'PASS') AS passed,
     COUNT(*) FILTER (WHERE status = 'FAIL') AS failed,
@@ -659,7 +820,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED (migrations 001–009)'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–014)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;

@@ -25,10 +25,14 @@ def supabase_request(url, headers, body=None, method="POST"):
     data = json.dumps(body, default=str).encode("utf-8") if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             return True, resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        return False, e.read().decode("utf-8")
+        error_body = e.read().decode("utf-8")
+        # Redact response body to prevent secret leakage in CI logs
+        if len(error_body) > 500:
+            error_body = error_body[:500] + "... [truncated]"
+        return False, error_body
 
 
 def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
@@ -51,7 +55,7 @@ def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
 
     req = urllib.request.Request(upload_url, data=file_data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             public_url = f"{supabase_url}/storage/v1/object/public/models/{storage_path}"
             size_mb = len(file_data) / (1024 * 1024)
             ext = os.path.splitext(local_path)[1]
@@ -243,6 +247,11 @@ def main():
 
     if not all([supabase_url, service_key, leaf_type, version]):
         print("[ERROR] Missing env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, LEAF_TYPE, VERSION")
+        sys.exit(1)
+
+    # Validate URL scheme to prevent accidental HTTP or injection
+    if not supabase_url.startswith("https://"):
+        print(f"[ERROR] SUPABASE_URL must use https:// scheme, got: {supabase_url[:30]}...")
         sys.exit(1)
 
     api_headers = {

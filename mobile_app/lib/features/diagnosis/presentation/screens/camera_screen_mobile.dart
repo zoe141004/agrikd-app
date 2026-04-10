@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -152,9 +154,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   }
 
   Future<void> _processImage(String imagePath) async {
-    await ref
-        .read(diagnosisProvider.notifier)
-        .diagnose(imagePath, widget.leafType);
+    try {
+      await ref
+          .read(diagnosisProvider.notifier)
+          .diagnose(imagePath, widget.leafType)
+          .timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(S.get('error_timeout'))));
+        setState(() => _isProcessing = false);
+      }
+      return;
+    }
 
     final diagState = ref.read(diagnosisProvider);
     if (diagState.status == DiagnosisStatus.error) {

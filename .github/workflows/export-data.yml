@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: export-data
+  cancel-in-progress: false
+
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -19,9 +23,9 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.10'
 
@@ -73,6 +77,12 @@ jobs:
           dvc push
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Commit DVC tracking file
         run: |

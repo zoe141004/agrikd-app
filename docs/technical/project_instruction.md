@@ -203,17 +203,26 @@ app/
 |   |-- agrikd.service                # Systemd unit file
 |   |-- setup_jetson.sh               # One-click setup
 |
-|-- database/migrations/              # SQL migrations
-|   |-- 001_tables.sql                # Core tables (predictions, models, profiles, devices)
-|   |-- 002_rls_policies.sql          # RLS policies + admin helpers
-|   |-- 003_functions_triggers.sql    # Server-side RPCs + triggers
+|-- database/migrations/              # SQL migrations (15 files)
+|   |-- 001_tables.sql                # Core tables (predictions, models, profiles, audit_log)
+|   |-- 002_functions_triggers.sql    # Server-side RPCs + triggers
+|   |-- 003_rls_policies.sql          # RLS policies + admin helpers
 |   |-- 004_indexes.sql               # Performance indexes
 |   |-- 005_storage.sql               # Storage buckets + policies
 |   |-- 006_model_reports_and_rpcs.sql # Model reports table + dashboard RPCs
 |   |-- 007_multi_version.sql         # Multi-version model registry + pipeline_runs
+|   |-- 008_cleanup_and_realtime.sql  # Enum cleanup, benchmarks constraints, realtime
+|   |-- 009_security_hardening.sql    # SET search_path on SECURITY DEFINER functions
+|   |-- 010_fix_lifecycle_for_update.sql # Lifecycle trigger fix for UPDATE
+|   |-- 011_dvc_operations.sql        # DVC operations tracking table
+|   |-- 012_devices.sql               # Device management, provisioning tokens, Device Shadow
+|   |-- 013_model_engines.sql         # Model engines (TensorRT), ONNX URL, engine RPCs
+|   |-- 014_audit_fixes.sql           # Admin guards on RPCs, profile/report policies
+|   |-- 015_audit_log_cleanup.sql     # audit_log schema normalization
 |
-|-- .github/workflows/               # CI/CD (11 workflows)
+|-- .github/workflows/               # CI/CD (12 workflows)
 |   |-- ci.yml                        # Lint, Test, Model Conversion, Build APK
+|   |-- codeql.yml                    # CodeQL SAST security scanning (JS/TS, Python)
 |   |-- release.yml                   # GitHub Release + APK
 |   |-- model-pipeline.yml            # Full conversion + benchmark + upload
 |   |-- model-rollback.yml            # Rollback model to previous version

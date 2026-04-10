@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -30,6 +31,21 @@ from database import JetsonDatabase
 from health_server import start_health_server
 from inference import InferenceWorkerPool
 from sync_engine import SyncEngine
+
+
+def _notify_watchdog():
+    """Send sd_notify WATCHDOG=1 heartbeat to systemd (if running as service)."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]
+        sock.sendto(b"WATCHDOG=1", addr)
+        sock.close()
+    except OSError:
+        pass
 
 
 def _read_device_state(path, retries=1, delay=0.05):
@@ -61,8 +77,8 @@ def setup_logging(config):
 
     handler = RotatingFileHandler(
         log_file,
-        maxBytes=log_cfg.get("max_bytes", 100 * 1024 * 1024),
-        backupCount=log_cfg.get("backup_count", 5),
+        maxBytes=log_cfg.get("max_bytes", 10 * 1024 * 1024),
+        backupCount=log_cfg.get("backup_count", 3),
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -75,9 +91,86 @@ def setup_logging(config):
 
 
 def load_config(path="config/config.json"):
-    """Load configuration from JSON file."""
+    """Load configuration from JSON file with schema validation."""
     with open(path, "r") as f:
-        return json.load(f)
+        config = json.load(f)
+
+    # Required top-level sections and their mandatory keys
+    schema = {
+        "camera": ["source"],
+        "models": [],  # non-empty dict checked separately
+        "sync": ["supabase_url", "interval_seconds"],
+        "server": ["host", "port"],
+        "database": ["path"],
+    }
+    errors = []
+    for section, keys in schema.items():
+        if section not in config:
+            errors.append(f"Missing required section: '{section}'")
+            continue
+        for key in keys:
+            if key not in config[section]:
+                errors.append(f"Missing '{section}.{key}'")
+
+    # Validate each model entry has required fields
+    models = config.get("models", {})
+    if not models:
+        errors.append("'models' must contain at least one entry")
+    for leaf_type, mcfg in models.items():
+        for key in ("engine_path", "num_classes", "class_labels"):
+            if key not in mcfg:
+                errors.append(f"Missing 'models.{leaf_type}.{key}'")
+
+    if errors:
+        raise ValueError(
+            "Config validation failed:\n  - " + "\n  - ".join(errors)
+        )
+
+    return config
+
+
+def check_ready(config):
+    """Run preflight checks — fail fast with clear error if anything is missing."""
+    errors = []
+
+    # Check TensorRT and PyCUDA imports
+    try:
+        import tensorrt  # noqa: F401
+    except ImportError:
+        errors.append("TensorRT is not installed")
+
+    try:
+        import pycuda.driver as cuda
+        cuda.init()
+        if cuda.Device.count() == 0:
+            errors.append("No CUDA devices found")
+    except ImportError:
+        errors.append("PyCUDA is not installed")
+    except Exception as e:
+        errors.append(f"CUDA init failed: {e}")
+
+    # Check model engine files
+    for leaf_type, model_cfg in config.get("models", {}).items():
+        engine_path = model_cfg.get("engine_path", "")
+        if not os.path.isfile(engine_path):
+            errors.append(f"Engine file missing for {leaf_type}: {engine_path}")
+
+    # Check camera source exists (for device paths)
+    cam_source = config.get("camera", {}).get("source", "")
+    if cam_source.startswith("/dev/") and not os.path.exists(cam_source):
+        errors.append(f"Camera device not found: {cam_source}")
+
+    # Check database directory is writable
+    db_path = config.get("database", {}).get("path", "")
+    if db_path:
+        db_dir = os.path.dirname(db_path) or "."
+        if not os.access(db_dir, os.W_OK):
+            errors.append(f"Database directory not writable: {db_dir}")
+
+    if errors:
+        raise RuntimeError(
+            "Preflight checks failed:\n  - " + "\n  - ".join(errors)
+        )
 
 
 def main():
@@ -88,6 +181,10 @@ def main():
     logger.info("=" * 50)
     logger.info("AgriKD Jetson Edge Inference - Starting")
     logger.info("=" * 50)
+
+    # Preflight checks — fail fast before allocating resources
+    check_ready(config)
+    logger.info("Preflight checks passed")
 
     # Fix 1.8: Read device state with retry for atomic-replace safety
     device_state_path = os.path.join("data", "device_state.json")
@@ -128,7 +225,7 @@ def main():
         models_config=config.get("models", {}),
         shutdown_event=shutdown_event,
     )
-    sync_thread = threading.Thread(target=sync.run, daemon=True)
+    sync_thread = threading.Thread(target=sync.run, daemon=True, name="sync-engine")
     sync_thread.start()
     logger.info("Sync engine started (interval=%ds)", config["sync"]["interval_seconds"])
 
@@ -189,6 +286,13 @@ def main():
                 logger.warning("Config check failed, keeping current: %s", e)
 
             if mode == "periodic":
+                # Crash-guard: restart sync thread if it died unexpectedly.
+                if not sync_thread.is_alive() and not shutdown_event.is_set():
+                    logger.error("Sync thread died — restarting")
+                    sync_thread = threading.Thread(
+                        target=sync.run, daemon=True, name="sync-engine"
+                    )
+                    sync_thread.start()
                 try:
                     # Fix 1.7: Wake-Capture-Sleep — open camera, capture,
                     # release each cycle to reduce heat and sensor wear.
@@ -204,15 +308,28 @@ def main():
                         )
                 except Exception as e:
                     logger.error("Capture/inference error: %s", e)
-                time.sleep(interval)
+                _notify_watchdog()
+                shutdown_event.wait(timeout=interval)
+                if shutdown_event.is_set():
+                    break
             else:
                 # Manual mode — predictions triggered via REST API /predict
-                time.sleep(5)
+                # Crash-guard: restart sync thread if it died unexpectedly.
+                if not sync_thread.is_alive() and not shutdown_event.is_set():
+                    logger.error("Sync thread died — restarting")
+                    sync_thread = threading.Thread(
+                        target=sync.run, daemon=True, name="sync-engine"
+                    )
+                    sync_thread.start()
+                _notify_watchdog()
+                shutdown_event.wait(timeout=5)
+                if shutdown_event.is_set():
+                    break
     finally:
         logger.info("AgriKD Jetson Edge Inference - Shutting down")
         # Signal sync engine to drain, then wait briefly
-        shutdown_event.set()
-        sync_thread.join(timeout=5)
+        sync.stop()
+        sync_thread.join(timeout=15)
         # Clean up resources
         pool.shutdown()
         camera.release()

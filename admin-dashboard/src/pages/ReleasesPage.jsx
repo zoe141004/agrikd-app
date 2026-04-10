@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getGitHubConfig, triggerGitHubWorkflow } from '../lib/helpers'
+import { getGitHubConfig, triggerGitHubWorkflow, validateGitHubSlugs } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Commits', 'Pull Requests', 'Releases']
@@ -23,6 +23,8 @@ export default function ReleasesPage() {
   useEffect(() => { if (configured) loadData(); else setLoading(false) }, [])
 
   const ghFetch = async (path) => {
+    // Validate slugs before URL construction (SSRF prevention)
+    try { validateGitHubSlugs(ghOwner, ghRepo) } catch (e) { throw new Error(e.message) }
     const url = `https://api.github.com/repos/${ghOwner}/${ghRepo}${path}`
     let res
     try {
@@ -77,6 +79,7 @@ export default function ReleasesPage() {
       onConfirm: async () => {
         setConfirmAction(null)
         try {
+          validateGitHubSlugs(ghOwner, ghRepo)
           const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}/pulls/${pr.number}/merge`, {
             method: 'PUT',
             headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
@@ -95,6 +98,7 @@ export default function ReleasesPage() {
     setCreating(true)
     setActionMsg(null)
     try {
+      validateGitHubSlugs(ghOwner, ghRepo)
       const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}/releases`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },

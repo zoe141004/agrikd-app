@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:app/core/utils/file_helper.dart';
 
@@ -48,6 +50,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
       if (loaded) {
         _loadedModelVersion = active['version'] as String;
         _setClassLabelsFromRecord(active, leafType);
+        // Clean up orphaned model files now that we've loaded successfully
+        _cleanupOldModelFiles(filePath, leafType);
         return;
       }
 
@@ -64,6 +68,7 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
         if (fbLoaded) {
           _loadedModelVersion = fallback['version'] as String;
           _setClassLabelsFromRecord(fallback, leafType);
+          _cleanupOldModelFiles(fbPath, leafType);
           return;
         }
       }
@@ -81,6 +86,16 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     } else {
       _loadedModelVersion = '1.0.0';
     }
+  }
+
+  /// Fire-and-forget cleanup of orphaned model files after successful load.
+  void _cleanupOldModelFiles(String loadedFilePath, String leafType) {
+    final modelDir = p.dirname(loadedFilePath);
+    unawaited(
+      _modelDao.cleanupOrphanedFiles(leafType, modelDir).catchError((e) {
+        debugPrint('[DiagnosisRepo] Model cleanup failed: $e');
+      }),
+    );
   }
 
   /// Extract class labels from a DB model record, falling back to ModelConstants.

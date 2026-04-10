@@ -18,10 +18,10 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlparse
 
 import requests
 
@@ -89,6 +89,32 @@ def supabase_rpc(base_url, key, function_name, params):
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def _validate_storage_url(url, base_url):
+    """Validate that a download URL is HTTPS and on the configured Supabase host.
+
+    Prevents SSRF by rejecting URLs that point outside our Supabase storage,
+    contain embedded credentials, or use non-standard ports.
+    """
+    try:
+        parsed = urlparse(url)
+        allowed_host = urlparse(base_url).hostname
+    except Exception as exc:
+        raise ValueError(f"Malformed URL: {url[:80]}") from exc
+    if parsed.scheme != "https":
+        raise ValueError(f"Only HTTPS download URLs are allowed: {url[:80]}")
+    if parsed.hostname != allowed_host:
+        raise ValueError(
+            f"Download URL host '{parsed.hostname}' does not match "
+            f"configured Supabase host '{allowed_host}'"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Download URLs must not contain embedded credentials")
+    if parsed.port is not None and parsed.port != 443:
+        raise ValueError(
+            f"Download URL uses non-standard port {parsed.port}; only 443 is allowed"
+        )
 
 
 def download_file(url, dest_path, key=None):
@@ -212,6 +238,7 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
     if engine_info:
         # Engine exists — download directly
         log.info("Pre-built engine found for %s/%s/%s, downloading...", leaf_type, version, hardware_tag)
+        _validate_storage_url(engine_info[0]["engine_url"], base_url)
         download_file(engine_info[0]["engine_url"], engine_path, key)
         expected_sha = engine_info[0]["engine_sha256"]
         actual_sha = sha256_file(engine_path)
@@ -226,6 +253,7 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
     log.info("No cached engine for %s/%s — building from ONNX...", hardware_tag, version)
     with tempfile.TemporaryDirectory() as tmpdir:
         onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
+        _validate_storage_url(onnx_url, base_url)
         size = download_file(onnx_url, onnx_path, key)
         log.info("Downloaded ONNX: %d bytes", size)
 

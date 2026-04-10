@@ -1,4 +1,6 @@
-export default function CustomTooltip({ active, payload, label }) {
+import { memo } from 'react'
+
+export default memo(function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: '8px 12px', boxShadow: '0 8px 24px rgba(18,28,40,0.12)', border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}>
@@ -8,4 +10,4 @@ export default function CustomTooltip({ active, payload, label }) {
       ))}
     </div>
   )
-}
+})

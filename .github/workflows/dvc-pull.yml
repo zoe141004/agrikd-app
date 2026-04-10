@@ -13,16 +13,20 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: dvc-pull-${{ inputs.leaf_type || 'all' }}
+  cancel-in-progress: false
 
 jobs:
   dvc-pull:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.10'
 
@@ -84,6 +88,12 @@ jobs:
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
+
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Report dataset info
         run: |

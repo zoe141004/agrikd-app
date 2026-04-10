@@ -25,6 +25,22 @@ both the Flutter app and the admin dashboard, Dart code obfuscation in release b
 rate-limited and MIME-validated Jetson API endpoints, security headers on the admin
 dashboard, and an Infrastructure-as-Code RLS audit script for the Supabase database.
 
+Phase 3 (production audit round 2) applied targeted fixes across all components:
+- **Flutter**: corrected `StateNotifier.mounted` usage in `AuthNotifier`; added RGBA→RGB
+  and grayscale→RGB channel normalisation in `ImagePreprocessor` using `image.convert()`;
+  bumped Android `targetSdk` to 35.
+- **MLOps pipeline**: replaced bulk `np.vstack` preload with lazy per-sample access to
+  eliminate OOM risk on large datasets; added `model_metadata.json` emission (SHA-256
+  checksums, accuracy, size) after each evaluation run; set global random seeds
+  (`random`, `numpy`, `torch`) in `evaluate_models.py` and `validate_models.py` for
+  reproducible results; removed `continue-on-error: true` from the CI cross-format
+  validation step to make it a hard gate.
+- **Admin Dashboard**: added Google and GitHub OAuth sign-in buttons to `LoginPage.jsx`
+  via `supabase.auth.signInWithOAuth()`.
+- **Jetson**: added sync-thread liveness check in the main loop with automatic restart;
+  added composite `(is_synced, id)` index on the SQLite predictions table for efficient
+  unsynced-row queries.
+
 ---
 
 ## 2. System Architecture
@@ -175,11 +191,16 @@ agrikd/
 │   │   ├── 009_security_hardening.sql
 │   │   ├── 010_fix_lifecycle_for_update.sql
 │   │   ├── 011_dvc_operations.sql
-│   │   └── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
+│   │   ├── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
+│   │   ├── 013_model_engines.sql      # Model engines table (TensorRT), ONNX URL support, engine RPCs
+│   │   ├── 014_audit_fixes.sql        # Admin guards on dashboard RPCs, profile/report policies
+│   │   └── 015_audit_log_cleanup.sql  # audit_log schema normalization (UUID, user_id)
+│   ├── verify_all_migrations.sql      # Comprehensive verify for all 15 migrations
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
-├── .github/workflows/                 # CI/CD (11 workflow files)
+├── .github/workflows/                 # CI/CD (12 workflow files)
 │   ├── ci.yml                         # Lint, test, build APK, dashboard tests, Jetson lint
+│   ├── codeql.yml                     # CodeQL SAST security scanning (JS/TS, Python)
 │   ├── release.yml                    # Tagged release build + GitHub Release
 │   ├── model-pipeline.yml             # Full convert + validate + upload
 │   ├── model-rollback.yml             # Rollback model version in registry

@@ -21,12 +21,14 @@ Usage:
     model = load_student_from_checkpoint("path/to/checkpoint.pth", num_classes=10)
 """
 
+import logging
 import os
 
 import torch
 import torch.nn as nn
 from torchvision import models
 
+logger = logging.getLogger(__name__)
 
 # Number of MobileNetV2 feature blocks used in the student backbone
 # Full MobileNetV2 has features[0:19] (1280 output); student uses [0:12] (96 output)
@@ -245,16 +247,16 @@ def load_student_from_checkpoint(
     # Check if any actual trained weights are missing
     missing_weights = [k for k in incompatible_keys.missing_keys if 'num_batches_tracked' not in k]
     if missing_weights:
-        print(f"[!] Warning: missing keys from checkpoint: {missing_weights[:5]}...")
+        logger.warning(f"[!] Warning: missing keys from checkpoint: {missing_weights[:5]}...")
 
-    print(f"     Classes: {num_classes}, Device: {device}")
-    print(f"     Backbone: MobileNetV2 features[0:{_BACKBONE_FEATURE_COUNT}] ({_BACKBONE_OUTPUT_DIM}d)")
-    print(f"     Classifier: {_BACKBONE_OUTPUT_DIM} -> {classifier_hidden_dims or _CLASSIFIER_HIDDEN_DIMS} -> {num_classes}")
+    logger.info(f"     Classes: {num_classes}, Device: {device}")
+    logger.info(f"     Backbone: MobileNetV2 features[0:{_BACKBONE_FEATURE_COUNT}] ({_BACKBONE_OUTPUT_DIM}d)")
+    logger.info(f"     Classifier: {_BACKBONE_OUTPUT_DIM} -> {classifier_hidden_dims or _CLASSIFIER_HIDDEN_DIMS} -> {num_classes}")
     
     if "epoch" in checkpoint:
-        print(f"     Trained for: {checkpoint['epoch']} epochs")
+        logger.info(f"     Trained for: {checkpoint['epoch']} epochs")
     if "val_loss" in checkpoint:
-        print(f"     Val loss: {checkpoint['val_loss']:.4f}")
+        logger.info(f"     Val loss: {checkpoint['val_loss']:.4f}")
     
     model.eval()
     return model
@@ -271,6 +273,16 @@ def load_leaf_config(config_path):
 
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
+
+    # Validate critical config fields
+    num_classes = config.get("num_classes")
+    if num_classes is None or not isinstance(num_classes, int) or num_classes < 2 or num_classes > 1000:
+        raise ValueError(f"num_classes must be int in [2, 1000], got: {num_classes}")
+    input_size = config.get("input_size")
+    if input_size is None or not isinstance(input_size, int) or input_size < 32 or input_size > 1024:
+        raise ValueError(f"input_size must be int in [32, 1024], got: {input_size}")
+    if not config.get("leaf_type") or not isinstance(config["leaf_type"], str):
+        raise ValueError(f"leaf_type must be a non-empty string, got: {config.get('leaf_type')}")
 
     # Project root: two levels up from this script (scripts/ -> mlops_pipeline/ -> root)
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -300,14 +312,14 @@ if __name__ == "__main__":
         model = create_student_model(num_classes=num_cls)
         dummy_input = torch.randn(1, 3, 224, 224)
         output = model(dummy_input)
-        print(f"{name}: input={list(dummy_input.shape)} -> output={list(output.shape)}")
+        logger.info(f"{name}: input={list(dummy_input.shape)} -> output={list(output.shape)}")
         assert output.shape == (1, num_cls), f"Expected (1, {num_cls}), got {output.shape}"
     
     # Verify key names match checkpoint format after remapping
     model = create_student_model(num_classes=10)
     model_keys = set(model.state_dict().keys())
-    print(f"\nModel has {len(model_keys)} parameters")
-    print(f"Sample keys: {sorted(list(model_keys))[:3]}")
-    print(f"Classifier keys: {sorted([k for k in model_keys if 'classifier' in k])}")
+    logger.info(f"\nModel has {len(model_keys)} parameters")
+    logger.debug(f"Sample keys: {sorted(list(model_keys))[:3]}")
+    logger.debug(f"Classifier keys: {sorted([k for k in model_keys if 'classifier' in k])}")
     
-    print("\n[OK] All model architecture checks passed!")
+    logger.info("\n[OK] All model architecture checks passed!")

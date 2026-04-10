@@ -1,6 +1,6 @@
 [Unit]
 Description=AgriKD Edge Inference Service
-After=network.target
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -12,7 +12,15 @@ Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=agrikd
 Environment=PYTHONUNBUFFERED=1
+
+# Watchdog: systemd restarts if no heartbeat in 120s
+WatchdogSec=120
+
+# Crash loop protection: max 5 restarts in 300 seconds
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
 # Resource limits
 MemoryMax=512M

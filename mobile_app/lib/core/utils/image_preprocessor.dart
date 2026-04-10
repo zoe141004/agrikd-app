@@ -42,9 +42,35 @@ class ImagePreprocessor {
     const mean = AppConstants.imagenetMean;
     const std = AppConstants.imagenetStd;
 
+    // 0. Ensure image is 3-channel RGB before any processing.
+    //    Handles RGBA (4-ch), grayscale (1-ch), and any other format.
+    final img.Image rgb;
+    if (image.numChannels == 3) {
+      rgb = image;
+    } else if (image.numChannels == 4) {
+      // RGBA → RGB: composite onto white background to discard alpha cleanly.
+      rgb = img.Image(width: image.width, height: image.height, numChannels: 3);
+      for (int y = 0; y < image.height; y++) {
+        for (int x = 0; x < image.width; x++) {
+          final p = image.getPixel(x, y);
+          final a = p.a / 255.0;
+          rgb.setPixelRgb(
+            x,
+            y,
+            ((p.r * a) + (255 * (1 - a))).round().clamp(0, 255),
+            ((p.g * a) + (255 * (1 - a))).round().clamp(0, 255),
+            ((p.b * a) + (255 * (1 - a))).round().clamp(0, 255),
+          );
+        }
+      }
+    } else {
+      // Grayscale (1-ch) or any other format → convert to 3-ch RGB.
+      rgb = image.convert(numChannels: 3);
+    }
+
     // 1. Resize to 224x224
     final resized = img.copyResize(
-      image,
+      rgb,
       width: size,
       height: size,
       interpolation: img.Interpolation.linear,

@@ -138,6 +138,45 @@ class TensorRTInference:
             "inference_time_ms": round(elapsed_ms, 2),
         }
 
+    def cleanup(self):
+        """Release CUDA device memory and TensorRT resources."""
+        try:
+            import pycuda.driver as cuda
+        except ImportError:
+            return
+
+        for attr in ("d_input", "d_output"):
+            buf = getattr(self, attr, None)
+            if buf is not None:
+                try:
+                    buf.free()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        for attr in ("stream", "context", "engine"):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                try:
+                    del obj
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        self.h_input = None
+        self.h_output = None
+        logger.debug("TensorRT resources released for %s", self.engine_path)
+
+    def __del__(self):
+        self.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
+        return False
+
 
 # ── Sentinel to signal worker shutdown ──
 _SHUTDOWN = object()
@@ -199,8 +238,12 @@ class InferenceWorkerPool:
         return list(self._leaf_types)
 
     def shutdown(self):
-        """Signal the worker to exit (best-effort)."""
+        """Signal the worker to exit and clean up GPU resources."""
         self._queue.put(_SHUTDOWN)
+        self._thread.join(timeout=10)
+        for engine in self._engines.values():
+            engine.cleanup()
+        self._engines.clear()
 
     # ── Worker (runs on its own thread — owns CUDA context) ─────────
 
@@ -219,24 +262,48 @@ class InferenceWorkerPool:
             ", ".join(self._leaf_types),
         )
 
+        consecutive_errors = 0
         while True:
-            job = self._queue.get()
-            if job is _SHUTDOWN:
-                logger.info("Inference worker shutting down")
-                break
-
-            leaf_type, frame, fut = job
             try:
-                engine = self._engines.get(leaf_type)
-                if engine is None:
-                    fut.set_exception(
-                        ValueError(f"Unknown leaf type: {leaf_type}")
+                job = self._queue.get()
+                if job is _SHUTDOWN:
+                    logger.info("Inference worker shutting down")
+                    break
+
+                leaf_type, frame, fut = job
+                try:
+                    engine = self._engines.get(leaf_type)
+                    if engine is None:
+                        fut.set_exception(
+                            ValueError(f"Unknown leaf type: {leaf_type}")
+                        )
+                    else:
+                        result = engine.predict(frame)
+                        fut.set_result(result)
+                        consecutive_errors = 0
+                except Exception as exc:
+                    fut.set_exception(exc)
+                    consecutive_errors += 1
+                    logger.error(
+                        "Inference error (%d consecutive): %s",
+                        consecutive_errors, exc,
                     )
-                else:
-                    result = engine.predict(frame)
-                    fut.set_result(result)
-            except Exception as exc:
-                fut.set_exception(exc)
+                    # Attempt CUDA memory cleanup to prevent leaks
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except ImportError:
+                        pass
+                    if consecutive_errors >= 10:
+                        logger.critical(
+                            "10 consecutive inference failures — worker staying alive "
+                            "but CUDA state may be corrupt"
+                        )
+            except Exception as outer_exc:
+                logger.critical(
+                    "Unexpected error in inference worker loop: %s", outer_exc
+                )
 
     def _init_engines(self):
         """Load TensorRT engines ON the worker thread (CUDA-owner)."""

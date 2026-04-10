@@ -23,12 +23,20 @@ Go to **Repository → Settings → Secrets and variables → Actions** and add:
 | `KAGGLE_USERNAME` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Username |
 | `KAGGLE_KEY` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Create New Token |
 
+> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions — no manual setup needed.
+
 ### Create DVC credentials:
 ```bash
 # 1. Create a service account in Google Cloud Console
 # 2. Download the JSON key file
 # 3. Base64-encode it:
+
+# Linux / macOS:
 base64 -w 0 service-account.json
+
+# Windows (PowerShell):
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
+
 # 4. Paste the output as GDRIVE_CREDENTIALS_DATA secret
 ```
 
@@ -39,8 +47,7 @@ base64 -w 0 service-account.json
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | Push to `main`/`release/*`, PRs to `main` | Lint, test, build APK |
-| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release |
-
+| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release || **CodeQL** | `codeql.yml` | Push to `main`, PRs to `main`, weekly schedule | Security scanning (JS/TS + Python) |
 ### Manual workflows (workflow_dispatch):
 
 | Workflow | File | Purpose |

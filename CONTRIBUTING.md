@@ -11,7 +11,7 @@ dashboard, and Jetson edge deployment. This guide reflects the Phase 2 layout.
 | Tool | Minimum Version | Purpose |
 |------|-----------------|---------|
 | Git | 2.30+ | Version control |
-| Flutter SDK | 3.41.4+ | Mobile application |
+| Flutter SDK | 3.41.4+ (includes Dart SDK ^3.11.1) | Mobile application |
 | Python | 3.10+ | MLOps pipeline |
 | Node.js | 18+ | Admin dashboard |
 | Android Studio or VS Code | Latest stable | IDE with Flutter/Dart plugin |
@@ -47,6 +47,7 @@ python3 -m venv venv_mlops                                  # MLOps venv
 source venv_mlops/bin/activate                              # Win: venv_mlops\Scripts\activate
 pip install -r mlops_pipeline/requirements-convert.txt
 pip install -r mlops_pipeline/requirements-evaluate.txt
+pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu
 cd admin-dashboard && npm install && cd ..                   # Admin dashboard
 cp .env.development .env && python3 sync_env.py             # Env vars
 ```
@@ -147,7 +148,7 @@ agrikd-app/
 │   │   └── config.example.json  # Template (commit this)
 │   └── requirements.txt         # Jetson Python dependencies
 ├── database/
-│   ├── migrations/              # 13 SQL migration files (001-013)
+│   ├── migrations/              # 15 SQL migration files (001-015)
 │   └── verify_rls_policies.sql  # RLS verification queries
 ├── dvc/                         # DVC tracking files
 │   ├── data_tomato.dvc

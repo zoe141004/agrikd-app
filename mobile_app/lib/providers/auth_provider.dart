@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:app/core/config/env_config.dart';
@@ -44,6 +46,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   StreamSubscription? _authSub;
   GoogleSignIn? _googleSignIn;
 
+  static const _cacheKey = 'cached_auth_user';
+
   AuthNotifier() : super(const AuthState()) {
     _init();
   }
@@ -51,6 +55,38 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void clearError() {
     if (state.errorMessage != null) {
       state = state.copyWith(errorMessage: null);
+    }
+  }
+
+  // ── Session cache for offline cold start ──────────────────────────────
+
+  Future<void> _cacheUser(User user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKey, jsonEncode(user.toJson()));
+    } catch (e) {
+      debugPrint('[Auth] Cache user failed: $e');
+    }
+  }
+
+  Future<User?> _loadCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final json = prefs.getString(_cacheKey);
+      if (json == null) return null;
+      return User.fromJson(jsonDecode(json) as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('[Auth] Load cached user failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> _clearCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cacheKey);
+    } catch (e) {
+      debugPrint('[Auth] Clear cached user failed: $e');
     }
   }
 
@@ -90,9 +126,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void _init() {
     if (!SupabaseConfig.isInitialized) {
       // Supabase not initialized (offline cold start).
-      // Stay in 'unknown' so the app shows a loading/splash screen
+      // Try to restore cached user so the app shows "logged in" state
       // instead of prematurely showing the login page.
-      // retryInit() will be called when connectivity restores.
+      // retryInit() will replace with real session when connectivity restores.
+      _loadCachedUser().then((cached) {
+        // `mounted` is defined on StateNotifier (state_notifier package) — not Widget-only.
+        if (cached != null && mounted) {
+          state = AuthState(status: AuthStatus.authenticated, user: cached);
+          debugPrint('[Auth] Restored cached session for ${cached.email}');
+        }
+      });
       return;
     }
 
@@ -102,6 +145,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       if (currentUser != null) {
         state = AuthState(status: AuthStatus.authenticated, user: currentUser);
+        _cacheUser(currentUser);
       } else {
         state = const AuthState(status: AuthStatus.unauthenticated);
       }
@@ -112,13 +156,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
           state = AuthState(status: AuthStatus.passwordRecovery, user: user);
         } else if (user != null) {
           state = AuthState(status: AuthStatus.authenticated, user: user);
+          _cacheUser(user);
         } else {
           state = const AuthState(status: AuthStatus.unauthenticated);
         }
       });
     } catch (e) {
       debugPrint('[Auth] Supabase init failed: $e');
-      // Unexpected error accessing Supabase — stay unknown for retry
     }
   }
 
@@ -291,8 +335,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await SupabaseConfig.client.auth.signOut();
     } catch (e) {
       debugPrint('[Auth] SignOut failed (possibly offline): $e');
-      // Supabase may fail if offline — still clear local state
     }
+    await _clearCachedUser();
     await _clearLocalUserData();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

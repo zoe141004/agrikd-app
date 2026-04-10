@@ -9,16 +9,20 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: train-${{ inputs.leaf_type || 'all' }}
+  cancel-in-progress: false
 
 jobs:
   train:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -49,6 +53,12 @@ jobs:
         env:
           GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
 
+      - name: Cleanup DVC credentials
+        if: always()
+        run: |
+          rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
+
       - name: Run training pipeline
         run: |
           if [ "$LEAF_TYPE" = "all" ]; then
@@ -62,7 +72,7 @@ jobs:
 
       - name: Upload trained models
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: trained-models
           path: models/

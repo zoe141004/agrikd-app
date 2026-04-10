@@ -28,9 +28,14 @@ Usage (CLI args):
 
 import argparse
 import gc
+import logging
 import os
+import random
 import sys
 import time
+
+logger = logging.getLogger(__name__)
+
 import psutil
 import torch
 import numpy as np
@@ -109,27 +114,33 @@ class ModelEvaluator:
         self.flops_macs = None  # (flops, params) from thop
 
         if data_dir and os.path.isdir(data_dir):
-            print(f"[*] Loading real test data from: {data_dir}")
+            logger.info(f"[*] Loading real test data from: {data_dir}")
             test_subset, test_labels, class_names = load_test_dataset(
                 data_dir, input_size=input_size, mean=norm_mean, std=norm_std
             )
             self.class_names = class_names
             self.test_labels = test_labels
             self.num_samples = len(test_subset)
-            print(f"    Test samples: {self.num_samples}")
-            print(f"    Classes ({len(class_names)}): {class_names}")
+            logger.info(f"    Test samples: {self.num_samples}")
+            logger.info(f"    Classes ({len(class_names)}): {class_names}")
 
-            # Pre-load all images into numpy arrays (NCHW, float32)
-            print(f"[*] Pre-loading {self.num_samples} test images...")
-            loader = torch.utils.data.DataLoader(test_subset, batch_size=1, shuffle=False)
-            images = []
-            for img, _ in loader:
-                images.append(img.numpy())
-            self.test_data = np.vstack(images)
+            # Store the subset lazily to avoid loading all images into RAM.
+            # Samples are fetched one at a time during benchmarking via _get_sample().
+            logger.info(f"[*] Using lazy dataset access ({self.num_samples} samples).")
+            self.test_dataset = test_subset
+            self.test_data = None  # not used when test_dataset is set
         else:
             self.num_samples = 100
-            print(f"[*] No dataset provided. Using {self.num_samples} random samples.")
+            logger.info(f"[*] No dataset provided. Using {self.num_samples} random samples.")
+            self.test_dataset = None
             self.test_data = np.random.randn(self.num_samples, 3, input_size, input_size).astype(np.float32)
+
+    def _get_sample(self, i: int) -> np.ndarray:
+        """Return a single NCHW sample as float32 numpy array (shape 1,C,H,W)."""
+        if self.test_dataset is not None:
+            tensor, _ = self.test_dataset[i]
+            return tensor.numpy()[np.newaxis]  # (1, C, H, W)
+        return self.test_data[i:i+1]
 
     def _measure_memory(self, func, *args):
         process = psutil.Process(os.getpid())
@@ -144,7 +155,10 @@ class ModelEvaluator:
         p2 = np.clip(probs2, epsilon, 1.0)
         p1 = p1 / p1.sum(axis=1, keepdims=True)
         p2 = p2 / p2.sum(axis=1, keepdims=True)
-        return np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
+        kl = np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
+        if not np.isfinite(kl):
+            raise ValueError(f"KL divergence is {kl} (NaN/Inf) — check model outputs for degenerate probabilities")
+        return float(kl)
 
     def _compute_flops(self, model):
         """Compute FLOPs/MACs using thop library."""
@@ -155,7 +169,7 @@ class ModelEvaluator:
             self.flops_macs = (macs * 2, params)  # FLOPs = 2 * MACs
             return macs * 2, params
         except Exception as e:
-            print(f"  [!] FLOPs computation failed: {e}")
+            logger.warning(f"  [!] FLOPs computation failed: {e}")
             return None, None
 
     def _compute_accuracy(self, all_probs, format_name):
@@ -176,9 +190,9 @@ class ModelEvaluator:
         return accuracy
 
     def _benchmark_runner(self, name, size_mb, load_fn, infer_fn):
-        print(f"\n{'='*50}")
-        print(f"  Benchmarking: {name}")
-        print(f"{'='*50}")
+        logger.info(f"\n{'='*50}")
+        logger.info(f"  Benchmarking: {name}")
+        logger.info(f"{'='*50}")
 
         # 0. Clean up previous model to make memory measurement fair
         gc.collect()
@@ -190,24 +204,27 @@ class ModelEvaluator:
         # 2. Warm up (skip first 10)
         warmup_iters = min(10, self.num_samples)
         for i in range(warmup_iters):
-            infer_fn(model_obj, self.test_data[i:i+1])
+            infer_fn(model_obj, self._get_sample(i))
 
-        # 3. Inference loop
+        # 3. Inference loop — track true peak memory
         latencies = []
         all_probs = []
         process = psutil.Process(os.getpid())
-        mem_infer_start = process.memory_info().rss / (1024 * 1024)
+        mem_baseline = process.memory_info().rss / (1024 * 1024)
+        mem_peak = mem_baseline
 
         for i in range(self.num_samples):
-            inp = self.test_data[i:i+1]
+            inp = self._get_sample(i)
             start = time.perf_counter()
             probs = infer_fn(model_obj, inp)
             end = time.perf_counter()
             latencies.append((end - start) * 1000)
             all_probs.append(probs)
+            current_mem = process.memory_info().rss / (1024 * 1024)
+            if current_mem > mem_peak:
+                mem_peak = current_mem
 
-        mem_infer_end = process.memory_info().rss / (1024 * 1024)
-        mem_infer_peak = max(0.0, mem_infer_end - mem_infer_start)
+        mem_infer_peak = max(0.0, mem_peak - mem_baseline)
         all_probs = np.vstack(all_probs)
 
         # 4. KL Divergence
@@ -246,13 +263,13 @@ class ModelEvaluator:
             params_m = "-"
             params_total = "-"
 
-        print(f"  Size:    {size_mb:.2f} MB")
-        print(f"  Params:  {params_m} M | FLOPs: {flops_m} M")
-        print(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
-        print(f"  FPS:     {fps:.1f}")
-        print(f"  Runtime Mem: {total_mem:.1f} MB")
-        print(f"  Accuracy: {accuracy:.1f}%")
-        print(f"  KL Div:  {kl_div:.8f}")
+        logger.info(f"  Size:    {size_mb:.2f} MB")
+        logger.info(f"  Params:  {params_m} M | FLOPs: {flops_m} M")
+        logger.info(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
+        logger.info(f"  FPS:     {fps:.1f}")
+        logger.info(f"  Runtime Mem: {total_mem:.1f} MB")
+        logger.info(f"  Accuracy: {accuracy:.1f}%")
+        logger.info(f"  KL Div:  {kl_div:.8f}")
 
         self.results.append({
             "Format": name,
@@ -327,7 +344,10 @@ class ModelEvaluator:
             if len(expected_shape) == 4 and expected_shape[-1] != inp.shape[-1]:
                 inp = np.transpose(inp, (0, 2, 3, 1))
             if list(inp.shape) != list(expected_shape):
-                inp = np.resize(inp, expected_shape)
+                raise ValueError(
+                    f"TFLite input shape mismatch after transpose: "
+                    f"got {list(inp.shape)}, expected {list(expected_shape)}"
+                )
             interp.set_tensor(in_det['index'], inp)
             interp.invoke()
             logits = interp.get_tensor(out_det['index'])
@@ -339,13 +359,17 @@ class ModelEvaluator:
 
     def run_all(self):
         self.eval_pytorch()
-        # Delete PyTorch model before ONNX benchmark
+        # Release PyTorch model + GPU memory before ONNX benchmark
         if hasattr(self, '_last_model'):
             del self._last_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
         self.eval_onnx()
-        # Delete ONNX session before TFLite benchmarks
+        # Release ONNX session before TFLite benchmarks
         if hasattr(self, '_last_model'):
             del self._last_model
+        gc.collect()
         self.eval_tflite(self.tflite_path, "TFLite (float16)")
         self.generate_report()
 
@@ -468,7 +492,54 @@ class ModelEvaluator:
         report_path = os.path.join(self.output_dir, "benchmark_report.md")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report_str)
-        print(f"\n[OK] Benchmark report: {report_path}")
+        logger.info(f"\n[OK] Benchmark report: {report_path}")
+
+        # Write model versioning metadata JSON for pipeline tracking / OTA updates.
+        import json
+        import hashlib
+
+        def _sha256(path):
+            if path and os.path.exists(path):
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(65536), b""):
+                        h.update(chunk)
+                return h.hexdigest()
+            return None
+
+        tflite_row = next((r for r in self.results if "TFLite" in r.get("Format", "")), None)
+        metadata = {
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "num_classes": self.num_classes,
+            "class_names": list(self.class_names) if self.class_names else None,
+            "test_samples": self.num_samples,
+            "input_size": self.input_size,
+            "models": {
+                "pytorch": {
+                    "path": self.pth_path,
+                    "sha256": _sha256(self.pth_path),
+                    "size_mb": next((r["Size (MB)"] for r in self.results if r["Format"] == "PyTorch"), None),
+                    "accuracy_pct": next((r.get("Accuracy (%)") for r in self.results if r["Format"] == "PyTorch"), None),
+                },
+                "onnx": {
+                    "path": self.onnx_path,
+                    "sha256": _sha256(self.onnx_path),
+                    "size_mb": next((r["Size (MB)"] for r in self.results if r["Format"] == "ONNX"), None),
+                    "accuracy_pct": next((r.get("Accuracy (%)") for r in self.results if r["Format"] == "ONNX"), None),
+                },
+                "tflite_float16": {
+                    "path": self.tflite_path,
+                    "sha256": _sha256(self.tflite_path),
+                    "size_mb": tflite_row.get("Size (MB)") if tflite_row else None,
+                    "accuracy_pct": tflite_row.get("Accuracy (%)") if tflite_row else None,
+                    "kl_divergence": tflite_row.get("KL Div") if tflite_row else None,
+                },
+            },
+        }
+        meta_path = os.path.join(self.output_dir, "model_metadata.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+        logger.info(f"[OK] Model metadata: {meta_path}")
 
         # Charts
         sns.set_theme(style="whitegrid")
@@ -497,7 +568,18 @@ class ModelEvaluator:
         plt.savefig(os.path.join(self.output_dir, "benchmark_accuracy_size.png"), dpi=150)
         plt.close()
 
-        print(f"[OK] Charts saved to: {self.output_dir}")
+        logger.info(f"[OK] Charts saved to: {self.output_dir}")
+
+
+def _set_global_seeds(seed: int = 42) -> None:
+    """Fix all random seeds for reproducible benchmark results."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def main():
@@ -515,6 +597,7 @@ def main():
                         help="Output directory for reports and charts")
 
     args = parser.parse_args()
+    _set_global_seeds(42)
 
     input_size = 224
     norm_mean = None

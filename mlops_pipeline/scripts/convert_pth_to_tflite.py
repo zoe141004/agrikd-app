@@ -20,15 +20,18 @@ import time
 import torch
 import torchvision
 import numpy as np
+import logging
 
 # Suppress annoying TF/Torch logs
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+logger = logging.getLogger(__name__)
+
 try:
     import ai_edge_torch
 except ImportError:
-    print("[!] Error: 'ai-edge-torch' is not installed.")
-    print("    Please run: pip install ai-edge-torch")
+    logger.error("[!] Error: 'ai-edge-torch' is not installed.")
+    logger.error("    Please run: pip install ai-edge-torch")
     exit(1)
 
 import sys
@@ -42,9 +45,9 @@ def convert_pth_to_tflite_aiedge(
     num_classes: int,
     quantize: str = "none"
 ):
-    print(f"\n{'='*60}")
-    print(f"  AgriKD: PyTorch -> TFLite (ai-edge-torch)")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"  AgriKD: PyTorch -> TFLite (ai-edge-torch)")
+    logger.info(f"{'='*60}")
     
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
@@ -52,7 +55,7 @@ def convert_pth_to_tflite_aiedge(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # 1. Load the model
-    print(f"[*] Loading PyTorch checkpoint: {checkpoint_path}")
+    logger.info(f"[*] Loading PyTorch checkpoint: {checkpoint_path}")
     model = load_student_from_checkpoint(checkpoint_path, num_classes=num_classes)
     model.eval()
     
@@ -62,7 +65,7 @@ def convert_pth_to_tflite_aiedge(
     # 3. Handle Quantization Configuration
     quant_config = None
     if quantize == "dynamic":
-        print("[*] Applying Dynamic Range Quantization (INT8)...")
+        logger.info("[*] Applying Dynamic Range Quantization (INT8)...")
         try:
             import ai_edge_torch.quantize.quant_config as qcfg
             import ai_edge_torch.quantize.pt2e_quantizer as pt2e_q
@@ -70,12 +73,12 @@ def convert_pth_to_tflite_aiedge(
                 pt2e_quantizer=pt2e_q.get_symmetric_quantization_config(is_dynamic=True)
             )
         except Exception as e:
-            print(f"[!] Failed to setup quantizer: {e}")
-            print("    Falling back to standard FP32 conversion.")
+            logger.warning(f"[!] Failed to setup quantizer: {e}")
+            logger.warning("    Falling back to standard FP32 conversion.")
             quant_config = None
     
     # 4. Convert using ai-edge-torch
-    print("[*] Tracing and converting to TFLite Format...")
+    logger.info("[*] Tracing and converting to TFLite Format...")
     start_time = time.time()
     
     try:
@@ -84,24 +87,24 @@ def convert_pth_to_tflite_aiedge(
         else:
             edge_model = ai_edge_torch.convert(model, sample_input)
             
-        print(f"    Conversion took {time.time() - start_time:.2f} seconds.")
+        logger.info(f"    Conversion took {time.time() - start_time:.2f} seconds.")
     except Exception as e:
-        print(f"\n[!] AI-Edge-Torch Conversion Failed:\n{e}")
+        logger.error(f"\n[!] AI-Edge-Torch Conversion Failed:\n{e}")
         return
 
     # 5. Export to disk
     edge_model.export(output_path)
-    print(f"[OK] TFLite model successfully saved: {output_path}")
+    logger.info(f"[OK] TFLite model successfully saved: {output_path}")
     
     # 6. Check sizes
     pth_size = os.path.getsize(checkpoint_path) / (1024 * 1024)
     tflite_size = os.path.getsize(output_path) / (1024 * 1024)
     compression = (1 - (tflite_size / pth_size)) * 100
     
-    print(f"    PTH Size:    {pth_size:.2f} MB")
-    print(f"    TFLite Size: {tflite_size:.2f} MB")
-    print(f"    Compression: {compression:.1f}% reduction")
-    print(f"{'='*60}")
+    logger.info(f"    PTH Size:    {pth_size:.2f} MB")
+    logger.info(f"    TFLite Size: {tflite_size:.2f} MB")
+    logger.info(f"    Compression: {compression:.1f}% reduction")
+    logger.info(f"{'='*60}")
 
 
 if __name__ == "__main__":

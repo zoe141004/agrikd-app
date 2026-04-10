@@ -74,11 +74,21 @@ END
 WHERE status IS NULL;
 
 -- New unique constraint: one version per leaf_type
-ALTER TABLE public.model_registry
-    DROP CONSTRAINT IF EXISTS model_registry_leaf_version_unique;
-ALTER TABLE public.model_registry
-    ADD CONSTRAINT model_registry_leaf_version_unique
-        UNIQUE(leaf_type, version);
+-- Wrapped in DO block: skip if constraint already exists (avoids CASCADE
+-- issues when model_engines FK depends on this constraint)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'model_registry_leaf_version_unique'
+          AND table_schema = 'public'
+          AND table_name = 'model_registry'
+    ) THEN
+        ALTER TABLE public.model_registry
+            ADD CONSTRAINT model_registry_leaf_version_unique
+                UNIQUE(leaf_type, version);
+    END IF;
+END $$;
 
 -- Index for fast lookup of active models
 CREATE INDEX IF NOT EXISTS idx_model_registry_active

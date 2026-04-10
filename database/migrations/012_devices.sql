@@ -96,9 +96,20 @@ CREATE TABLE IF NOT EXISTS public.devices (
 );
 
 -- FK from provisioning_tokens to devices (deferred to avoid ordering issues)
-ALTER TABLE public.provisioning_tokens
-    ADD CONSTRAINT fk_prov_device FOREIGN KEY (device_id)
-    REFERENCES public.devices(id) ON DELETE SET NULL;
+-- Wrapped in DO block for idempotency (safe to re-run)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_prov_device'
+          AND table_schema = 'public'
+          AND table_name = 'provisioning_tokens'
+    ) THEN
+        ALTER TABLE public.provisioning_tokens
+            ADD CONSTRAINT fk_prov_device FOREIGN KEY (device_id)
+            REFERENCES public.devices(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- 3. Link predictions to device (nullable, backward-compatible)
 ALTER TABLE public.predictions
@@ -132,7 +143,7 @@ CREATE OR REPLACE FUNCTION public.update_device_config(
     p_device_name TEXT DEFAULT NULL
 )
 RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
 BEGIN
     UPDATE public.devices
     SET desired_config = COALESCE(p_desired_config, desired_config),
@@ -193,7 +204,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public, pg_catalog;
 
 DROP TRIGGER IF EXISTS trg_config_version ON public.devices;
 CREATE TRIGGER trg_config_version

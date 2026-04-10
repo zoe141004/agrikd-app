@@ -161,13 +161,17 @@ final syncProvider = StateNotifierProvider<SyncNotifier, SyncState>((ref) {
     if (next && previous == false) {
       // Retry Supabase init if app started offline (C1 fix)
       if (!SupabaseConfig.isInitialized) {
-        SupabaseConfig.ensureInitialized().then((ok) {
-          if (notifier.disposed) return;
-          if (ok) {
-            ref.read(authProvider.notifier).retryInit();
-            notifier.triggerSync();
-          }
-        });
+        SupabaseConfig.ensureInitialized()
+            .then((ok) {
+              if (notifier.disposed) return;
+              if (ok) {
+                ref.read(authProvider.notifier).retryInit();
+                notifier.triggerSync();
+              }
+            })
+            .catchError((e) {
+              debugPrint('[SyncProvider] Supabase re-init failed: $e');
+            });
       } else {
         notifier.triggerSync();
       }

@@ -14,12 +14,14 @@ final diagnosisRepositoryProvider = Provider<DiagnosisRepository>((ref) {
   final predictionDao = ref.watch(predictionDaoProvider);
   final syncQueue = ref.watch(syncQueueProvider);
   final modelDao = ref.watch(modelDaoProvider);
-  return DiagnosisRepositoryImpl(
+  final repo = DiagnosisRepositoryImpl(
     inferenceService: inferenceService,
     predictionDao: predictionDao,
     syncQueue: syncQueue,
     modelDao: modelDao,
   );
+  ref.onDispose(() => repo.dispose());
+  return repo;
 });
 
 enum DiagnosisStatus { idle, loading, success, error }

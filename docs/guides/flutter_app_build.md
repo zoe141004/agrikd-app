@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Flutter SDK 3.41.4+ ([install](https://docs.flutter.dev/get-started/install))
+- Flutter SDK 3.41.4+ (includes Dart SDK ^3.11.1) ([install](https://docs.flutter.dev/get-started/install))
 - Android Studio (for Android SDK and emulator)
 - JDK 17 (bundled with Android Studio or install Zulu JDK)
 - Git
@@ -15,7 +15,7 @@ flutter doctor
 ## 1. Clone and Setup
 
 ```bash
-cd D:/Capstone/app/mobile_app
+cd <project-root>/mobile_app
 flutter pub get
 ```
 
@@ -25,7 +25,7 @@ flutter pub get
 
 1. Create root `.env` from template:
    ```bash
-   cd D:/Capstone/app
+   cd <project-root>
    cp .env.example .env
    # Edit .env with your actual values
    ```
@@ -56,7 +56,7 @@ flutter build apk --release \
 ## 3. Run in Debug Mode
 
 ```bash
-cd D:/Capstone/app/mobile_app
+cd <project-root>/mobile_app
 
 # On connected device or emulator:
 flutter run
@@ -89,7 +89,7 @@ Current test count: **89 tests** across 11 test files:
 
 ### Standard release build:
 ```bash
-cd D:/Capstone/app/mobile_app
+cd <project-root>/mobile_app
 
 flutter build apk --release \
   --obfuscate \

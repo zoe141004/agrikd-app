@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { maskUrl, triggerGitHubWorkflow, getGitHubConfig, formatDateTime, logAudit } from '../lib/helpers'
+import { maskUrl, triggerGitHubWorkflow, getGitHubConfig, validateGitHubSlugs, formatDateTime, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
@@ -24,6 +24,9 @@ export default function SettingsPage() {
   const [auditLogs, setAuditLogs] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState(null)
+  const [auditPage, setAuditPage] = useState(0)
+  const [auditHasMore, setAuditHasMore] = useState(true)
+  const AUDIT_PAGE_SIZE = 50
   const [ghTesting, setGhTesting] = useState(false)
 
   useEffect(() => {
@@ -57,6 +60,8 @@ export default function SettingsPage() {
     if (!ghToken) { setCiMsg({ type: 'error', text: 'Save GitHub config first.' }); return }
     setGhTesting(true)
     try {
+      // Validate slugs before URL construction (SSRF prevention)
+      validateGitHubSlugs(ghOwner, ghRepo)
       const ghController = new AbortController()
       const timeoutId = setTimeout(() => ghController.abort(), 10000)
       const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })
@@ -384,6 +389,7 @@ export default function SettingsPage() {
           </div>
           {auditError && <div className="alert alert-error" style={{ margin: '0 16px 12px' }}>{auditError}</div>}
           {auditLogs.length > 0 ? (
+            <>
             <div className="table-wrapper">
               <table>
                 <thead><tr><th>Action</th><th>Entity</th><th>Entity ID</th><th>User</th><th>Date</th><th>Details</th></tr></thead>
@@ -401,6 +407,12 @@ export default function SettingsPage() {
                 </tbody>
               </table>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <button className="btn btn-sm" disabled={auditPage === 0 || auditLoading} onClick={() => loadAuditLogs(null, auditPage - 1)}>← Previous</button>
+              <span style={{ color: '#94a3b8', fontSize: 13 }}>Page {auditPage + 1}</span>
+              <button className="btn btn-sm" disabled={!auditHasMore || auditLoading} onClick={() => loadAuditLogs(null, auditPage + 1)}>Next →</button>
+            </div>
+            </>
           ) : (
             <div className="empty-state"><p>No audit log entries yet. Actions like model uploads, edits, and deletions will appear here.</p></div>
           )}
@@ -411,16 +423,20 @@ export default function SettingsPage() {
     </>
   )
 
-  async function loadAuditLogs(signal) {
+  async function loadAuditLogs(signal, page = 0) {
     setAuditLoading(true)
     setAuditError(null)
     try {
+      const from = page * AUDIT_PAGE_SIZE
+      const to = from + AUDIT_PAGE_SIZE - 1
       const { data, error: err } = await supabase
         .from('audit_log').select('*')
-        .order('created_at', { ascending: false }).limit(50)
+        .order('created_at', { ascending: false }).range(from, to)
       if (signal?.aborted) return
       if (err) throw err
       setAuditLogs(data || [])
+      setAuditHasMore((data || []).length >= AUDIT_PAGE_SIZE)
+      setAuditPage(page)
     } catch (err) {
       if (err.name !== 'AbortError' && !signal?.aborted) {
         setAuditError(err.message || 'Failed to load audit logs')

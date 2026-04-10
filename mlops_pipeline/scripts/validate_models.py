@@ -16,7 +16,9 @@ Usage (CLI args):
 """
 
 import argparse
+import logging
 import os
+import random
 import sys
 
 import numpy as np
@@ -25,6 +27,8 @@ import torch
 # Add scripts directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model_definition import load_student_from_checkpoint, load_leaf_config
+
+logger = logging.getLogger(__name__)
 
 
 def run_pytorch_inference(checkpoint_path: str, num_classes: int, input_data: np.ndarray) -> np.ndarray:
@@ -57,13 +61,13 @@ def run_tflite_inference(tflite_path: str, input_data: np.ndarray) -> np.ndarray
     tflite_input_shape = input_details[0]['shape']
     
     # If TFLite expects NHWC (batch, H, W, C) but our input is NCHW (batch, C, H, W)
-    if len(tflite_input_shape) == 4 and tflite_input_shape[-1] == 3:
+    if len(tflite_input_shape) == 4 and tflite_input_shape[-1] != input_data.shape[-1]:
         # Convert NCHW -> NHWC
         tflite_input = np.transpose(input_data, (0, 2, 3, 1))
     else:
         tflite_input = input_data
     
-    # Resize input tensor if needed
+    # Resize input tensor if needed (batch dimension may differ)
     if not np.array_equal(tflite_input.shape, tflite_input_shape):
         interpreter.resize_tensor_input(input_details[0]['index'], list(tflite_input.shape))
         interpreter.allocate_tensors()
@@ -83,10 +87,10 @@ def compare_outputs(name_a: str, output_a: np.ndarray, name_b: str, output_b: np
     passed = max_diff < atol
     status = "OK PASS" if passed else "FAIL"
     
-    print(f"  {name_a} vs {name_b}:")
-    print(f"    Max diff:  {max_diff:.8f}")
-    print(f"    Mean diff: {mean_diff:.8f}")
-    print(f"    Status:    [{status}] (atol={atol})")
+    logger.info(f"  {name_a} vs {name_b}:")
+    logger.info(f"    Max diff:  {max_diff:.8f}")
+    logger.info(f"    Mean diff: {mean_diff:.8f}")
+    logger.info(f"    Status:    [{status}] (atol={atol})")
     
     return passed
 
@@ -97,7 +101,7 @@ def validate_models(
     tflite_path: str = None,
     tflite_float32_path: str = None,
     num_classes: int = 10,
-    num_samples: int = 5,
+    num_samples: int = 50,
     atol: float = 1e-4,
     tflite_atol: float = 1e-2,
 ):
@@ -114,9 +118,9 @@ def validate_models(
         atol: Absolute tolerance for ONNX comparison.
         tflite_atol: Absolute tolerance for TFLite comparison (higher due to conversion precision loss).
     """
-    print("\n" + "=" * 60)
-    print("  AgriKD: Cross-Format Model Validation")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("  AgriKD: Cross-Format Model Validation")
+    logger.info("=" * 60)
 
     # Load PyTorch model once — reuse for all samples to keep BatchNorm stats consistent
     model = load_student_from_checkpoint(checkpoint_path, num_classes)
@@ -124,7 +128,7 @@ def validate_models(
     all_passed = True
 
     for i in range(num_samples):
-        print(f"\n--- Sample {i + 1}/{num_samples} ---")
+        logger.info(f"\n--- Sample {i + 1}/{num_samples} ---")
 
         # Generate random input (NCHW format)
         np.random.seed(42 + i)
@@ -133,7 +137,7 @@ def validate_models(
         # PyTorch reference
         with torch.no_grad():
             pytorch_output = model(torch.from_numpy(input_data)).numpy()
-        print(f"  PyTorch output: {pytorch_output[0][:5]}... (showing first 5)")
+        logger.debug(f"  PyTorch output: {pytorch_output[0][:5]}... (showing first 5)")
 
         # ONNX comparison
         if onnx_path and os.path.exists(onnx_path):
@@ -154,12 +158,12 @@ def validate_models(
                 all_passed = False
 
     # Summary
-    print(f"\n{'=' * 60}")
+    logger.info(f"\n{'=' * 60}")
     if all_passed:
-        print(f"  [OK] ALL VALIDATIONS PASSED ({num_samples} samples)")
+        logger.info(f"  [OK] ALL VALIDATIONS PASSED ({num_samples} samples)")
     else:
-        print(f"  [FAIL] SOME VALIDATIONS FAILED - check outputs above")
-    print(f"{'=' * 60}")
+        logger.error(f"  [FAIL] SOME VALIDATIONS FAILED - check outputs above")
+    logger.info(f"{'=' * 60}")
 
     return all_passed
 
@@ -189,8 +193,8 @@ def main():
         help="Number of output classes"
     )
     parser.add_argument(
-        "--num-samples", type=int, default=5,
-        help="Number of random samples to test (default: 5)"
+        "--num-samples", type=int, default=50,
+        help="Number of random samples to test (default: 50)"
     )
     parser.add_argument(
         "--atol", type=float, default=1e-4,
@@ -198,6 +202,12 @@ def main():
     )
 
     args = parser.parse_args()
+    # Fix all random seeds for reproducible validation.
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
 
     tflite_float32 = None
 
@@ -221,7 +231,7 @@ def main():
         parser.error("Either --config or --checkpoint and --num-classes are required")
 
     if not args.onnx and not args.tflite:
-        print("[FAIL] At least one of --onnx or --tflite must exist/be provided")
+        logger.error("[FAIL] At least one of --onnx or --tflite must exist/be provided")
         sys.exit(1)
 
     passed = validate_models(
