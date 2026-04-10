@@ -196,11 +196,12 @@ class ModelEvaluator:
         for i in range(warmup_iters):
             infer_fn(model_obj, self.test_data[i:i+1])
 
-        # 3. Inference loop
+        # 3. Inference loop — track true peak memory
         latencies = []
         all_probs = []
         process = psutil.Process(os.getpid())
-        mem_infer_start = process.memory_info().rss / (1024 * 1024)
+        mem_baseline = process.memory_info().rss / (1024 * 1024)
+        mem_peak = mem_baseline
 
         for i in range(self.num_samples):
             inp = self.test_data[i:i+1]
@@ -209,9 +210,11 @@ class ModelEvaluator:
             end = time.perf_counter()
             latencies.append((end - start) * 1000)
             all_probs.append(probs)
+            current_mem = process.memory_info().rss / (1024 * 1024)
+            if current_mem > mem_peak:
+                mem_peak = current_mem
 
-        mem_infer_end = process.memory_info().rss / (1024 * 1024)
-        mem_infer_peak = max(0.0, mem_infer_end - mem_infer_start)
+        mem_infer_peak = max(0.0, mem_peak - mem_baseline)
         all_probs = np.vstack(all_probs)
 
         # 4. KL Divergence

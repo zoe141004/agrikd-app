@@ -147,20 +147,31 @@ jobs:
           fi
 
           # Try public URL first (faster), fall back to authenticated
-          HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" "$MODEL_URL")
+          RESP=$(curl -sL --compressed -w "\n%{http_code}\n%{content_type}" -o "$PTH_FILE" "$MODEL_URL")
+          HTTP_CODE=$(echo "$RESP" | tail -2 | head -1)
+          CONTENT_TYPE=$(echo "$RESP" | tail -1)
           if [ "$HTTP_CODE" != "200" ]; then
             echo "Public download failed ($HTTP_CODE), trying authenticated..."
             AUTH_URL="$SUPABASE_URL/storage/v1/object/authenticated/$STORAGE_PATH"
-            HTTP_CODE=$(curl -sL --compressed -w "%{http_code}" -o "$PTH_FILE" \
+            RESP=$(curl -sL --compressed -w "\n%{http_code}\n%{content_type}" -o "$PTH_FILE" \
               -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
               -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
               "$AUTH_URL")
+            HTTP_CODE=$(echo "$RESP" | tail -2 | head -1)
+            CONTENT_TYPE=$(echo "$RESP" | tail -1)
           fi
-          echo "HTTP status: $HTTP_CODE"
+          echo "HTTP status: $HTTP_CODE, Content-Type: $CONTENT_TYPE"
 
           if [ "$HTTP_CODE" != "200" ]; then
             echo "[ERROR] Download failed with HTTP $HTTP_CODE"
             cat "$PTH_FILE" 2>/dev/null | head -5
+            exit 1
+          fi
+
+          # Reject HTML/text responses (error pages served instead of binary)
+          if echo "$CONTENT_TYPE" | grep -qiE "text/html|text/plain"; then
+            echo "[ERROR] Server returned $CONTENT_TYPE instead of binary — likely an error page"
+            head -5 "$PTH_FILE" 2>/dev/null
             exit 1
           fi
 
