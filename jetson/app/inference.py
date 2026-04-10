@@ -140,9 +140,8 @@ class TensorRTInference:
 
     def cleanup(self):
         """Release CUDA device memory and TensorRT resources."""
-        try:
-            import pycuda.driver as cuda
-        except ImportError:
+        import importlib.util
+        if importlib.util.find_spec('pycuda') is None:
             return
 
         for attr in ("d_input", "d_output"):

@@ -32,8 +32,8 @@ dependencies:
   google_sign_in: ^6.2.1
 
   # Backend
-  supabase_flutter: ^2.12.2
-  shared_preferences: ^2.3.4
+  supabase_flutter: ^2.9.0
+  shared_preferences: ^2.5.5
 
   # Security
   crypto: ^3.0.6
@@ -43,16 +43,16 @@ dependencies:
   permission_handler: ^11.3.1
 
   # UI
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^1.0.9
   fl_chart: ^0.69.2
   intl: ^0.19.0
   sqflite_common_ffi_web: ^1.1.1
 
   # Environment
-  flutter_dotenv: ^5.2.1
+  flutter_dotenv: ^6.0.0
 
   # Error Tracking
-  sentry_flutter: ^9.0.0
+  sentry_flutter: ^9.16.1
 
 dev_dependencies:
   flutter_test:
