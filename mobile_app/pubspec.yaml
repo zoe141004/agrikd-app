@@ -33,7 +33,7 @@ dependencies:
 
   # Backend
   supabase_flutter: ^2.9.0
-  shared_preferences: ^2.3.4
+  shared_preferences: ^2.5.5
 
   # Security
   crypto: ^3.0.6
