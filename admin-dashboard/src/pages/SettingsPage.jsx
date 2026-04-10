@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { maskUrl, triggerGitHubWorkflow, getGitHubConfig, formatDateTime, logAudit } from '../lib/helpers'
+import { maskUrl, triggerGitHubWorkflow, getGitHubConfig, validateGitHubSlugs, formatDateTime, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
@@ -60,6 +60,8 @@ export default function SettingsPage() {
     if (!ghToken) { setCiMsg({ type: 'error', text: 'Save GitHub config first.' }); return }
     setGhTesting(true)
     try {
+      // Validate slugs before URL construction (SSRF prevention)
+      validateGitHubSlugs(ghOwner, ghRepo)
       const ghController = new AbortController()
       const timeoutId = setTimeout(() => ghController.abort(), 10000)
       const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })

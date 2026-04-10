@@ -290,6 +290,9 @@ export default function ModelsPage() {
         warnings.push('No model URL configured (bundled models don\'t need one)')
       } else {
         try {
+          // Validate URL scheme before fetching (SSRF prevention)
+          const parsedUrl = new URL(m.model_url)
+          if (parsedUrl.protocol !== 'https:') throw new Error('Only HTTPS model URLs are allowed')
           const res = await fetch(m.model_url, { method: 'HEAD', signal: AbortSignal.timeout(6000) })
           if (!res.ok) errors.push(`Model URL returned HTTP ${res.status}`)
           else {

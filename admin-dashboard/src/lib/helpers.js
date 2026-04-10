@@ -37,6 +37,14 @@ export function formatBytes(bytes) {
 
 // ── GitHub Actions integration ─────────────────────────────────────────────
 
+// GitHub slug validation: owner/repo names must be alphanumeric + limited punctuation.
+// This prevents tainted sessionStorage values from being injected into API URLs (SSRF).
+const _GH_SLUG_RE = /^[a-zA-Z0-9_.-]{1,100}$/
+export function validateGitHubSlugs(owner, repo) {
+  if (!_GH_SLUG_RE.test(owner)) throw new Error(`Invalid GitHub owner: "${owner}"`)
+  if (!_GH_SLUG_RE.test(repo))  throw new Error(`Invalid GitHub repo: "${repo}"`)
+}
+
 // All GitHub config (including gh_token) is stored in sessionStorage so it
 // is cleared when the tab closes — minimizes PAT exposure window.
 export function getGitHubConfig() {
@@ -52,6 +60,8 @@ export async function triggerGitHubWorkflow(workflow, inputs = {}) {
   const stamp = checkRateLimit(workflow, 30000)
   const { ghToken, ghOwner, ghRepo, ghBranch } = getGitHubConfig()
   if (!ghToken || !ghOwner || !ghRepo) throw new Error('GitHub not configured. Go to Settings → Integrations.')
+  // Validate slugs before URL construction (SSRF prevention)
+  validateGitHubSlugs(ghOwner, ghRepo)
   const res = await fetch(
     `https://api.github.com/repos/${ghOwner}/${ghRepo}/actions/workflows/${workflow}/dispatches`,
     {
@@ -76,6 +86,8 @@ export async function triggerGitHubWorkflow(workflow, inputs = {}) {
 export async function getGitHubWorkflowRuns(workflow) {
   const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
   if (!ghToken || !ghOwner || !ghRepo) return null
+  // Validate slugs before URL construction (SSRF prevention)
+  try { validateGitHubSlugs(ghOwner, ghRepo) } catch { return null }
   const res = await fetch(
     `https://api.github.com/repos/${ghOwner}/${ghRepo}/actions/workflows/${workflow}/runs?per_page=10`,
     { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }

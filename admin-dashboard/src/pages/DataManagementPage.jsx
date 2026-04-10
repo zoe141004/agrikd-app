@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { downloadFile, formatBytes, formatDateTime, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
+import { downloadFile, formatBytes, formatDateTime, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, validateGitHubSlugs, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const DTABS = ['Overview', 'Stage Data', 'DVC Operations', 'Prediction Data', 'Storage Files']
@@ -486,6 +486,8 @@ export default function DataManagementPage() {
         setDvcDatasetsLoading(false)
         return
       }
+      // Validate slugs before URL construction (SSRF prevention)
+      validateGitHubSlugs(ghOwner, ghRepo)
       const res = await fetch(
         `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents?ref=${ghBranch}`,
         { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }
@@ -495,6 +497,8 @@ export default function DataManagementPage() {
       const dvcFiles = files.filter(f => f.name.endsWith('.dvc') && f.name.startsWith('data_'))
       const datasets = []
       for (const df of dvcFiles) {
+        // Validate download_url is from GitHub raw content (SSRF prevention)
+        if (!df.download_url?.startsWith('https://raw.githubusercontent.com/')) continue
         const contentRes = await fetch(df.download_url)
         const content = await contentRes.text()
         const leafType = df.name.replace('data_', '').replace('.dvc', '')
