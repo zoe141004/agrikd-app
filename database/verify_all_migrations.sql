@@ -241,6 +241,21 @@ BEGIN
         CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 013' END
     );
 
+    -- model_registry.onnx_sha256 (013)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'model_registry'
+          AND column_name = 'onnx_sha256'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '02. Columns',
+        'model_registry.onnx_sha256',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 013' END
+    );
+
     -- devices.device_token (012)
     SELECT EXISTS (
         SELECT 1 FROM information_schema.columns
@@ -573,6 +588,41 @@ BEGIN
              ELSE 'DEFAULT=' || _text_val || ' (unexpected)' END
     );
 
+    -- model_engines: UNIQUE(leaf_type, version, hardware_tag) from 013
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'model_engines'
+          AND constraint_name = 'uq_model_engines_hw'
+          AND constraint_type = 'UNIQUE'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '09. Constraints (013)',
+        'model_engines UNIQUE(leaf_type, version, hardware_tag)',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'CONSTRAINT MISSING — run 013' END
+    );
+
+    -- devices: UNIQUE(hw_id) from 012
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        WHERE tc.table_schema = 'public'
+          AND tc.table_name = 'devices'
+          AND tc.constraint_type = 'UNIQUE'
+          AND kcu.column_name = 'hw_id'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '09. Constraints (012)',
+        'devices UNIQUE(hw_id)',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'UNIQUE MISSING — run 012' END
+    );
+
     -- =====================================================================
     -- SECTION 10: Storage Buckets (005)
     -- =====================================================================
@@ -594,8 +644,12 @@ BEGIN
     -- =====================================================================
     FOREACH _pol IN ARRAY ARRAY[
         'Public read models', 'Admin upload models',
+        'Admin update models', 'Admin delete models',
         'Public read datasets', 'Admin upload datasets',
-        'Users upload own images', 'Users read own images', 'Admin read all images'
+        'Admin update datasets', 'Admin delete datasets',
+        'Users upload own images', 'Users read own images',
+        'Users delete own images',
+        'Admin read all images', 'Admin delete all images'
     ] LOOP
         SELECT EXISTS (
             SELECT 1 FROM pg_policies
@@ -751,6 +805,38 @@ BEGIN
              ELSE COALESCE(_text_val, 'function not found') END
     );
 
+    -- Check that get_disease_distribution uses PL/pgSQL — indicates admin guard
+    SELECT l.lanname INTO _text_val
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    JOIN pg_language l ON p.prolang = l.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_disease_distribution';
+
+    INSERT INTO _verify_results VALUES (
+        '15. Admin Guards (014)',
+        'get_disease_distribution() language',
+        CASE WHEN _text_val = 'plpgsql' THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _text_val = 'plpgsql' THEN 'plpgsql (has admin guard)'
+             WHEN _text_val = 'sql' THEN 'sql — missing admin guard! Run 014'
+             ELSE COALESCE(_text_val, 'function not found') END
+    );
+
+    -- Check that get_leaf_type_options uses PL/pgSQL — indicates admin guard
+    SELECT l.lanname INTO _text_val
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    JOIN pg_language l ON p.prolang = l.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_leaf_type_options';
+
+    INSERT INTO _verify_results VALUES (
+        '15. Admin Guards (014)',
+        'get_leaf_type_options() language',
+        CASE WHEN _text_val = 'plpgsql' THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _text_val = 'plpgsql' THEN 'plpgsql (has admin guard)'
+             WHEN _text_val = 'sql' THEN 'sql — missing admin guard! Run 014'
+             ELSE COALESCE(_text_val, 'function not found') END
+    );
+
     -- FK constraint from provisioning_tokens to devices (012)
     SELECT EXISTS (
         SELECT 1 FROM information_schema.table_constraints
@@ -807,6 +893,44 @@ BEGIN
             WHEN _col_type IS NULL THEN 'COLUMN MISSING'
             ELSE 'type=' || _col_type
         END
+    );
+
+    -- audit_log.entity_id must be TEXT (015 casts bigint → text)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'audit_log'
+      AND column_name = 'entity_id';
+
+    INSERT INTO _verify_results VALUES (
+        '16. Migration 015',
+        'audit_log.entity_id type = text',
+        CASE
+            WHEN _col_type = 'text' THEN 'PASS'
+            WHEN _col_type = 'bigint' THEN 'FAIL'
+            WHEN _col_type IS NULL THEN 'FAIL'
+            ELSE 'WARN'
+        END,
+        CASE
+            WHEN _col_type = 'text' THEN 'text (correct)'
+            WHEN _col_type = 'bigint' THEN 'BIGINT — run 015 to convert to TEXT'
+            WHEN _col_type IS NULL THEN 'COLUMN MISSING'
+            ELSE 'type=' || _col_type
+        END
+    );
+
+    -- audit_log_legacy table should NOT exist after 015 cleanup
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'audit_log_legacy'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '16. Migration 015',
+        'audit_log_legacy table [should be dropped]',
+        CASE WHEN NOT _exists THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN NOT _exists THEN 'not present (correct — cleanup complete)'
+             ELSE 'still exists — 015 cleanup may be incomplete' END
     );
 
     -- =====================================================================
