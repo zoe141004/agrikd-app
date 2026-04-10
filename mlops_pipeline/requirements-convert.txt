@@ -8,7 +8,7 @@ onnx2tf>=1.28.8
 tf-keras>=2.18,<3.0
 ai-edge-litert>=1.0,<2.0
 psutil>=5.9,<6.0
-onnx-graphsurgeon==0.5.8
+onnx-graphsurgeon==0.6.1
 sng4onnx==2.0.1
 sne4onnx==2.0.1
 onnxsim==0.6.2
