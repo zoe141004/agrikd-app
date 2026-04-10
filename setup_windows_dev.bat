@@ -92,9 +92,9 @@ echo.
 
 REM ── 4. DVC setup ──────────────────────────────────────────
 echo [4/7] Setting up DVC...
-pip install dvc dvc-gdrive
+pip install dvc dvc-gs
 echo   [OK] DVC installed.
-echo   NOTE: DVC pull/push requires GDRIVE_CREDENTIALS_DATA in .env
+echo   NOTE: DVC pull/push requires GOOGLE_APPLICATION_CREDENTIALS_DATA in .env
 echo         See docs/guides/cicd_setup.md for how to generate credentials.
 echo.
 

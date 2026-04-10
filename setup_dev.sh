@@ -81,7 +81,7 @@ echo ""
 
 # ── 4. DVC setup ─────────────────────────────────────────────
 echo "[4/7] Setting up DVC..."
-pip install dvc dvc-gdrive
+pip install dvc dvc-gs
 echo "  [OK] DVC installed."
 echo ""
 

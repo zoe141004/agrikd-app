@@ -678,7 +678,7 @@ curl http://localhost:8080/health
 - Created `.dvc/config` với Google Drive remote (placeholder `<folder-id>`)
 - Created `.dvc/.gitignore`
 - Created DVC tracking files: `data_tomato.dvc`, `data_burmese_grape_leaf.dvc`
-- Khi có actual folder-id, chạy: `dvc remote modify gdrive url gdrive://<real-id>`
+- DVC remote đã chuyển sang GCS: `gs://agrikd-dvc-data/data`
 
 **6c. DB Encryption**
 - **Đánh giá**: `sqflite_sqlcipher` sẽ encrypt toàn bộ SQLite database

@@ -869,9 +869,9 @@ Restart the service after changing credentials:
 sudo systemctl restart agrikd
 ```
 
-### 9.3 GDrive Service Account Key
+### 9.3 GCS Service Account Key
 
-The file `.dvc/gdrive-sa.json` is gitignored and must never be committed. If
+The service account key file is gitignored and must never be committed. If
 this key was previously exposed in git history, rotate it immediately in the
 Google Cloud Console and replace the file on all deployed Jetson devices.
 
@@ -1101,7 +1101,7 @@ issued by a trusted CA (e.g., Let's Encrypt).
 | **HTTP 429 on `/predict`** | The client IP has exceeded 30 requests per minute. Wait 60 seconds before retrying or reduce request frequency. |
 | **"Invalid file type" on `/predict`** | Only jpg, jpeg, png, bmp, and tiff extensions are accepted. Rename or convert the file to a supported format. |
 | **`config.json` not found after git clone** | The file `jetson/config/config.json` is gitignored. Copy from the template: `cp config/config.example.json config/config.json`. |
-| **GDrive service account key missing** | The file `.dvc/gdrive-sa.json` is gitignored. Obtain the key from your Google Cloud Console and place it at that path. If previously exposed in git history, rotate the key immediately. |
+| **GCS service account key missing** | Set `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to the SA JSON key, or place it as `.dvc/gcs-sa.json`. Obtain the key from Google Cloud Console. If previously exposed in git history, rotate the key immediately. |
 
 ---
 

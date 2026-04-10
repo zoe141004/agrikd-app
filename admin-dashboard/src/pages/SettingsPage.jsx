@@ -290,7 +290,7 @@ export default function SettingsPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
             {[
-              { workflow: 'dvc-push.yml', label: 'DVC Push', desc: 'Sync prediction data to DVC remote (S3/GDrive)', color: '#16a34a' },
+              { workflow: 'dvc-push.yml', label: 'DVC Push', desc: 'Sync prediction data to DVC remote (GCS)', color: '#16a34a' },
               { workflow: 'dvc-pull.yml', label: 'DVC Pull', desc: 'Pull latest tracked data from DVC remote', color: '#0284c7' },
               { workflow: 'deploy.yml', label: 'Redeploy App', desc: 'Trigger Vercel production deployment via GitHub push', color: '#ca8a04' },
               { workflow: 'export-data.yml', label: 'Export to DVC', desc: 'Export prediction DB snapshot and push to DVC', color: '#065f46' },
@@ -365,7 +365,7 @@ export default function SettingsPage() {
             {[
               ['Tomato DVC file', 'data_tomato.dvc'],
               ['Burmese Grape DVC file', 'data_burmese_grape_leaf.dvc'],
-              ['Remote type', 'Configurable (gdrive / s3 / gcs / azure)'],
+              ['Remote type', 'Google Cloud Storage (gs://agrikd-dvc-data)'],
               ['DVC config path', '.dvc/config'],
               ['CI trigger', 'Settings → CI/CD → DVC Push/Pull buttons'],
             ].map(([k, v]) => (

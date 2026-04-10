@@ -254,7 +254,7 @@ export default function DataManagementPage() {
       setDvcOps(prev => [op, ...prev])
       subscribeToDvcOp(op.id)
       setDvcOpStatus('pending')
-      setDsMsg({ type: 'success', text: `Workflow dispatched. Dataset will be validated and pushed directly to DVC (Google Drive).` })
+      setDsMsg({ type: 'success', text: `Workflow dispatched. Dataset will be validated and pushed directly to DVC (GCS).` })
       logAudit(supabase, 'dvc_staging_triggered', 'dvc_operation', op.id, { source, leaf_type: inputs.leaf_type })
     } catch (err) {
       setDsMsg({ type: 'error', text: err.message })
@@ -873,7 +873,7 @@ export default function DataManagementPage() {
               <div className="card-header"><div><div className="card-label">Method A</div><div className="card-title">From User Predictions</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Export user predictions as a dataset and push directly to DVC (Google Drive). Images are downloaded, organized by class, and tracked via DVC.</div>
+                <div>Export user predictions as a dataset and push directly to DVC (GCS). Images are downloaded, organized by class, and tracked via DVC.</div>
               </div>
               <div className="form-group">
                 <label className="form-label">Leaf Type *</label>
@@ -909,7 +909,7 @@ export default function DataManagementPage() {
               <div className="card-header"><div><div className="card-label">Method B</div><div className="card-title">From External Source</div></div></div>
               <div className="alert alert-info" style={{ marginBottom: 16 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                <div>Download dataset from Google Drive or Kaggle, validate structure, and push directly to DVC (Google Drive).<br/><strong>Expected structure:</strong> <code>dataset_name/class_name/images.*</code></div>
+                <div>Download dataset from Google Drive or Kaggle, validate structure, and push directly to DVC (GCS).<br/><strong>Expected structure:</strong> <code>dataset_name/class_name/images.*</code></div>
               </div>
               <div className="form-group">
                 <label className="form-label">Source</label>
@@ -975,7 +975,7 @@ export default function DataManagementPage() {
             {/* DVC Pull/Verify */}
             <div className="card">
               <div className="card-header"><div><div className="card-label">DVC Pull</div><div className="card-title">Verify Remote</div></div></div>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Pull latest datasets from DVC remote (Google Drive). Runs via GitHub Actions.</p>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>Pull latest datasets from DVC remote (GCS). Runs via GitHub Actions.</p>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <select value={dvcPullLeaf} onChange={e => setDvcPullLeaf(e.target.value)} className="form-input" style={{ flex: 1 }}>
                   <option value="">All datasets</option>

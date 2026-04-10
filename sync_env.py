@@ -85,7 +85,7 @@ MOBILE_KEYS = {"SUPABASE_URL", "SUPABASE_ANON_KEY", "GOOGLE_WEB_CLIENT_ID", "SEN
 def sync_mobile_app(env):
     """Write mobile_app/.env with only the keys the Flutter app needs.
 
-    Intentionally excludes SUPABASE_SERVICE_ROLE_KEY and GDRIVE_CREDENTIALS_DATA
+    Intentionally excludes SUPABASE_SERVICE_ROLE_KEY and GOOGLE_APPLICATION_CREDENTIALS_DATA
     so they are never bundled into local debug APK builds.
     """
     dest = os.path.join(ROOT, "mobile_app", ".env")

@@ -31,7 +31,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install DVC
-        run: pip install dvc dvc-gdrive
+        run: pip install dvc dvc-gs
 
       - name: Report status — pulling
         if: inputs.dvc_operation_id != ''
@@ -51,7 +51,6 @@ jobs:
 
       - name: DVC Pull
         run: |
-          dvc remote modify gdrive gdrive_use_service_account true
           if [ -n "$LEAF_TYPE" ]; then
             DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
             if [ ! -f "$DVC_FILE" ]; then
@@ -86,14 +85,14 @@ jobs:
             done
           fi
         env:
-          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Cleanup DVC credentials
         if: always()
         run: |
           rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
-          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
+          unset GOOGLE_APPLICATION_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Report dataset info
         run: |

@@ -86,7 +86,7 @@ mobile_app/android/local.properties
 mobile_app/android/.gradle/
 
 # Secrets — NEVER commit (rotate if exposed in git history)
-.dvc/gdrive-sa.json
+.dvc/gcs-sa.json
 .dvc/config.local
 jetson/config/config.json
 

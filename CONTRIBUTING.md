@@ -78,7 +78,7 @@ python3 sync_env.py
 | `SUPABASE_ANON_KEY` | Supabase anonymous key | Flutter, Admin, Jetson |
 | `GOOGLE_WEB_CLIENT_ID` | Google OAuth client ID | Flutter |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service-level access | CI/CD workflows |
-| `GDRIVE_CREDENTIALS_DATA` | GDrive service account JSON | DVC workflows |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | GCS service account JSON | DVC workflows |
 | `SENTRY_DSN` | Sentry error tracking DSN | Flutter, Admin Dashboard |
 
 ### CI/CD Secrets (GitHub)
@@ -88,7 +88,7 @@ python3 sync_env.py
 | `SUPABASE_URL` | ci.yml, release.yml, model-pipeline.yml |
 | `SUPABASE_ANON_KEY` | ci.yml, release.yml |
 | `SUPABASE_SERVICE_ROLE_KEY` | model-pipeline.yml, dataset-upload.yml, export-data.yml |
-| `GDRIVE_CREDENTIALS_DATA` | All DVC workflows |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | All DVC workflows |
 | `SENTRY_DSN` | ci.yml, release.yml |
 | `VERCEL_DEPLOY_HOOK` | deploy.yml |
 
@@ -256,7 +256,7 @@ policy change to confirm RLS is correctly applied.
 
 | Path | Status | If Exposed |
 |------|--------|------------|
-| `.dvc/gdrive-sa.json` | Gitignored | Rotate GDrive SA key immediately |
+| `.dvc/gcs-sa.json` | Gitignored | Rotate GCS SA key immediately |
 | `jetson/config/config.json` | Gitignored | Recreate from `config.example.json` |
 | `.env` | Gitignored | Rotate all keys and Sentry DSN |
 

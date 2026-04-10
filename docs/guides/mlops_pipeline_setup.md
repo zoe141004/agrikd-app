@@ -45,15 +45,14 @@ cd D:/Capstone/app
 # Initialize DVC (skip if .dvc/ already exists)
 dvc init
 
-# Configure Google Drive remote
-dvc remote add -d gdrive gdrive://<your-folder-id>
-dvc remote modify gdrive gdrive_use_service_account true
+# Configure GCS remote
+dvc remote add -d gcs gs://agrikd-dvc-data/data
 
 # Pull datasets
 dvc pull
 ```
 
-For CI/CD, the `GDRIVE_CREDENTIALS_DATA` secret (base64-encoded service account JSON) is used for authentication.
+For CI/CD, the `GOOGLE_APPLICATION_CREDENTIALS_DATA` secret (service account JSON) is used for authentication.
 
 ## 4. Config Files
 

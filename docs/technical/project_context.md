@@ -420,7 +420,7 @@ workflows (the `GITHUB_TOKEN` is auto-provided and not counted):
 | `SUPABASE_SERVICE_ROLE_KEY` | model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml | Service role key (bypasses RLS) |
 | `SENTRY_DSN` | ci.yml, release.yml | Sentry Data Source Name for error tracking |
 | `GOOGLE_WEB_CLIENT_ID` | ci.yml, release.yml | Google OAuth client ID for `--dart-define` |
-| `GDRIVE_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml | Google Drive service account JSON for DVC |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml | GCS service account JSON for DVC |
 | `VERCEL_DEPLOY_HOOK` | deploy.yml | Vercel deploy webhook URL |
 | `KAGGLE_USERNAME` | dataset-upload.yml | Kaggle API username for external dataset downloads |
 | `KAGGLE_KEY` | dataset-upload.yml | Kaggle API key for external dataset downloads |

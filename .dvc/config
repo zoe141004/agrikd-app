@@ -1,5 +1,5 @@
 [core]
-    remote = gdrive
+    remote = gcs
     autostage = true
-['remote "gdrive"']
-    url = gdrive://1HxkDdlgtwAUREw6i864rFXxBkOeMdagx
+['remote "gcs"']
+    url = gs://agrikd-dvc-data/data

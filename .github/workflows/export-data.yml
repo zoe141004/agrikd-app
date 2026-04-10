@@ -30,7 +30,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install dvc dvc-gdrive requests
+        run: pip install dvc dvc-gs requests
 
       - name: Report status — exporting
         if: inputs.dvc_operation_id != ''
@@ -72,17 +72,16 @@ jobs:
 
       - name: DVC add and push
         run: |
-          dvc remote modify gdrive gdrive_use_service_account true
           dvc add data/exports/predictions_snapshot.json
           dvc push
         env:
-          GDRIVE_CREDENTIALS_DATA: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
 
       - name: Cleanup DVC credentials
         if: always()
         run: |
           rm -f ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
-          unset GDRIVE_CREDENTIALS_DATA 2>/dev/null || true
+          unset GOOGLE_APPLICATION_CREDENTIALS_DATA 2>/dev/null || true
 
       - name: Commit DVC tracking file
         run: |

@@ -18,7 +18,7 @@ Go to **Repository → Settings → Secrets and variables → Actions** and add:
 | `SUPABASE_SERVICE_ROLE_KEY` | Model Pipeline, Export Data, Dataset Upload | Supabase Dashboard → Settings → API → service_role key |
 | `SENTRY_DSN` | CI, Release | sentry.io → Project → Settings → Client Keys |
 | `GOOGLE_WEB_CLIENT_ID` | CI, Release | Google Cloud Console → Credentials → OAuth Client ID |
-| `GDRIVE_CREDENTIALS_DATA` | DVC Pull/Push, Train, Validate, Export, Dataset Upload | Base64-encoded Google Drive service account JSON |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | DVC Pull/Push, Train, Validate, Export, Dataset Upload | GCS service account JSON |
 | `VERCEL_DEPLOY_HOOK` | Deploy (optional) | Vercel → Project → Settings → Git → Deploy Hooks |
 | `KAGGLE_USERNAME` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Username |
 | `KAGGLE_KEY` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Create New Token |
@@ -37,7 +37,7 @@ base64 -w 0 service-account.json
 # Windows (PowerShell):
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
 
-# 4. Paste the output as GDRIVE_CREDENTIALS_DATA secret
+# 4. Paste the output as GOOGLE_APPLICATION_CREDENTIALS_DATA secret
 ```
 
 ## 2. Workflows Overview
@@ -131,17 +131,17 @@ with `github_run_id` and `github_run_url` for traceability.
 
 ### Pull data (`dvc-pull.yml`):
 ```
-Manual trigger → Select leaf_type (optional) → Pull from Google Drive
+Manual trigger → Select leaf_type (optional) → Pull from GCS
 ```
 Uses 3 retries with 10s backoff.
 
 ### Push data (`dvc-push.yml`):
 ```
-Manual trigger → Push all DVC-tracked data to Google Drive
+Manual trigger → Push all DVC-tracked data to GCS
 ```
 
 ### Dataset Upload (`dataset-upload.yml`):
-Three source modes — datasets are pushed directly to DVC (Google Drive), not staged in Supabase Storage:
+Three source modes — datasets are pushed directly to DVC (GCS), not staged in Supabase Storage:
 - **gdrive**: Download ZIP from Google Drive URL → prepare dataset → push to DVC
 - **kaggle**: Download dataset from Kaggle → prepare dataset → push to DVC (requires `KAGGLE_USERNAME` + `KAGGLE_KEY` secrets)
 - **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset → push to DVC
@@ -152,7 +152,7 @@ Additional inputs:
 
 ## 7. Export Data (`export-data.yml`)
 
-Manually triggered. Exports all predictions (paginated, 1000/page) from Supabase, saves to `data/exports/predictions_snapshot.json`, then tracks with DVC and pushes to Google Drive.
+Manually triggered. Exports all predictions (paginated, 1000/page) from Supabase, saves to `data/exports/predictions_snapshot.json`, then tracks with DVC and pushes to GCS.
 
 **PII filtering:** Export excludes sensitive fields from the prediction data.
 
@@ -183,7 +183,7 @@ Then target it in workflows with `runs-on: self-hosted`.
 | Problem | Solution |
 |---------|----------|
 | CI fails on `dart format` | Run `dart format .` locally and commit |
-| DVC pull fails | Check `GDRIVE_CREDENTIALS_DATA` secret and Google Drive sharing permissions |
+| DVC pull fails | Check `GOOGLE_APPLICATION_CREDENTIALS_DATA` secret and GCS bucket IAM permissions |
 | APK build fails on secrets | Ensure all 4 secrets are set: SUPABASE_URL, SUPABASE_ANON_KEY, SENTRY_DSN, GOOGLE_WEB_CLIENT_ID |
 | Model conversion not running | Commit message must contain `[model]` or change files in `mlops_pipeline/` |
 | Release not created | Tag must match `v*` pattern (e.g., `v1.0.0`) |

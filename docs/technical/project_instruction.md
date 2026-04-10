@@ -228,9 +228,9 @@ app/
 |   |-- model-rollback.yml            # Rollback model to previous version
 |   |-- validate-model.yml            # Validate + benchmark a specific model
 |   |-- train.yml                     # Run full training pipeline
-|   |-- dvc-pull.yml                  # Pull datasets from Google Drive
-|   |-- dvc-push.yml                  # Push datasets to Google Drive
-|   |-- dataset-upload.yml            # Add new dataset from GDrive or predictions
+|   |-- dvc-pull.yml                  # Pull datasets from GCS
+|   |-- dvc-push.yml                  # Push datasets to GCS
+|   |-- dataset-upload.yml            # Add new dataset from GDrive/Kaggle or predictions
 |   |-- deploy.yml                    # Trigger Vercel deployment
 |   |-- export-data.yml               # Export predictions from Supabase
 |
@@ -881,7 +881,7 @@ File: `lib/data/sync/supabase_sync_service.dart` — method `downloadModelUpdate
 | Model Hosting | GitHub Releases | Free | .tflite files < 2 GB each |
 | MQTT Broker (IoT) | Eclipse Mosquitto | Free | Self-hosted tren Jetson hoac VPS |
 | CI/CD | GitHub Actions | Free | Public repo unlimited minutes |
-| Data Storage | Google Drive (DVC) | Free | 15 GB free |
+| Data Storage | Google Cloud Storage (DVC) | Free | 5 GB free (us-east1) |
 | Monitoring | GitHub Issues + Logs | Free | Manual monitoring |
 
 **Tong chi phi: 0 VND/thang**
@@ -973,9 +973,9 @@ curl http://localhost:8080/health
 | **Model Rollback** | `model-rollback.yml` | Rollback model to previous version |
 | **Validate Model** | `validate-model.yml` | Validate + benchmark a specific model |
 | **Train** | `train.yml` | Run full training pipeline |
-| **DVC Pull** | `dvc-pull.yml` | Pull datasets from Google Drive |
-| **DVC Push** | `dvc-push.yml` | Push datasets to Google Drive |
-| **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive or predictions |
+| **DVC Pull** | `dvc-pull.yml` | Pull datasets from GCS |
+| **DVC Push** | `dvc-push.yml` | Push datasets to GCS |
+| **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive/Kaggle or predictions |
 | **Deploy** | `deploy.yml` | Trigger Vercel deployment for admin dashboard |
 | **Export Data** | `export-data.yml` | Export predictions from Supabase |
 
@@ -1048,8 +1048,8 @@ Central index luu tai `mlops_pipeline/configs/model_registry.json`:
 Files: `.dvc/config`, `data_tomato.dvc`, `data_burmese_grape_leaf.dvc`
 
 ```bash
-# DVC da duoc khoi tao voi Google Drive remote
-# Can thay <folder-id> trong .dvc/config bang actual Google Drive folder ID
+# DVC da duoc khoi tao voi Google Cloud Storage remote
+# Remote: gs://agrikd-dvc-data/data
 
 # Sau khi config xong:
 dvc push                  # Upload datasets to remote
