@@ -62,7 +62,7 @@ A paginated table of all prediction records submitted by mobile app users.
 | Feature | Description |
 |---------|-------------|
 | Search | Free-text search across prediction metadata |
-| Filter by leaf type | Narrow results to Tomato or Burmese Grape Leaf |
+| Filter by leaf type | Dynamic dropdown populated from DataContext (synced across pages) |
 | Filter by date | Select a date range to scope results |
 | CSV export | Download the current filtered view as a `.csv` file |
 
@@ -121,9 +121,25 @@ Five tabs:
     filter, 20-per-page pagination, inline label editing (click label →
     edit → save), and full-size image preview modal.
 
-Operation tracking uses Supabase Realtime subscriptions on the
-`dvc_operations` table with GitHub Actions polling as a fallback, so
-status persists across page refreshes.
+Operation tracking uses a three-layer strategy: Supabase Realtime
+subscriptions on the `dvc_operations` table (primary), GitHub Actions API
+polling every 15 seconds (secondary), and direct database polling every
+10 seconds (tertiary fallback). Status persists across page refreshes.
+
+### Data Synchronization
+
+The dashboard uses a shared **DataContext** (`src/lib/DataContext.jsx`) to
+keep cross-page state synchronized without requiring page reloads:
+
+- **Leaf type options** are merged from three sources: the `predictions`
+  table (via RPC), the `model_registry` table, and completed `dvc_operations`.
+  All pages share the same list, so uploading a dataset or model on one page
+  immediately updates dropdowns on every other page.
+- **DVC tracked datasets** are loaded once and refreshed when operations
+  complete.
+- **GitHub connection status** is shared across Settings and other pages that
+  depend on GitHub integration.
+- Navigating between pages automatically refreshes shared leaf type data.
 
 ### Releases (`/releases`)
 
@@ -137,20 +153,23 @@ Integration with GitHub Releases.
 Operational status overview.
 
 - **Supabase status** -- Connection health and API latency.
-- **Database statistics** -- Row counts and table sizes.
-- **Storage buckets** -- Number of Supabase Storage buckets detected.
+- **Database statistics** -- Prediction count, model registry, DVC operations,
+  and pipeline runs.
+- **Storage buckets** -- Probes the three known buckets (`models`, `datasets`,
+  `prediction-images`) individually and reports how many are accessible.
 
 ### Settings (`/settings`)
 
 Application-level configuration with six tabs: **General**, **Integrations**,
 **Admin**, **CI/CD**, **Deployment**, and **Audit Log**.
 
-- **General** -- View and update general app configuration values. Display
-  the current Supabase connection details (project URL and anonymous key).
+- **General** -- Application info and dynamic system statistics (prediction
+  count, model count, DVC operations, registered users).
 - **Integrations** -- Configure GitHub repository owner, repo name,
   branch, and Personal Access Token (PAT). Token is stored in
-  `localStorage` (persists across sessions). Required for DVC sync,
-  model validation, and CI/CD triggers.
+  `sessionStorage` (cleared when the browser tab closes). The **Test
+  Connection** button validates the GitHub API connection and updates the
+  badge (Connected / Connection Failed / Not Tested / Not configured).
 - **Admin** -- Admin-specific settings and user management shortcuts.
 - **CI/CD** -- Quick-trigger buttons for common CI/CD workflows.
 - **Deployment** -- Trigger Vercel deployments and view deployment status.
@@ -296,3 +315,6 @@ The following GitHub secrets are used by admin dashboard workflows:
 | Pipeline trigger fails | GitHub token or workflow permissions | Check repository Actions settings and secrets |
 | CSV export is empty | Active filters exclude all records | Clear filters and retry |
 | Blank page with console errors | JavaScript crash not caught | Check Sentry dashboard for error details, or browser DevTools |
+| Test Connection shows "Not Tested" | Config saved but not tested | Click the "Test Connection" button after saving |
+| Storage shows "0/3 buckets OK" | Supabase Storage buckets not created | Create `models`, `datasets`, and `prediction-images` buckets in the Supabase dashboard |
+| Leaf type dropdown empty | No predictions, models, or DVC operations | Upload a dataset or model first; the dropdown merges leaf types from all three sources |
