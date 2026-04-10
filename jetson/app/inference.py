@@ -138,6 +138,45 @@ class TensorRTInference:
             "inference_time_ms": round(elapsed_ms, 2),
         }
 
+    def cleanup(self):
+        """Release CUDA device memory and TensorRT resources."""
+        try:
+            import pycuda.driver as cuda
+        except ImportError:
+            return
+
+        for attr in ("d_input", "d_output"):
+            buf = getattr(self, attr, None)
+            if buf is not None:
+                try:
+                    buf.free()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        for attr in ("stream", "context", "engine"):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                try:
+                    del obj
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        self.h_input = None
+        self.h_output = None
+        logger.debug("TensorRT resources released for %s", self.engine_path)
+
+    def __del__(self):
+        self.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
+        return False
+
 
 # ── Sentinel to signal worker shutdown ──
 _SHUTDOWN = object()
@@ -199,8 +238,12 @@ class InferenceWorkerPool:
         return list(self._leaf_types)
 
     def shutdown(self):
-        """Signal the worker to exit (best-effort)."""
+        """Signal the worker to exit and clean up GPU resources."""
         self._queue.put(_SHUTDOWN)
+        self._thread.join(timeout=10)
+        for engine in self._engines.values():
+            engine.cleanup()
+        self._engines.clear()
 
     # ── Worker (runs on its own thread — owns CUDA context) ─────────
 

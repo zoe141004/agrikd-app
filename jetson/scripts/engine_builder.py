@@ -94,7 +94,8 @@ def supabase_rpc(base_url, key, function_name, params):
 def _validate_storage_url(url, base_url):
     """Validate that a download URL is HTTPS and on the configured Supabase host.
 
-    Prevents SSRF by rejecting URLs that point outside our Supabase storage.
+    Prevents SSRF by rejecting URLs that point outside our Supabase storage,
+    contain embedded credentials, or use non-standard ports.
     """
     try:
         parsed = urlparse(url)
@@ -107,6 +108,12 @@ def _validate_storage_url(url, base_url):
         raise ValueError(
             f"Download URL host '{parsed.hostname}' does not match "
             f"configured Supabase host '{allowed_host}'"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Download URLs must not contain embedded credentials")
+    if parsed.port is not None and parsed.port != 443:
+        raise ValueError(
+            f"Download URL uses non-standard port {parsed.port}; only 443 is allowed"
         )
 
 

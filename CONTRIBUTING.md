@@ -11,7 +11,7 @@ dashboard, and Jetson edge deployment. This guide reflects the Phase 2 layout.
 | Tool | Minimum Version | Purpose |
 |------|-----------------|---------|
 | Git | 2.30+ | Version control |
-| Flutter SDK | 3.41.4+ | Mobile application |
+| Flutter SDK | 3.41.4+ (includes Dart SDK ^3.11.1) | Mobile application |
 | Python | 3.10+ | MLOps pipeline |
 | Node.js | 18+ | Admin dashboard |
 | Android Studio or VS Code | Latest stable | IDE with Flutter/Dart plugin |

@@ -1,19 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
-import DashboardPage from './pages/DashboardPage'
-import PredictionsPage from './pages/PredictionsPage'
-import ModelsPage from './pages/ModelsPage'
-import UsersPage from './pages/UsersPage'
-import DataManagementPage from './pages/DataManagementPage'
-import ReleasesPage from './pages/ReleasesPage'
-import SystemHealthPage from './pages/SystemHealthPage'
-import SettingsPage from './pages/SettingsPage'
-import ModelReportsPage from './pages/ModelReportsPage'
-import DevicesPage from './pages/DevicesPage'
+
+// Lazy-load page components for faster initial bundle
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const PredictionsPage = lazy(() => import('./pages/PredictionsPage'))
+const ModelsPage = lazy(() => import('./pages/ModelsPage'))
+const UsersPage = lazy(() => import('./pages/UsersPage'))
+const DataManagementPage = lazy(() => import('./pages/DataManagementPage'))
+const ReleasesPage = lazy(() => import('./pages/ReleasesPage'))
+const SystemHealthPage = lazy(() => import('./pages/SystemHealthPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const ModelReportsPage = lazy(() => import('./pages/ModelReportsPage'))
+const DevicesPage = lazy(() => import('./pages/DevicesPage'))
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -103,19 +105,21 @@ export default function App() {
   return (
     <ErrorBoundary>
       <Layout session={session} profile={profile} onSignOut={() => supabase.auth.signOut()}>
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/predictions" element={<PredictionsPage />} />
-          <Route path="/models" element={<ModelsPage />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/devices" element={<DevicesPage />} />
-          <Route path="/data" element={<DataManagementPage />} />
-          <Route path="/releases" element={<ReleasesPage />} />
-          <Route path="/health" element={<SystemHealthPage />} />
-          <Route path="/reports" element={<ModelReportsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}><div className="spinner" /></div>}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/predictions" element={<PredictionsPage />} />
+            <Route path="/models" element={<ModelsPage />} />
+            <Route path="/users" element={<UsersPage />} />
+            <Route path="/devices" element={<DevicesPage />} />
+            <Route path="/data" element={<DataManagementPage />} />
+            <Route path="/releases" element={<ReleasesPage />} />
+            <Route path="/health" element={<SystemHealthPage />} />
+            <Route path="/reports" element={<ModelReportsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </Layout>
     </ErrorBoundary>
   )

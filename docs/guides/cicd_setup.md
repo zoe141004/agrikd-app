@@ -47,8 +47,7 @@ base64 -w 0 service-account.json
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | Push to `main`/`release/*`, PRs to `main` | Lint, test, build APK |
-| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release |
-
+| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release || **CodeQL** | `codeql.yml` | Push to `main`, PRs to `main`, weekly schedule | Security scanning (JS/TS + Python) |
 ### Manual workflows (workflow_dispatch):
 
 | Workflow | File | Purpose |

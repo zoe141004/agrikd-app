@@ -1,4 +1,4 @@
-import 'dart:io' show File;
+import 'dart:io' show Directory, File;
 
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
@@ -58,7 +58,9 @@ class ModelDao {
   }
 
   /// Add a new active version via OTA. Manages the 2-active-version rotation:
-  /// 1. If already 2 active versions, delete the oldest (+ file on disk)
+  /// 1. If already 2 active versions, delete the oldest from DB (file cleanup
+  ///    is deferred to DiagnosisRepository after successful model load to
+  ///    prevent race conditions where the old file is deleted while in use)
   /// 2. Deselect all versions for this leaf type
   /// 3. Insert new version as active + selected
   Future<void> promoteNewVersion({
@@ -70,7 +72,6 @@ class ModelDao {
     required String classLabels,
   }) async {
     final db = await _db;
-    final filesToDelete = <String>[];
 
     await db.transaction((txn) async {
       // 1. Get current active versions
@@ -81,13 +82,10 @@ class ModelDao {
         orderBy: "updated_at ASC",
       );
 
-      // 2. If already 2 active, delete the oldest
+      // 2. If already 2 active, delete the oldest from DB only
+      //    (file cleanup deferred to avoid race with model loading)
       if (actives.length >= 2) {
         final oldest = actives.first;
-        final path = oldest['file_path'] as String?;
-        if (path != null && (oldest['is_bundled'] as int) == 0) {
-          filesToDelete.add(path);
-        }
         await txn.delete('models', where: "id = ?", whereArgs: [oldest['id']]);
       }
 
@@ -114,14 +112,44 @@ class ModelDao {
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
     });
+  }
 
-    // Delete files AFTER transaction commits successfully
-    for (final path in filesToDelete) {
-      try {
-        await File(path).delete();
-      } catch (e) {
-        debugPrint('[ModelDao] Failed to delete file $path: $e');
+  /// Clean up orphaned model files on disk that are no longer tracked in DB.
+  /// Call AFTER a model has been successfully loaded to avoid deleting
+  /// files that are still being used for inference.
+  Future<void> cleanupOrphanedFiles(String leafType, String modelDir) async {
+    final db = await _db;
+
+    // Get all tracked file paths for this leaf type
+    final rows = await db.query(
+      'models',
+      columns: ['file_path'],
+      where: "leaf_type = ? AND is_bundled = 0",
+      whereArgs: [leafType],
+    );
+    final trackedPaths = rows
+        .map((r) => r['file_path'] as String?)
+        .whereType<String>()
+        .toSet();
+
+    // Scan model directory for .tflite files not in DB
+    try {
+      final dir = Directory(modelDir);
+      if (!await dir.exists()) return;
+      await for (final entity in dir.list()) {
+        if (entity is File && entity.path.endsWith('.tflite')) {
+          if (!trackedPaths.contains(entity.path)) {
+            try {
+              await entity.delete();
+              debugPrint('[ModelDao] Cleaned up orphaned file: ${entity.path}');
+            } catch (e) {
+              debugPrint('[ModelDao] Failed to clean up ${entity.path}: $e');
+            }
+          }
+        }
       }
+    } catch (e) {
+      debugPrint('[ModelDao] Directory scan failed for $modelDir: $e');
     }
   }
 

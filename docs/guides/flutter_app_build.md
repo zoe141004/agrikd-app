@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Flutter SDK 3.41.4+ ([install](https://docs.flutter.dev/get-started/install))
+- Flutter SDK 3.41.4+ (includes Dart SDK ^3.11.1) ([install](https://docs.flutter.dev/get-started/install))
 - Android Studio (for Android SDK and emulator)
 - JDK 17 (bundled with Android Studio or install Zulu JDK)
 - Git

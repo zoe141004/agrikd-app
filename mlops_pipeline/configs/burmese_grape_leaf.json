@@ -4,6 +4,7 @@
     "num_classes": 5,
     "input_size": [224, 224],
     "input_channels": 3,
+    "input_layout": "NCHW",
     "checkpoint_filename": "burmese_grape_leaf_student.pth",
     "data_dir": "data/burmese_grape_leaf",
     "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",

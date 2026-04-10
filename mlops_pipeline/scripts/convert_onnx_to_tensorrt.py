@@ -36,9 +36,12 @@ Usage (on Jetson):
 """
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def convert_with_trtexec(
@@ -62,9 +65,9 @@ def convert_with_trtexec(
     Returns:
         Path to the saved engine file.
     """
-    print("\n" + "=" * 60)
-    print("  AgriKD: ONNX -> TensorRT (trtexec)")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("  AgriKD: ONNX -> TensorRT (trtexec)")
+    logger.info("=" * 60)
     
     # Build trtexec command
     cmd = [
@@ -77,13 +80,13 @@ def convert_with_trtexec(
     
     if fp16:
         cmd.append("--fp16")
-        print("[...] FP16 precision enabled")
+        logger.info("[...] FP16 precision enabled")
     
     # Create output directory
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     
-    print(f"[...] Running: {' '.join(cmd)}")
-    print(f"[...] This may take several minutes on Jetson...\n")
+    logger.info(f"[...] Running: {' '.join(cmd)}")
+    logger.info(f"[...] This may take several minutes on Jetson...\n")
     
     try:
         result = subprocess.run(
@@ -95,23 +98,23 @@ def convert_with_trtexec(
         
         if result.returncode == 0:
             file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"\n[OK] TensorRT engine saved: {output_path}")
-            print(f"    File size: {file_size_mb:.2f} MB")
+            logger.info(f"\n[OK] TensorRT engine saved: {output_path}")
+            logger.info(f"    File size: {file_size_mb:.2f} MB")
         else:
-            print(f"\n[FAIL] trtexec failed!")
-            print(f"    stderr: {result.stderr[:500]}")
+            logger.error(f"\n[FAIL] trtexec failed!")
+            logger.error(f"    stderr: {result.stderr[:500]}")
             sys.exit(1)
             
     except FileNotFoundError:
-        print(f"\n[FAIL] 'trtexec' not found!")
-        print(f"    Make sure TensorRT is installed (JetPack SDK)")
-        print(f"    Or try: --method python")
+        logger.error(f"\n[FAIL] 'trtexec' not found!")
+        logger.error(f"    Make sure TensorRT is installed (JetPack SDK)")
+        logger.error(f"    Or try: --method python")
         sys.exit(1)
     except subprocess.TimeoutExpired:
-        print(f"\n[FAIL] trtexec timed out after 10 minutes")
+        logger.error(f"\n[FAIL] trtexec timed out after 10 minutes")
         sys.exit(1)
     
-    print("=" * 60)
+    logger.info("=" * 60)
     return output_path
 
 
@@ -136,22 +139,22 @@ def convert_with_python_api(
     Returns:
         Path to the saved engine file.
     """
-    print("\n" + "=" * 60)
-    print("  AgriKD: ONNX -> TensorRT (Python API)")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("  AgriKD: ONNX -> TensorRT (Python API)")
+    logger.info("=" * 60)
     
     try:
         import tensorrt as trt
     except ImportError:
-        print("[FAIL] TensorRT Python package not installed!")
-        print("    On Jetson: sudo apt-get install python3-libnvinfer")
-        print("    Or try: --method trtexec")
+        logger.error("[FAIL] TensorRT Python package not installed!")
+        logger.error("    On Jetson: sudo apt-get install python3-libnvinfer")
+        logger.error("    Or try: --method trtexec")
         sys.exit(1)
     
     TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
     
-    print(f"[...] TensorRT version: {trt.__version__}")
-    print(f"[...] Loading ONNX model: {input_path}")
+    logger.info(f"[...] TensorRT version: {trt.__version__}")
+    logger.info(f"[...] Loading ONNX model: {input_path}")
     
     # Create builder and network
     builder = trt.Builder(TRT_LOGGER)
@@ -164,10 +167,10 @@ def convert_with_python_api(
     with open(input_path, "rb") as f:
         if not parser.parse(f.read()):
             for i in range(parser.num_errors):
-                print(f"    Parse error: {parser.get_error(i)}")
+                logger.error(f"    Parse error: {parser.get_error(i)}")
             sys.exit(1)
     
-    print(f"[OK] ONNX model parsed successfully")
+    logger.info(f"[OK] ONNX model parsed successfully")
     
     # Configure builder
     config = builder.create_builder_config()
@@ -175,16 +178,16 @@ def convert_with_python_api(
     
     if fp16 and builder.platform_has_fast_fp16:
         config.set_flag(trt.BuilderFlag.FP16)
-        print(f"[...] FP16 precision enabled")
+        logger.info(f"[...] FP16 precision enabled")
     elif fp16:
-        print(f"[WARN] FP16 requested but not supported on this platform")
+        logger.warning(f"[WARN] FP16 requested but not supported on this platform")
     
     # Build engine
-    print(f"[...] Building TensorRT engine (this may take several minutes)...")
+    logger.info(f"[...] Building TensorRT engine (this may take several minutes)...")
     engine = builder.build_engine(network, config)
     
     if engine is None:
-        print(f"[FAIL] Engine build failed!")
+        logger.error(f"[FAIL] Engine build failed!")
         sys.exit(1)
     
     # Save engine
@@ -193,19 +196,19 @@ def convert_with_python_api(
         f.write(engine.serialize())
     
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"\n[OK] TensorRT engine saved: {output_path}")
-    print(f"    File size: {file_size_mb:.2f} MB")
-    print("=" * 60)
+    logger.info(f"\n[OK] TensorRT engine saved: {output_path}")
+    logger.info(f"    File size: {file_size_mb:.2f} MB")
+    logger.info("=" * 60)
     
     return output_path
 
 
 def print_jetson_instructions(onnx_path: str, engine_path: str):
     """Print manual instructions for running on Jetson."""
-    print("\n" + "=" * 60)
-    print("  INSTRUCTIONS: Run on Jetson Device")
-    print("=" * 60)
-    print(f"""
+    logger.info("\n" + "=" * 60)
+    logger.info("  INSTRUCTIONS: Run on Jetson Device")
+    logger.info("=" * 60)
+    logger.info(f"""
 If this script is not run on Jetson, follow these steps:
 
 1. Copy the ONNX model to your Jetson device:
@@ -227,7 +230,7 @@ If this script is not run on Jetson, follow these steps:
 5. Copy the engine back (if needed):
    scp user@jetson-ip:/home/user/agrikd/models/{os.path.basename(engine_path)} .
 """)
-    print("=" * 60)
+    logger.info("=" * 60)
 
 
 def main():

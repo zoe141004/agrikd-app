@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'package:app/core/l10n/app_strings.dart';
 import 'core/config/env_config.dart';
+import 'core/config/ssl_pinning.dart';
 import 'core/config/supabase_config.dart';
 import 'core/constants/model_constants.dart';
 import 'core/theme/app_theme.dart';
@@ -28,6 +30,11 @@ bool _showOfflineNotification = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Enforce SSL certificate validation in production builds
+  HttpOverrides.global = SslPinningHttpOverrides(
+    allowedHost: Uri.tryParse(EnvConfig.supabaseUrl)?.host ?? '',
+  );
 
   // Load .env for local dev; silently skip in production (no .env in release APK)
   try {

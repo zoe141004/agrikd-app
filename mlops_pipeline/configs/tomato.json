@@ -4,6 +4,7 @@
     "num_classes": 10,
     "input_size": [224, 224],
     "input_channels": 3,
+    "input_layout": "NCHW",
     "checkpoint_filename": "tomato_student.pth",
     "data_dir": "data/tomato",
     "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",

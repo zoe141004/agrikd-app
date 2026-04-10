@@ -103,15 +103,18 @@ class HistoryNotifier extends StateNotifier<HistoryState> {
       );
       final newPredictions = rows.map((r) => Prediction.fromMap(r)).toList();
 
-      final combined = [...state.predictions, ...newPredictions];
-      // Cap in-memory list to prevent unbounded memory growth
+      // Cap in-memory list to prevent unbounded memory growth.
+      // Check budget BEFORE combining to avoid temporary over-allocation.
+      final budget = _maxInMemory - state.predictions.length;
+      final trimmed = newPredictions.length > budget
+          ? newPredictions.sublist(0, budget)
+          : newPredictions;
+      final combined = [...state.predictions, ...trimmed];
       final hasMore =
           newPredictions.length >= _pageSize && combined.length < _maxInMemory;
 
       state = state.copyWith(
-        predictions: combined.length > _maxInMemory
-            ? combined.sublist(0, _maxInMemory)
-            : combined,
+        predictions: combined,
         isLoading: false,
         hasMore: hasMore,
       );

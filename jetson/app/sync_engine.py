@@ -53,6 +53,7 @@ class SyncEngine:
         self.db = db
         self._models_config = models_config or {}
         self._shutdown_event = shutdown_event or threading.Event()
+        self._session = requests.Session()
 
         # JWT auth (legacy)
         self._access_token = ""
@@ -157,6 +158,11 @@ class SyncEngine:
         with self._config_lock:
             return self._active_config.copy() if self._active_config else None
 
+    def stop(self):
+        """Signal shutdown and close pending HTTP connections."""
+        self._shutdown_event.set()
+        self._session.close()
+
     # ── Authentication ────────────────────────────────────────────────
 
     def _get_headers(self):
@@ -181,7 +187,7 @@ class SyncEngine:
             return
 
         url = f"{self.supabase_url}/auth/v1/token?grant_type=password"
-        resp = requests.post(
+        resp = self._session.post(
             url,
             json={"email": self.email, "password": self.password},
             headers={
@@ -216,7 +222,7 @@ class SyncEngine:
         )
 
         try:
-            resp = requests.get(url, headers=self._get_headers(), timeout=10, verify=True)
+            resp = self._session.get(url, headers=self._get_headers(), timeout=10, verify=True)
         except requests.RequestException as e:
             logger.warning("Config poll failed (network): %s", e)
             return
@@ -283,7 +289,7 @@ class SyncEngine:
         headers["Prefer"] = "return=minimal"
 
         try:
-            resp = requests.patch(
+            resp = self._session.patch(
                 url,
                 headers=headers,
                 json={
@@ -324,7 +330,7 @@ class SyncEngine:
         headers["Prefer"] = "return=minimal"
 
         try:
-            requests.patch(url, headers=headers, json=body, timeout=10, verify=True)
+            self._session.patch(url, headers=headers, json=body, timeout=10, verify=True)
         except requests.RequestException:
             pass  # Heartbeat is best-effort
 
@@ -394,7 +400,7 @@ class SyncEngine:
             payload_list.append(payload)
 
         try:
-            resp = requests.post(url, headers=headers, json=payload_list, timeout=30, verify=True)
+            resp = self._session.post(url, headers=headers, json=payload_list, timeout=30, verify=True)
             if resp.status_code in (200, 201):
                 for pred in unsynced:
                     self.db.mark_synced(pred["id"])

@@ -18,6 +18,15 @@ updates:
     labels:
       - "dependencies"
 
+  # Flutter / Dart (mobile app)
+  - package-ecosystem: "pub"
+    directory: "/mobile_app"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -21,12 +21,14 @@ Usage:
     model = load_student_from_checkpoint("path/to/checkpoint.pth", num_classes=10)
 """
 
+import logging
 import os
 
 import torch
 import torch.nn as nn
 from torchvision import models
 
+logger = logging.getLogger(__name__)
 
 # Number of MobileNetV2 feature blocks used in the student backbone
 # Full MobileNetV2 has features[0:19] (1280 output); student uses [0:12] (96 output)
@@ -245,16 +247,16 @@ def load_student_from_checkpoint(
     # Check if any actual trained weights are missing
     missing_weights = [k for k in incompatible_keys.missing_keys if 'num_batches_tracked' not in k]
     if missing_weights:
-        print(f"[!] Warning: missing keys from checkpoint: {missing_weights[:5]}...")
+        logger.warning(f"[!] Warning: missing keys from checkpoint: {missing_weights[:5]}...")
 
-    print(f"     Classes: {num_classes}, Device: {device}")
-    print(f"     Backbone: MobileNetV2 features[0:{_BACKBONE_FEATURE_COUNT}] ({_BACKBONE_OUTPUT_DIM}d)")
-    print(f"     Classifier: {_BACKBONE_OUTPUT_DIM} -> {classifier_hidden_dims or _CLASSIFIER_HIDDEN_DIMS} -> {num_classes}")
+    logger.info(f"     Classes: {num_classes}, Device: {device}")
+    logger.info(f"     Backbone: MobileNetV2 features[0:{_BACKBONE_FEATURE_COUNT}] ({_BACKBONE_OUTPUT_DIM}d)")
+    logger.info(f"     Classifier: {_BACKBONE_OUTPUT_DIM} -> {classifier_hidden_dims or _CLASSIFIER_HIDDEN_DIMS} -> {num_classes}")
     
     if "epoch" in checkpoint:
-        print(f"     Trained for: {checkpoint['epoch']} epochs")
+        logger.info(f"     Trained for: {checkpoint['epoch']} epochs")
     if "val_loss" in checkpoint:
-        print(f"     Val loss: {checkpoint['val_loss']:.4f}")
+        logger.info(f"     Val loss: {checkpoint['val_loss']:.4f}")
     
     model.eval()
     return model
@@ -310,14 +312,14 @@ if __name__ == "__main__":
         model = create_student_model(num_classes=num_cls)
         dummy_input = torch.randn(1, 3, 224, 224)
         output = model(dummy_input)
-        print(f"{name}: input={list(dummy_input.shape)} -> output={list(output.shape)}")
+        logger.info(f"{name}: input={list(dummy_input.shape)} -> output={list(output.shape)}")
         assert output.shape == (1, num_cls), f"Expected (1, {num_cls}), got {output.shape}"
     
     # Verify key names match checkpoint format after remapping
     model = create_student_model(num_classes=10)
     model_keys = set(model.state_dict().keys())
-    print(f"\nModel has {len(model_keys)} parameters")
-    print(f"Sample keys: {sorted(list(model_keys))[:3]}")
-    print(f"Classifier keys: {sorted([k for k in model_keys if 'classifier' in k])}")
+    logger.info(f"\nModel has {len(model_keys)} parameters")
+    logger.debug(f"Sample keys: {sorted(list(model_keys))[:3]}")
+    logger.debug(f"Classifier keys: {sorted([k for k in model_keys if 'classifier' in k])}")
     
-    print("\n[OK] All model architecture checks passed!")
+    logger.info("\n[OK] All model architecture checks passed!")

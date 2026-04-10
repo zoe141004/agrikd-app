@@ -55,6 +55,7 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 13 | `database/migrations/013_model_engines.sql` | ONNX URL columns on model_registry + model_engines table for hardware-specific TensorRT engines |
 | 14 | `database/migrations/014_audit_fixes.sql` | Admin-only guards on dashboard RPCs, profiles UPDATE policy for users, model_reports SELECT policy, audit_log user_id index |
 | 15 | `database/migrations/015_audit_log_cleanup.sql` | Migrates legacy audit_log schema (BIGINT id, actor_email) to correct UUID-based schema, preserves existing data |
+| 16 | `database/migrations/016_fk_constraints.sql` | FK constraints: model_benchmarks + model_versions → model_registry (ON DELETE CASCADE) |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning

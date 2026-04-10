@@ -3,10 +3,14 @@
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import threading
 
 logger = logging.getLogger("database")
+
+# Minimum free disk space (bytes) required before writing
+_MIN_DISK_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 class JetsonDatabase:
@@ -58,7 +62,19 @@ class JetsonDatabase:
                 pass  # Column already exists
 
     def save_prediction(self, leaf_type, result, image_path=None, device_id=None):
-        """Save a prediction result to the database."""
+        """Save a prediction result to the database.
+
+        Raises:
+            OSError: If available disk space is below threshold.
+        """
+        free = shutil.disk_usage(os.path.dirname(self.db_path) or ".").free
+        if free < _MIN_DISK_BYTES:
+            logger.error(
+                "Disk space too low (%.1f MB free) — skipping save",
+                free / (1024 * 1024),
+            )
+            raise OSError(f"Insufficient disk space: {free} bytes free")
+
         with self._lock:
             self.conn.execute(
                 """INSERT INTO predictions

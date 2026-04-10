@@ -19,6 +19,7 @@ Usage (CLI args):
 """
 
 import argparse
+import logging
 import os
 import sys
 
@@ -30,6 +31,8 @@ import numpy as np
 # Add scripts directory to path for model_definition import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model_definition import load_student_from_checkpoint, load_leaf_config
+
+logger = logging.getLogger(__name__)
 
 
 def convert_pth_to_onnx(
@@ -53,9 +56,9 @@ def convert_pth_to_onnx(
         Path to the saved ONNX file.
     """
     # Step 1: Load PyTorch model
-    print("\n" + "=" * 60)
-    print("  AgriKD: PyTorch -> ONNX Conversion")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("  AgriKD: PyTorch -> ONNX Conversion")
+    logger.info("=" * 60)
     
     model = load_student_from_checkpoint(checkpoint_path, num_classes)
     model.eval()
@@ -67,7 +70,7 @@ def convert_pth_to_onnx(
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     
     # Step 4: Export to ONNX
-    print(f"\n[...] Exporting to ONNX (opset={opset_version})...")
+    logger.info(f"\n[...] Exporting to ONNX (opset={opset_version})...")
     torch.onnx.export(
         model,
         dummy_input,
@@ -84,13 +87,13 @@ def convert_pth_to_onnx(
     )
     
     # Step 5: Validate ONNX model
-    print(f"[...] Validating ONNX model...")
+    logger.info(f"[...] Validating ONNX model...")
     onnx_model = onnx.load(output_path)
     onnx.checker.check_model(onnx_model)
-    print(f"[OK] ONNX model validated successfully!")
+    logger.info(f"[OK] ONNX model validated successfully!")
     
     # Step 6: Verify with ONNX Runtime
-    print(f"[...] Verifying with ONNX Runtime...")
+    logger.info(f"[...] Verifying with ONNX Runtime...")
     ort_session = ort.InferenceSession(output_path)
     
     # Run inference with same dummy input
@@ -102,18 +105,18 @@ def convert_pth_to_onnx(
     
     # Compare outputs
     max_diff = np.max(np.abs(pytorch_output - ort_output))
-    print(f"    Max output difference (PyTorch vs ONNX): {max_diff:.8f}")
+    logger.info(f"    Max output difference (PyTorch vs ONNX): {max_diff:.8f}")
     
     if max_diff < 1e-5:
-        print(f"[OK] Outputs match within tolerance (atol=1e-5)")
+        logger.info(f"[OK] Outputs match within tolerance (atol=1e-5)")
     else:
-        print(f"[WARN] Outputs differ by {max_diff:.8f} - check for numerical issues")
+        logger.warning(f"[WARN] Outputs differ by {max_diff:.8f} - check for numerical issues")
     
     # File size info
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"\n[OK] ONNX model saved: {output_path}")
-    print(f"    File size: {file_size_mb:.2f} MB")
-    print("=" * 60)
+    logger.info(f"\n[OK] ONNX model saved: {output_path}")
+    logger.info(f"    File size: {file_size_mb:.2f} MB")
+    logger.info("=" * 60)
     
     return output_path
 

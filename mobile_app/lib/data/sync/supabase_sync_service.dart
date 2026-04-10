@@ -109,6 +109,22 @@ class SupabaseSyncService {
 
         // Mark synced in local DB
         await _predictionDao.markSynced(entityId, serverId);
+
+        // If image upload failed but a local image exists, keep retrying
+        // so the image can be uploaded on the next sync cycle.
+        if (imageUrl == null && prediction.imagePath.isNotEmpty) {
+          await _syncQueue.incrementRetry(queueId);
+          final retryCount = (item['retry_count'] as int) + 1;
+          final maxRetries = item['max_retries'] as int;
+          if (retryCount >= maxRetries) {
+            // Exhausted retries — mark completed anyway so the prediction
+            // (without image) is not stuck in the queue forever.
+            await _syncQueue.markCompleted(queueId);
+            synced++;
+          }
+          continue;
+        }
+
         await _syncQueue.markCompleted(queueId);
         synced++;
       } on AuthException {

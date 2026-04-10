@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show File;
 import 'dart:math';
 
@@ -31,48 +32,71 @@ class TfliteInferenceService {
   final ModelDao _modelDao = ModelDao();
   final PreferenceDao _preferenceDao = PreferenceDao();
 
+  /// Async lock to serialize loadModel / loadModelFromFile / dispose.
+  /// runInference() is synchronous so cannot be preempted in Dart's event loop.
+  Completer<void>? _loadLock;
+
+  Future<void> _acquireLoadLock() async {
+    while (_loadLock != null) {
+      await _loadLock!.future;
+    }
+    _loadLock = Completer<void>();
+  }
+
+  void _releaseLoadLock() {
+    final lock = _loadLock;
+    _loadLock = null;
+    lock?.complete();
+  }
+
   bool get isLoaded => _interpreter != null;
   String get currentLeafType => _currentLeafType ?? '';
   String get delegateUsed => _delegateUsed;
 
   Future<void> loadModel(String assetPath, {String? leafType}) async {
-    // Skip if same model already loaded
-    if (_currentLeafType == leafType && _interpreter != null) return;
+    await _acquireLoadLock();
+    try {
+      // Skip if same model already loaded
+      if (_currentLeafType == leafType && _interpreter != null) return;
 
-    dispose();
+      _disposeInterpreter();
 
-    // Verify model integrity before loading
-    if (leafType != null) {
-      final modelRecord = await _modelDao.getSelected(leafType);
-      if (modelRecord != null) {
-        final expectedChecksum = modelRecord['sha256_checksum'] as String?;
-        if (expectedChecksum != null && expectedChecksum.isNotEmpty) {
-          final isValid = await ModelIntegrity.verify(
-            assetPath,
-            expectedChecksum,
-          );
-          if (!isValid) {
-            throw StateError(
-              'Model integrity check failed for $leafType. '
-              'The model file may be corrupted.',
+      // Verify model integrity before loading
+      if (leafType != null) {
+        final modelRecord = await _modelDao.getSelected(leafType);
+        if (modelRecord != null) {
+          final expectedChecksum = modelRecord['sha256_checksum'] as String?;
+          if (expectedChecksum != null && expectedChecksum.isNotEmpty) {
+            final isValid = await ModelIntegrity.verify(
+              assetPath,
+              expectedChecksum,
             );
+            if (!isValid) {
+              throw StateError(
+                'Model integrity check failed for $leafType. '
+                'The model file may be corrupted.',
+              );
+            }
           }
         }
       }
-    }
 
-    // Try delegates with fallback: GPU -> XNNPack -> CPU
-    _interpreter = await _loadWithDelegateFallback(assetPath);
-    _currentLeafType = leafType;
+      // Try delegates with fallback: GPU -> XNNPack -> CPU
+      _interpreter = await _loadWithDelegateFallback(assetPath);
+      _currentLeafType = leafType;
+    } finally {
+      _releaseLoadLock();
+    }
   }
 
   /// Load an OTA model from the filesystem (not bundled asset).
   /// Verifies SHA-256 checksum from DB before loading to detect corruption.
   /// Returns false if loading or integrity check fails (caller should handle rollback).
   Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
-    dispose();
-
+    await _acquireLoadLock();
     try {
+      _disposeInterpreter();
+
       // Verify SHA-256 integrity before loading OTA model
       if (leafType != null) {
         final modelRecord = await _modelDao.getSelected(leafType);
@@ -98,6 +122,8 @@ class TfliteInferenceService {
       _interpreter = null;
       _currentLeafType = null;
       return false;
+    } finally {
+      _releaseLoadLock();
     }
   }
 
@@ -335,9 +361,20 @@ class TfliteInferenceService {
     return exps.map((e) => e / sumExp).toList();
   }
 
-  void dispose() {
+  /// Internal dispose — no lock (called from within locked sections).
+  void _disposeInterpreter() {
     _interpreter?.close();
     _interpreter = null;
     _currentLeafType = null;
+  }
+
+  /// Public dispose — acquires lock to prevent racing with load operations.
+  Future<void> dispose() async {
+    await _acquireLoadLock();
+    try {
+      _disposeInterpreter();
+    } finally {
+      _releaseLoadLock();
+    }
   }
 }

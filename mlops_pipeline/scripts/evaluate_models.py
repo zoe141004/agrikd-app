@@ -28,9 +28,13 @@ Usage (CLI args):
 
 import argparse
 import gc
+import logging
 import os
 import sys
 import time
+
+logger = logging.getLogger(__name__)
+
 import psutil
 import torch
 import numpy as np
@@ -109,18 +113,18 @@ class ModelEvaluator:
         self.flops_macs = None  # (flops, params) from thop
 
         if data_dir and os.path.isdir(data_dir):
-            print(f"[*] Loading real test data from: {data_dir}")
+            logger.info(f"[*] Loading real test data from: {data_dir}")
             test_subset, test_labels, class_names = load_test_dataset(
                 data_dir, input_size=input_size, mean=norm_mean, std=norm_std
             )
             self.class_names = class_names
             self.test_labels = test_labels
             self.num_samples = len(test_subset)
-            print(f"    Test samples: {self.num_samples}")
-            print(f"    Classes ({len(class_names)}): {class_names}")
+            logger.info(f"    Test samples: {self.num_samples}")
+            logger.info(f"    Classes ({len(class_names)}): {class_names}")
 
             # Pre-load all images into numpy arrays (NCHW, float32)
-            print(f"[*] Pre-loading {self.num_samples} test images...")
+            logger.info(f"[*] Pre-loading {self.num_samples} test images...")
             loader = torch.utils.data.DataLoader(test_subset, batch_size=1, shuffle=False)
             images = []
             for img, _ in loader:
@@ -128,7 +132,7 @@ class ModelEvaluator:
             self.test_data = np.vstack(images)
         else:
             self.num_samples = 100
-            print(f"[*] No dataset provided. Using {self.num_samples} random samples.")
+            logger.info(f"[*] No dataset provided. Using {self.num_samples} random samples.")
             self.test_data = np.random.randn(self.num_samples, 3, input_size, input_size).astype(np.float32)
 
     def _measure_memory(self, func, *args):
@@ -146,8 +150,7 @@ class ModelEvaluator:
         p2 = p2 / p2.sum(axis=1, keepdims=True)
         kl = np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
         if not np.isfinite(kl):
-            print(f"[WARN] KL divergence is {kl}, returning 0.0")
-            return 0.0
+            raise ValueError(f"KL divergence is {kl} (NaN/Inf) — check model outputs for degenerate probabilities")
         return float(kl)
 
     def _compute_flops(self, model):
@@ -159,7 +162,7 @@ class ModelEvaluator:
             self.flops_macs = (macs * 2, params)  # FLOPs = 2 * MACs
             return macs * 2, params
         except Exception as e:
-            print(f"  [!] FLOPs computation failed: {e}")
+            logger.warning(f"  [!] FLOPs computation failed: {e}")
             return None, None
 
     def _compute_accuracy(self, all_probs, format_name):
@@ -180,9 +183,9 @@ class ModelEvaluator:
         return accuracy
 
     def _benchmark_runner(self, name, size_mb, load_fn, infer_fn):
-        print(f"\n{'='*50}")
-        print(f"  Benchmarking: {name}")
-        print(f"{'='*50}")
+        logger.info(f"\n{'='*50}")
+        logger.info(f"  Benchmarking: {name}")
+        logger.info(f"{'='*50}")
 
         # 0. Clean up previous model to make memory measurement fair
         gc.collect()
@@ -253,13 +256,13 @@ class ModelEvaluator:
             params_m = "-"
             params_total = "-"
 
-        print(f"  Size:    {size_mb:.2f} MB")
-        print(f"  Params:  {params_m} M | FLOPs: {flops_m} M")
-        print(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
-        print(f"  FPS:     {fps:.1f}")
-        print(f"  Runtime Mem: {total_mem:.1f} MB")
-        print(f"  Accuracy: {accuracy:.1f}%")
-        print(f"  KL Div:  {kl_div:.8f}")
+        logger.info(f"  Size:    {size_mb:.2f} MB")
+        logger.info(f"  Params:  {params_m} M | FLOPs: {flops_m} M")
+        logger.info(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
+        logger.info(f"  FPS:     {fps:.1f}")
+        logger.info(f"  Runtime Mem: {total_mem:.1f} MB")
+        logger.info(f"  Accuracy: {accuracy:.1f}%")
+        logger.info(f"  KL Div:  {kl_div:.8f}")
 
         self.results.append({
             "Format": name,
@@ -482,7 +485,7 @@ class ModelEvaluator:
         report_path = os.path.join(self.output_dir, "benchmark_report.md")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report_str)
-        print(f"\n[OK] Benchmark report: {report_path}")
+        logger.info(f"\n[OK] Benchmark report: {report_path}")
 
         # Charts
         sns.set_theme(style="whitegrid")
@@ -511,7 +514,7 @@ class ModelEvaluator:
         plt.savefig(os.path.join(self.output_dir, "benchmark_accuracy_size.png"), dpi=150)
         plt.close()
 
-        print(f"[OK] Charts saved to: {self.output_dir}")
+        logger.info(f"[OK] Charts saved to: {self.output_dir}")
 
 
 def main():
