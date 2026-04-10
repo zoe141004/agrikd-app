@@ -74,6 +74,7 @@ vi.mock('recharts', () => ({
 }))
 
 // ── Import components after mocks are set up ─────────────────────────────────
+import { DataProvider } from '../lib/DataContext'
 import DashboardPage from '../pages/DashboardPage'
 import PredictionsPage from '../pages/PredictionsPage'
 import ModelReportsPage from '../pages/ModelReportsPage'
@@ -84,7 +85,9 @@ import DataManagementPage from '../pages/DataManagementPage'
 function renderPage(Component) {
   return render(
     <MemoryRouter>
-      <Component />
+      <DataProvider>
+        <Component />
+      </DataProvider>
     </MemoryRouter>,
   )
 }
