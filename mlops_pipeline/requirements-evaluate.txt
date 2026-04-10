@@ -1,7 +1,7 @@
 # AgriKD — Evaluation & benchmarking (requires convert deps too)
 # Used by: model-pipeline.yml
 -r requirements-convert.txt
-psutil>=5.9,<6.0
+psutil>=5.9,<8.0
 pandas>=2.0,<4.0
 matplotlib>=3.7,<4.0
 seaborn>=0.12,<1.0
