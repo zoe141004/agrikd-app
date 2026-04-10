@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–014)
+-- AgriKD — Comprehensive Migration Verification (001–016)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 14 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 16 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -781,6 +781,68 @@ BEGIN
         CASE WHEN _exists THEN 'exists' ELSE 'FK MISSING — run 013' END
     );
 
+    -- =====================================================================
+    -- SECTION 16: Migration 015 — audit_log schema cleanup
+    -- =====================================================================
+
+    -- audit_log.id must be UUID (015 converts from BIGINT)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'audit_log'
+      AND column_name = 'id';
+
+    INSERT INTO _verify_results VALUES (
+        '16. Migration 015',
+        'audit_log.id type = uuid',
+        CASE
+            WHEN _col_type = 'uuid' THEN 'PASS'
+            WHEN _col_type = 'bigint' THEN 'FAIL'
+            WHEN _col_type IS NULL THEN 'FAIL'
+            ELSE 'WARN'
+        END,
+        CASE
+            WHEN _col_type = 'uuid' THEN 'uuid (correct)'
+            WHEN _col_type = 'bigint' THEN 'BIGINT — run 015 to convert to UUID'
+            WHEN _col_type IS NULL THEN 'COLUMN MISSING'
+            ELSE 'type=' || _col_type
+        END
+    );
+
+    -- =====================================================================
+    -- SECTION 17: Migration 016 — composite FK constraints
+    -- =====================================================================
+
+    -- fk_model_benchmarks_leaf_version
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_model_benchmarks_leaf_version'
+          AND table_schema = 'public'
+          AND table_name = 'model_benchmarks'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '17. Migration 016',
+        'fk_model_benchmarks_leaf_version on model_benchmarks',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'FK MISSING — run 016' END
+    );
+
+    -- fk_model_versions_leaf_version
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_model_versions_leaf_version'
+          AND table_schema = 'public'
+          AND table_name = 'model_versions'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '17. Migration 016',
+        'fk_model_versions_leaf_version on model_versions',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'FK MISSING — run 016' END
+    );
+
 END $$;
 
 -- =====================================================================
@@ -820,7 +882,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED (migrations 001–014)'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–016)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;
