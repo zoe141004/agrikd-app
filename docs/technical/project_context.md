@@ -175,11 +175,16 @@ agrikd/
 │   │   ├── 009_security_hardening.sql
 │   │   ├── 010_fix_lifecycle_for_update.sql
 │   │   ├── 011_dvc_operations.sql
-│   │   └── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
+│   │   ├── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
+│   │   ├── 013_model_engines.sql      # Model engines table (TensorRT), ONNX URL support, engine RPCs
+│   │   ├── 014_audit_fixes.sql        # Admin guards on dashboard RPCs, profile/report policies
+│   │   └── 015_audit_log_cleanup.sql  # audit_log schema normalization (UUID, user_id)
+│   ├── verify_all_migrations.sql      # Comprehensive verify for all 15 migrations
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
-├── .github/workflows/                 # CI/CD (11 workflow files)
+├── .github/workflows/                 # CI/CD (12 workflow files)
 │   ├── ci.yml                         # Lint, test, build APK, dashboard tests, Jetson lint
+│   ├── codeql.yml                     # CodeQL SAST security scanning (JS/TS, Python)
 │   ├── release.yml                    # Tagged release build + GitHub Release
 │   ├── model-pipeline.yml             # Full convert + validate + upload
 │   ├── model-rollback.yml             # Rollback model version in registry
