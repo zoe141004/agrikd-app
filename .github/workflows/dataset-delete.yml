@@ -1,0 +1,166 @@
+name: Dataset Delete
+
+on:
+  workflow_dispatch:
+    inputs:
+      leaf_type:
+        description: 'Leaf type to delete (e.g. tomato, potato_dataset)'
+        required: true
+        type: string
+      dvc_operation_id:
+        description: 'DVC operation ID for status tracking'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dvc-delete-${{ inputs.leaf_type }}
+  cancel-in-progress: false
+
+jobs:
+  dataset-delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LEAF_TYPE: ${{ inputs.leaf_type }}
+      DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install DVC
+        run: pip install dvc dvc-gs
+
+      - name: Setup GCS credentials
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_DATA" > /tmp/gcs-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-sa.json" >> $GITHUB_ENV
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_DATA: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_DATA }}
+
+      - name: Report status — deleting
+        if: inputs.dvc_operation_id != ''
+        continue-on-error: true
+        run: |
+          curl -sS --fail-with-body -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "{\"status\":\"deleting\",\"github_run_id\":\"${{ github.run_id }}\",\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Locate DVC file
+        id: locate
+        run: |
+          DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
+          if [ -f "$DVC_FILE" ]; then
+            echo "dvc_file=$DVC_FILE" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Found: $DVC_FILE"
+            cat "$DVC_FILE"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "[WARN] DVC file not found: $DVC_FILE"
+            echo "Available .dvc files:"
+            ls -la dvc/*.dvc 2>/dev/null || echo "  (none)"
+          fi
+
+      - name: DVC remove (untrack + delete cache)
+        if: steps.locate.outputs.found == 'true'
+        run: |
+          DVC_FILE="${{ steps.locate.outputs.dvc_file }}"
+          echo "=== Removing DVC tracking for ${LEAF_TYPE} ==="
+          dvc remove "$DVC_FILE" -v
+          echo "DVC remove completed"
+
+      - name: Clean data directory
+        run: |
+          DATA_DIR="data/${LEAF_TYPE}"
+          if [ -d "$DATA_DIR" ]; then
+            echo "Removing data directory: $DATA_DIR"
+            rm -rf "$DATA_DIR"
+          fi
+
+      - name: Commit and push deletion
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
+          DATA_DIR="data/${LEAF_TYPE}"
+
+          # Stage all changes (deleted .dvc file, .gitignore changes, data dir)
+          git add -A "$DVC_FILE" || true
+          [ -f "data/.gitignore" ] && git add "data/.gitignore"
+          [ -d "$DATA_DIR" ] || git rm -r --cached "$DATA_DIR" 2>/dev/null || true
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No tracked changes to commit (DVC file may not have existed)"
+          else
+            git commit -m "Remove dataset: ${LEAF_TYPE}
+
+Deleted DVC tracking and data directory for ${LEAF_TYPE}.
+Triggered from admin dashboard."
+            for attempt in 1 2 3; do
+              git push && break
+              echo "[Retry $attempt] git push failed, pulling and retrying..."
+              git pull --rebase
+              sleep 5
+            done
+          fi
+
+      - name: Cleanup GCS credentials
+        if: always()
+        run: |
+          rm -f /tmp/gcs-sa.json ~/.config/dvc/config .dvc/config.local .dvc/tmp/lock
+
+      - name: Report status — completed
+        if: inputs.dvc_operation_id != '' && success()
+        continue-on-error: true
+        run: |
+          curl -sS --fail-with-body -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"deleted\":true,\"leaf_type\":\"$LEAF_TYPE\"}}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Report status — failed
+        if: failure() && inputs.dvc_operation_id != ''
+        continue-on-error: true
+        run: |
+          curl -sS --fail-with-body -X PATCH \
+            "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Dataset deletion failed — check GitHub Actions logs\"}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Summary
+        run: |
+          echo "## Dataset Deletion" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Leaf Type | \`${LEAF_TYPE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| DVC File | \`dvc/data_${LEAF_TYPE}.dvc\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Found | ${{ steps.locate.outputs.found }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
