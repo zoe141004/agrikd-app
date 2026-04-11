@@ -21,13 +21,22 @@ class InferenceResult {
 class TfliteInferenceService {
   bool get isLoaded => false;
   String get currentLeafType => '';
+  String get currentVersion => '';
   String get delegateUsed => 'none';
 
-  Future<void> loadModel(String assetPath, {String? leafType}) async {
+  Future<void> loadModel(
+    String assetPath, {
+    String? leafType,
+    String? version,
+  }) async {
     throw UnsupportedError('TFLite inference is not supported on web.');
   }
 
-  Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
+  Future<bool> loadModelFromFile(
+    String filePath, {
+    String? leafType,
+    String? version,
+  }) async {
     throw UnsupportedError('TFLite inference is not supported on web.');
   }
 

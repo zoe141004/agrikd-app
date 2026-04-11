@@ -4,12 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       leaf_type:
-        description: 'Leaf type to rollback'
+        description: 'Leaf type to rollback (e.g. tomato, burmese_grape_leaf)'
         required: true
-        type: choice
-        options:
-          - tomato
-          - burmese_grape_leaf
+        type: string
       reason:
         description: 'Reason for rollback (required)'
         required: true

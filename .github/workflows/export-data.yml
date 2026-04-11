@@ -19,9 +19,6 @@ jobs:
   export:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -52,6 +49,8 @@ jobs:
             -d "{\"status\":\"exporting\",\"github_run_id\":\"${{ github.run_id }}\",\"github_run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
         env:
           DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Export predictions from Supabase
         run: |
@@ -76,6 +75,9 @@ jobs:
               json.dump(all_rows, f, indent=2)
           print(f'Exported {len(all_rows)} predictions')
           "
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: DVC add and push
         run: |
@@ -110,6 +112,8 @@ jobs:
               "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SIZE" "$ROWS")"
         env:
           DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Report status — failed
         if: failure() && inputs.dvc_operation_id != ''
@@ -124,3 +128,5 @@ jobs:
             -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Export data failed — check GitHub Actions logs\"}"
         env:
           DVC_OP_ID: ${{ inputs.dvc_operation_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

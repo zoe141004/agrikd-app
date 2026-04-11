@@ -76,7 +76,11 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
 
         // Load model
         setState(() => _status = '${modelInfo.englishName}: loading...');
-        await service.loadModel(modelInfo.assetPath, leafType: leafType);
+        await service.loadModel(
+          modelInfo.assetPath,
+          leafType: leafType,
+          version: '1.0.0',
+        );
 
         // Warm-up
         setState(

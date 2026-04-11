@@ -1,5 +1,11 @@
 -- ============================================================================
--- AgriKD Admin Dashboard — Supabase Schema Sync
+-- ⚠️  DEPRECATED — DO NOT RUN THIS FILE
+-- ⚠️  Use database/migrations/001–017 instead.
+-- ⚠️  This file is kept for historical reference only.
+-- ⚠️  Running this file WILL conflict with current migration-based schema.
+-- ============================================================================
+--
+-- Original purpose: AgriKD Admin Dashboard — Supabase Schema Sync
 -- Safe to re-run: uses IF NOT EXISTS, DROP IF EXISTS, ADD COLUMN IF NOT EXISTS
 -- Run in Supabase Dashboard → SQL Editor → New query
 -- ============================================================================

@@ -155,6 +155,8 @@ Three source modes — datasets are pushed directly to DVC (GCS), not staged in 
 - **kaggle**: Download dataset from Kaggle → prepare dataset → push to DVC (requires `KAGGLE_USERNAME` + `KAGGLE_KEY` secrets)
 - **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset → push to DVC
 
+Git push uses 3 retries with `git pull --rebase` between attempts.
+
 Additional inputs:
 - `dvc_operation_id`: Links the workflow run to a `dvc_operations` row
   for real-time status tracking from the admin dashboard.
@@ -165,6 +167,8 @@ Manually triggered. Exports all predictions (paginated, 1000/page) from Supabase
 
 **PII filtering:** Export excludes sensitive fields from the prediction data.
 
+**Security:** Supabase credentials are scoped to individual steps (step-level env), not job-level.
+
 Supports `dvc_operation_id` for status report-back.
 
 ## 8. Dataset Delete (`dataset-delete.yml`)
@@ -172,14 +176,15 @@ Supports `dvc_operation_id` for status report-back.
 Manually triggered (from admin dashboard or GitHub Actions). Removes a dataset from DVC tracking and cleans up the GCS remote:
 
 ```
-Trigger → dvc remove data/<leaf_type>.dvc → dvc gc --cloud → git commit+push → Supabase status update
+Trigger → dvc remove dvc/data_<leaf_type>.dvc → dvc gc --cloud → git commit+push → Supabase status update
 ```
 
-- Removes the `.dvc` file from Git tracking
-- Runs `dvc gc --cloud --workspace -f` to garbage-collect unreferenced data from GCS
+- Removes the `.dvc` file from Git tracking (if present)
+- Always runs `dvc gc --cloud --workspace -f` to garbage-collect unreferenced data from GCS (handles both first-time and re-delete scenarios)
 - Cleans up the local `data/<leaf_type>/` directory
 - Reports status back to `dvc_operations` table (requires `SUPABASE_SERVICE_ROLE_KEY`)
 - The admin dashboard triggers this workflow and waits for completion before cleaning DB records
+- All GitHub Actions are pinned to SHA commit hashes for supply chain security
 
 **Required migration:** `database/migrations/017_dataset_delete.sql` (adds `'delete'` operation and `'deleting'` status).
 
@@ -192,7 +197,7 @@ Manually triggered. Rolls back a model version in the registry:
 - Updates model registry metadata
 - Reports status to audit log
 
-Inputs: `leaf_type`, `version`, `reason`.
+Inputs: `leaf_type` (free text, supports any leaf type), `version`, `reason`.
 
 ## 10. Admin Dashboard Deploy (`deploy.yml`)
 

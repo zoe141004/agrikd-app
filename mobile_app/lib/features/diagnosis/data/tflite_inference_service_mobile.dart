@@ -28,6 +28,7 @@ class InferenceResult {
 class TfliteInferenceService {
   Interpreter? _interpreter;
   String? _currentLeafType;
+  String? _currentVersion;
   String _delegateUsed = 'CPU';
   final ModelDao _modelDao = ModelDao();
   final PreferenceDao _preferenceDao = PreferenceDao();
@@ -51,13 +52,21 @@ class TfliteInferenceService {
 
   bool get isLoaded => _interpreter != null;
   String get currentLeafType => _currentLeafType ?? '';
+  String get currentVersion => _currentVersion ?? '';
   String get delegateUsed => _delegateUsed;
 
-  Future<void> loadModel(String assetPath, {String? leafType}) async {
+  Future<void> loadModel(
+    String assetPath, {
+    String? leafType,
+    String? version,
+  }) async {
     await _acquireLoadLock();
     try {
-      // Skip if same model already loaded
-      if (_currentLeafType == leafType && _interpreter != null) return;
+      // Skip if same model+version already loaded
+      if (_currentLeafType == leafType &&
+          _currentVersion == version &&
+          _interpreter != null)
+        return;
 
       _disposeInterpreter();
 
@@ -84,6 +93,7 @@ class TfliteInferenceService {
       // Try delegates with fallback: GPU -> XNNPack -> CPU
       _interpreter = await _loadWithDelegateFallback(assetPath);
       _currentLeafType = leafType;
+      _currentVersion = version;
     } finally {
       _releaseLoadLock();
     }
@@ -92,7 +102,11 @@ class TfliteInferenceService {
   /// Load an OTA model from the filesystem (not bundled asset).
   /// Verifies SHA-256 checksum from DB before loading to detect corruption.
   /// Returns false if loading or integrity check fails (caller should handle rollback).
-  Future<bool> loadModelFromFile(String filePath, {String? leafType}) async {
+  Future<bool> loadModelFromFile(
+    String filePath, {
+    String? leafType,
+    String? version,
+  }) async {
     await _acquireLoadLock();
     try {
       _disposeInterpreter();
@@ -116,11 +130,13 @@ class TfliteInferenceService {
 
       _interpreter = await _loadFromFileWithDelegateFallback(filePath);
       _currentLeafType = leafType;
+      _currentVersion = version;
       return true;
     } catch (e) {
       debugPrint('[TFLite] Failed to load model for $leafType: $e');
       _interpreter = null;
       _currentLeafType = null;
+      _currentVersion = null;
       return false;
     } finally {
       _releaseLoadLock();
@@ -366,6 +382,7 @@ class TfliteInferenceService {
     _interpreter?.close();
     _interpreter = null;
     _currentLeafType = null;
+    _currentVersion = null;
   }
 
   /// Public dispose — acquires lock to prevent racing with load operations.

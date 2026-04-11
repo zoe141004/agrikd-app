@@ -43,30 +43,33 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     final active = await _modelDao.getSelected(leafType);
     if (active != null && (active['is_bundled'] as int) == 0) {
       final filePath = active['file_path'] as String;
+      final activeVersion = active['version'] as String;
       final loaded = await _inferenceService.loadModelFromFile(
         filePath,
         leafType: leafType,
+        version: activeVersion,
       );
       if (loaded) {
-        _loadedModelVersion = active['version'] as String;
+        _loadedModelVersion = activeVersion;
         _setClassLabelsFromRecord(active, leafType);
-        // Clean up orphaned model files now that we've loaded successfully
         _cleanupOldModelFiles(filePath, leafType);
         return;
       }
 
       // Selected OTA failed — try removing and selecting another
-      await _modelDao.removeVersion(leafType, active['version'] as String);
+      await _modelDao.removeVersion(leafType, activeVersion);
 
       final fallback = await _modelDao.getSelected(leafType);
       if (fallback != null && (fallback['is_bundled'] as int) == 0) {
         final fbPath = fallback['file_path'] as String;
+        final fbVersion = fallback['version'] as String;
         final fbLoaded = await _inferenceService.loadModelFromFile(
           fbPath,
           leafType: leafType,
+          version: fbVersion,
         );
         if (fbLoaded) {
-          _loadedModelVersion = fallback['version'] as String;
+          _loadedModelVersion = fbVersion;
           _setClassLabelsFromRecord(fallback, leafType);
           _cleanupOldModelFiles(fbPath, leafType);
           return;
@@ -76,16 +79,18 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
     // 2. Fallback to bundled asset (ultimate fallback)
     final modelInfo = ModelConstants.getModel(leafType);
-    await _inferenceService.loadModel(modelInfo.assetPath, leafType: leafType);
+    final bundledVersion =
+        (active != null && (active['is_bundled'] as int) == 1)
+        ? active['version'] as String
+        : '1.0.0';
+    await _inferenceService.loadModel(
+      modelInfo.assetPath,
+      leafType: leafType,
+      version: bundledVersion,
+    );
     _loadedClassLabels = modelInfo.classLabels;
     _loadedNumClasses = modelInfo.numClasses;
-
-    // Use bundled model version from DB if available, else default
-    if (active != null && (active['is_bundled'] as int) == 1) {
-      _loadedModelVersion = active['version'] as String;
-    } else {
-      _loadedModelVersion = '1.0.0';
-    }
+    _loadedModelVersion = bundledVersion;
   }
 
   /// Fire-and-forget cleanup of orphaned model files after successful load.

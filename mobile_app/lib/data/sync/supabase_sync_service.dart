@@ -127,10 +127,24 @@ class SupabaseSyncService {
 
         await _syncQueue.markCompleted(queueId);
         synced++;
-      } on AuthException {
-        // Auth errors are permanent — mark failed immediately, don't retry
-        await _syncQueue.markFailed(queueId);
-        failed++;
+      } on AuthException catch (authErr) {
+        // Token may have expired — attempt a refresh before giving up
+        try {
+          await _client.auth.refreshSession();
+          // Refresh succeeded — treat as transient error so item is retried
+          await _syncQueue.incrementRetry(queueId);
+          final retryCount = (item['retry_count'] as int) + 1;
+          final maxRetries = item['max_retries'] as int;
+          if (retryCount >= maxRetries) {
+            await _syncQueue.markFailed(queueId);
+            failed++;
+          }
+        } on AuthException {
+          // Refresh also failed — mark permanently failed
+          debugPrint('[SyncService] Auth refresh failed: $authErr');
+          await _syncQueue.markFailed(queueId);
+          failed++;
+        }
       } catch (e) {
         // Network/transient errors — increment retry counter
         await _syncQueue.incrementRetry(queueId);
@@ -184,7 +198,11 @@ class SupabaseSyncService {
             fileOptions: const FileOptions(contentType: 'image/jpeg'),
           );
 
-      return _client.storage.from('prediction-images').getPublicUrl(path);
+      // prediction-images bucket is private — use signed URL (valid 365 days)
+      final signedUrl = await _client.storage
+          .from('prediction-images')
+          .createSignedUrl(path, 365 * 24 * 3600);
+      return signedUrl;
     } catch (e) {
       // Image upload failure is logged but does not block prediction sync.
       // The prediction will be synced without an image URL.

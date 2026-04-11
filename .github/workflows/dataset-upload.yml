@@ -300,8 +300,18 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Add dataset: ${LEAF_TYPE} via ${SOURCE}"
-            if ! git push; then
-              echo "[ERROR] git push failed"
+            PUSH_OK=false
+            for attempt in 1 2 3; do
+              if git push; then
+                PUSH_OK=true
+                break
+              fi
+              echo "[Retry $attempt/3] git push failed, pulling and retrying..."
+              git pull --rebase
+              sleep 5
+            done
+            if [ "$PUSH_OK" = false ]; then
+              echo "::error::Git push failed after 3 attempts"
               exit 1
             fi
           fi

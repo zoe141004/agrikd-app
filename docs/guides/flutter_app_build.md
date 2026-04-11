@@ -88,6 +88,12 @@ Current test count: **89 tests** across 14 test files:
 - `test/integration/` — OTA model version rotation, model integrity, sync queue, full OTA flow
 - `test/widget_test.dart` — Home screen rendering, navigation, scan button, leaf types
 
+### Key implementation notes
+
+- **Image URLs**: Prediction images use `createSignedUrl()` (365-day expiry) for the private `prediction-images` bucket. Public URLs would return 403.
+- **Auth resilience**: On `AuthException`, the sync service attempts `refreshSession()` before marking items as permanently failed. This handles token expiry (1h idle).
+- **Model version cache**: The TFLite inference service tracks both `leafType` and `version`. OTA model updates for the same leaf type correctly trigger a reload.
+
 ## 5. Build Release APK
 
 ### Standard release build:
