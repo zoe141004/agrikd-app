@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
 
 export default function SettingsPage() {
-  const { ghConnectionStatus, setGhConnectionStatus, triggerRefresh } = useData()
+  const { ghConnectionStatus, setGhConnectionStatus, triggerRefresh, refreshKey } = useData()
   const [stab, setStab] = useState('General')
   const [models, setModels] = useState([])
   const [envInfo, setEnvInfo] = useState({})
