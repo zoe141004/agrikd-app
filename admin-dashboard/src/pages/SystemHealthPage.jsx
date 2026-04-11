@@ -40,7 +40,7 @@ export default function SystemHealthPage() {
       const { count: pipelineRuns } = await supabase.from('pipeline_runs').select('*', { count: 'exact', head: true })
       const { data: earliest } = await supabase.from('predictions').select('created_at').order('created_at', { ascending: true }).limit(1)
       const uptime = earliest?.[0]?.created_at ? Math.floor((Date.now() - new Date(earliest[0].created_at).getTime()) / 86400000) : null
-      setDbStats({ predictions: count || 0, models: models || 0, dvcOps: dvcOps || 0, pipelineRuns: pipelineRuns || 0, uptime })
+      if (mountedRef.current) setDbStats({ predictions: count || 0, models: models || 0, dvcOps: dvcOps || 0, pipelineRuns: pipelineRuns || 0, uptime })
     } catch (e) {
       results.database = { ok: false, label: 'Unreachable', latency: null }
     }
@@ -89,8 +89,8 @@ export default function SystemHealthPage() {
       await supabase.from('predictions').select('*', { count: 'exact', head: true })
       latencyResults.push({ time: `#${i + 1}`, ms: Date.now() - t1 })
     }
-    setLatencyData(latencyResults)
     if (!mountedRef.current) return
+    setLatencyData(latencyResults)
     setChecks(results)
     setLastChecked(new Date())
     setLoading(false)

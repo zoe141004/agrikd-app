@@ -26,14 +26,18 @@ export default function App() {
   const [authError, setAuthError] = useState(null)
 
   useEffect(() => {
+    let mounted = true
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return
       setSession(session)
       if (!session) setLoading(false)
     }).catch((err) => {
+      if (!mounted) return
       setAuthError(err?.message || 'Failed to load session')
       setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return
       setSession(session)
       if (!session) {
         setProfile(null)
@@ -41,17 +45,19 @@ export default function App() {
         setLoading(false)
       }
     })
-    return () => subscription.unsubscribe()
+    return () => { mounted = false; subscription.unsubscribe() }
   }, [])
 
   useEffect(() => {
     if (!session) return
+    let mounted = true
     supabase
       .from('profiles')
       .select('role, is_active, email')
       .eq('id', session.user.id)
       .single()
       .then(({ data, error }) => {
+        if (!mounted) return
         if (error || !data || data.role !== 'admin') {
           setAccessDenied(true)
           setProfile(data || null)
@@ -61,8 +67,9 @@ export default function App() {
         }
         setLoading(false)
       }).catch(() => {
-        setLoading(false)
+        if (mounted) setLoading(false)
       })
+    return () => { mounted = false }
   }, [session])
 
   if (loading) return (

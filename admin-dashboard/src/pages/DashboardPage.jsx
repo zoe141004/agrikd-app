@@ -32,11 +32,16 @@ export default function DashboardPage() {
 
   // Auto-refresh every 60s — single interval, reads latest filter via ref
   useEffect(() => {
+    let currentController = null
     const id = setInterval(() => {
-      const controller = new AbortController()
-      loadDashboard(false, controller.signal)
+      if (currentController) currentController.abort()
+      currentController = new AbortController()
+      loadDashboard(false, currentController.signal)
     }, 60000)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      if (currentController) currentController.abort()
+    }
   }, [])
 
   const loadDashboard = async (showSpinner, signal) => {

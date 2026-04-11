@@ -19,6 +19,7 @@ export default function DataManagementPage() {
   const [dvcOpDismissed, setDvcOpDismissed] = useState(false)
   const realtimeChannelRef = useRef(null)
   const ghPollRef = useRef(null)
+  const dbPollRef = useRef(null)
 
   // Stage Data — Method A (predictions)
   const [dsLeafType, setDsLeafType] = useState('')
@@ -322,7 +323,6 @@ export default function DataManagementPage() {
   }
 
   // ── DB polling fallback (most reliable — polls dvc_operations table directly) ──
-  const dbPollRef = useRef(null)
   const startDbPolling = (opId) => {
     if (dbPollRef.current) clearInterval(dbPollRef.current)
     dbPollRef.current = setInterval(async () => {

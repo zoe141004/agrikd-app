@@ -91,25 +91,18 @@ jobs:
 
       - name: Delete data from DVC remote (GCS)
         if: steps.dvc_remove.outputs.found == 'true'
+        continue-on-error: true
         run: |
-          set -eo pipefail
           echo "=== Garbage-collecting deleted dataset from GCS remote ==="
           # dvc gc --cloud --workspace removes all cache files from the remote
           # that are NOT referenced by any .dvc file in the current workspace.
           # Since we just removed the .dvc file, this dataset's data will be cleaned.
-          dvc gc --cloud --workspace -f -v 2>&1 || {
-            echo "[WARN] dvc gc --cloud failed (may need manual cleanup)"
-            echo "Attempting direct GCS deletion as fallback..."
-            MD5="${{ steps.dvc_remove.outputs.md5 }}"
-            if [ -n "$MD5" ]; then
-              PREFIX="${MD5:0:2}"
-              REMOTE_URL=$(grep 'url =' .dvc/config | awk '{print $3}')
-              echo "Deleting ${REMOTE_URL}/${PREFIX}/ entries for hash ${MD5}..."
-              gsutil -m rm -r "${REMOTE_URL}/${PREFIX}/${MD5}" 2>/dev/null || true
-              gsutil rm "${REMOTE_URL}/${PREFIX}/${MD5%.dir}" 2>/dev/null || true
-            fi
-          }
-          echo "Remote cleanup completed"
+          if dvc gc --cloud --workspace -f -v 2>&1; then
+            echo "Remote garbage collection completed successfully"
+          else
+            echo "[WARN] dvc gc --cloud failed — remote data may need manual cleanup"
+            echo "Run manually: gsutil -m rm -r gs://agrikd-dvc-data/data/<hash>"
+          fi
 
       - name: Clean local data directory
         run: |
