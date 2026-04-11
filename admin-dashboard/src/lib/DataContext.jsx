@@ -103,9 +103,10 @@ export function DataProvider({ children }) {
               })
             }
           } else if (md?.file_count != null) {
-            const key = (op.leaf_type || '').toLowerCase().trim()
-            if (!key || datasetMap.has(key)) continue
-            datasetMap.set(key, {
+            const lt = (op.leaf_type || '').toLowerCase().trim()
+            // Skip aggregate operations (leaf_type "all" is not a real dataset)
+            if (!lt || lt === 'all' || datasetMap.has(lt)) continue
+            datasetMap.set(lt, {
               name: op.leaf_type,
               file: `data_${op.leaf_type}.dvc`,
               size: md.total_size || null,
