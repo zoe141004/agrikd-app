@@ -288,10 +288,10 @@ export default function DataManagementPage() {
       }
     }
 
-    // Always refresh shared context
+    // Always refresh shared context (order matters: datasets first, then leaf types)
     loadDvcOperations()
-    refreshDvcDatasets()
-    refreshLeafTypes()
+    await refreshDvcDatasets()
+    await refreshLeafTypes()
     triggerRefresh()
   }
 

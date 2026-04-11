@@ -52,6 +52,7 @@ export function DataProvider({ children }) {
           .select('leaf_type')
           .in('status', ['completed', 'staged'])
           .not('leaf_type', 'eq', 'all')
+          .neq('operation', 'delete')
           .limit(200),
       ])
 
@@ -147,12 +148,12 @@ export function DataProvider({ children }) {
       }
       try { validateGitHubSlugs(ghOwner, ghRepo) } catch { setDvcDatasetsLoading(false); return }
       const res = await fetch(
-        `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents?ref=${ghBranch}`,
+        `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/dvc?ref=${ghBranch}`,
         { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' } }
       )
       if (!res.ok) throw new Error(`GitHub API ${res.status}`)
       const files = await res.json()
-      const dvcFiles = files.filter(f => f.name.endsWith('.dvc') && f.name.startsWith('data_'))
+      const dvcFiles = (Array.isArray(files) ? files : []).filter(f => f.name.endsWith('.dvc') && f.name.startsWith('data_'))
       const datasets = []
       for (const df of dvcFiles) {
         if (!df.download_url?.startsWith('https://raw.githubusercontent.com/')) continue
