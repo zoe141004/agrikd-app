@@ -650,38 +650,66 @@ export default function DataManagementPage() {
         try {
           const { data: { session } } = await supabase.auth.getSession()
           const userId = session?.user?.id
+          const nameLower = dsName.toLowerCase().trim()
 
-          // 1. Delete model benchmarks for this leaf type
-          await supabase.from('model_benchmarks').delete().eq('leaf_type', dsName)
+          // 1. Delete model benchmarks for this leaf type (case-insensitive)
+          await supabase.from('model_benchmarks').delete().ilike('leaf_type', dsName)
 
           // 2. Delete model versions for this leaf type
-          await supabase.from('model_versions').delete().eq('leaf_type', dsName)
+          await supabase.from('model_versions').delete().ilike('leaf_type', dsName)
 
           // 3. Delete models from registry + remove storage files
-          const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').eq('leaf_type', dsName)
+          const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').ilike('leaf_type', dsName)
           if (modelsToDelete?.length) {
-            // Remove model files from storage
             const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
               const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
               return match ? decodeURIComponent(match[1]) : null
             }).filter(Boolean)
             if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
-            // Delete registry entries
-            await supabase.from('model_registry').delete().eq('leaf_type', dsName)
+            await supabase.from('model_registry').delete().ilike('leaf_type', dsName)
           }
 
           // 4. Delete pipeline runs for this leaf type
-          await supabase.from('pipeline_runs').delete().eq('leaf_type', dsName)
+          await supabase.from('pipeline_runs').delete().ilike('leaf_type', dsName)
 
           // 5. Delete DVC operations for this leaf type
-          await supabase.from('dvc_operations').delete().eq('leaf_type', dsName)
+          await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName)
 
-          // 6. Remove dataset files from storage
-          const { data: dsFiles } = await supabase.storage.from('datasets').list(dsName)
-          if (dsFiles?.length) {
-            await supabase.storage.from('datasets').remove(dsFiles.map(f => `${dsName}/${f.name}`))
+          // 5b. Clean up other operations that reference this dataset in metadata.datasets
+          //     (e.g., "pull all" operations with leaf_type="all" that contain this dataset)
+          const { data: relatedOps } = await supabase.from('dvc_operations')
+            .select('id, metadata')
+            .not('metadata', 'is', null)
+          for (const op of (relatedOps || [])) {
+            const md = op.metadata
+            if (!md?.datasets) continue
+            // Check if any key in metadata.datasets matches (case-insensitive)
+            const matchKey = Object.keys(md.datasets).find(k => k.toLowerCase().trim() === nameLower)
+            if (!matchKey) continue
+            const remaining = { ...md.datasets }
+            delete remaining[matchKey]
+            if (Object.keys(remaining).length === 0) {
+              // No datasets left — delete the entire operation
+              await supabase.from('dvc_operations').delete().eq('id', op.id)
+            } else {
+              // Update metadata to remove this dataset entry
+              await supabase.from('dvc_operations').update({ metadata: { ...md, datasets: remaining } }).eq('id', op.id)
+            }
           }
-          // Also try root-level file
+
+          // 6. Remove dataset files from storage (recursive)
+          const deleteRecursive = async (prefix) => {
+            const { data: items } = await supabase.storage.from('datasets').list(prefix, { limit: 200 })
+            if (!items?.length) return
+            const files = items.filter(i => i.id).map(i => prefix ? `${prefix}/${i.name}` : i.name)
+            const folders = items.filter(i => !i.id)
+            for (const folder of folders) {
+              await deleteRecursive(prefix ? `${prefix}/${folder.name}` : folder.name)
+            }
+            if (files.length) await supabase.storage.from('datasets').remove(files)
+          }
+          await deleteRecursive(dsName)
+          // Also try root-level files
           await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
 
           // 7. Audit log
