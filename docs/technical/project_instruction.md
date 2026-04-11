@@ -220,7 +220,7 @@ app/
 |   |-- 014_audit_fixes.sql           # Admin guards on RPCs, profile/report policies
 |   |-- 015_audit_log_cleanup.sql     # audit_log schema normalization
 |
-|-- .github/workflows/               # CI/CD (12 workflows)
+|-- .github/workflows/               # CI/CD (13 workflows)
 |   |-- ci.yml                        # Lint, Test, Model Conversion, Build APK
 |   |-- codeql.yml                    # CodeQL SAST security scanning (JS/TS, Python)
 |   |-- release.yml                   # GitHub Release + APK
@@ -956,7 +956,7 @@ curl http://localhost:8080/health
 
 ## 12. CI/CD Pipeline (GitHub Actions) — ✅ DA TRIEN KHAI
 
-### 12.1 Workflows Overview (11 workflows)
+### 12.1 Workflows Overview (13 workflows)
 
 **Automatic workflows** (triggered boi push/PR):
 
@@ -1208,7 +1208,7 @@ flutter build apk --release --dart-define-from-file=.env
 ```
 
 **Tinh nang app:**
-- 14 screens: Home, Camera, Result, History, Detail, Stats, Settings, Benchmark, Login, Register, ForgotPassword, ResetPassword (+ 4 stub/mobile variants)
+- 13 screens: Home, Camera, Result, History, Detail, Stats, Settings, Benchmark, Devices, Login, Register, ForgotPassword, ResetPassword (+ 4 stub/mobile variants)
 - Auth: Email/Password + Google Sign-In + Forgot/Reset Password + Deep Link (PKCE)
 - Authentication: Email/Password + Google Sign-In (native)
 - Inference: TFLite MobileNetV2 (GPU -> XNNPack -> CPU delegate fallback)

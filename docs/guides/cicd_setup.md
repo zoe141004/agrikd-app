@@ -4,7 +4,7 @@
 
 - GitHub repository with the AgriKD monorepo
 - Supabase project (see [Supabase Setup Guide](supabase_setup.md))
-- Google Drive service account for DVC (for model/data workflows)
+- Google Cloud Storage (GCS) service account for DVC (for model/data workflows)
 - Vercel account (optional, for admin dashboard deployment)
 
 ## 1. Required GitHub Secrets
@@ -13,12 +13,12 @@ Go to **Repository → Settings → Secrets and variables → Actions** and add:
 
 | Secret | Required By | How to Get |
 |--------|-------------|------------|
-| `SUPABASE_URL` | CI, Release, Model Pipeline, Export Data | Supabase Dashboard → Settings → API → URL |
+| `SUPABASE_URL` | CI, Release, Model Pipeline, Export Data, DVC Pull/Push, Dataset Upload/Delete, Deploy | Supabase Dashboard → Settings → API → URL |
 | `SUPABASE_ANON_KEY` | CI, Release | Supabase Dashboard → Settings → API → anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Model Pipeline, Export Data, Dataset Upload | Supabase Dashboard → Settings → API → service_role key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Model Pipeline, Export Data, Dataset Upload/Delete, DVC Pull/Push, Model Rollback | Supabase Dashboard → Settings → API → service_role key |
 | `SENTRY_DSN` | CI, Release | sentry.io → Project → Settings → Client Keys |
 | `GOOGLE_WEB_CLIENT_ID` | CI, Release | Google Cloud Console → Credentials → OAuth Client ID |
-| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | DVC Pull/Push, Train, Validate, Export, Dataset Upload | GCS service account JSON |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | DVC Pull/Push, Train, Validate, Export, Dataset Upload, Dataset Delete | GCS service account JSON |
 | `VERCEL_DEPLOY_HOOK` | Deploy (optional) | Vercel → Project → Settings → Git → Deploy Hooks |
 | `KAGGLE_USERNAME` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Username |
 | `KAGGLE_KEY` | Dataset Upload (kaggle source, optional) | kaggle.com → Settings → API → Create New Token |
@@ -42,12 +42,16 @@ base64 -w 0 service-account.json
 
 ## 2. Workflows Overview
 
+13 workflows total: 3 automatic + 10 manual.
+
 ### Automatic workflows (triggered by push/PR):
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **CI** | `ci.yml` | Push to `main`/`release/*`, PRs to `main` | Lint, test, build APK |
-| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release || **CodeQL** | `codeql.yml` | Push to `main`, PRs to `main`, weekly schedule | Security scanning (JS/TS + Python) |
+| **CI** | `ci.yml` | Push to `main`/`develop`/`release/*`, PRs to `main`/`develop`/`feature/**` | Lint, test, build APK, dashboard tests |
+| **Release** | `release.yml` | Push tag `v*` | Build APK + create GitHub Release |
+| **CodeQL** | `codeql.yml` | Push to `main`, PRs to `main`, weekly schedule | Security scanning (JS/TS + Python) |
+
 ### Manual workflows (workflow_dispatch):
 
 | Workflow | File | Purpose |
@@ -55,29 +59,34 @@ base64 -w 0 service-account.json
 | **Train** | `train.yml` | Run full training pipeline |
 | **Validate Model** | `validate-model.yml` | Validate + benchmark a specific model |
 | **Model Pipeline** | `model-pipeline.yml` | Full conversion + benchmark + upload to Supabase |
-| **DVC Pull** | `dvc-pull.yml` | Pull datasets from Google Drive |
-| **DVC Push** | `dvc-push.yml` | Push datasets to Google Drive |
+| **DVC Pull** | `dvc-pull.yml` | Pull datasets from GCS (Google Cloud Storage) |
+| **DVC Push** | `dvc-push.yml` | Push datasets to GCS |
 | **Export Data** | `export-data.yml` | Export predictions from Supabase |
 | **Dataset Upload** | `dataset-upload.yml` | Add new dataset from GDrive, Kaggle, or predictions → push directly to DVC |
+| **Dataset Delete** | `dataset-delete.yml` | Delete dataset from DVC tracking + garbage-collect from GCS remote |
 | **Deploy** | `deploy.yml` | Trigger Vercel deployment for admin dashboard |
 | **Model Rollback** | `model-rollback.yml` | Rollback model version in registry |
 
 ## 3. CI Workflow (`ci.yml`)
 
-Runs on every push to `main` or PR. 5 stages:
+Runs on every push to `main`/`develop`/`release/*` or PR to `main`/`develop`/`feature/**`. 8 stages:
 
 ```
-Lint & Format → Flutter Tests → Build APK
-                              ↘ Model Conversion → Model Validation
+Dependency Audit → Lint & Format → Flutter Tests → Build APK
+                                                 ↘ Model Conversion → Model Validation
+                                   Dashboard Tests → Jetson Python Lint
 ```
 
 | Stage | What it does |
 |-------|-------------|
+| **Dependency Audit** | `npm audit` + `pip audit` for known vulnerabilities |
 | **Lint** | `dart format --set-exit-if-changed .` + `flutter analyze` |
 | **Tests** | `flutter test --exclude-tags=widget` |
 | **Build APK** | Release APK with obfuscation + `--dart-define` secrets |
 | **Model Conversion** | Only runs if commit contains `[model]` or `mlops_pipeline/` files changed |
 | **Model Validation** | Validates + evaluates converted models |
+| **Dashboard Tests** | `vitest run` — admin dashboard unit/integration tests |
+| **Jetson Python Lint** | `ruff check` on Jetson Python code |
 
 **Flutter version:** 3.41.4
 **Python version:** 3.10
@@ -142,7 +151,7 @@ Manual trigger → Push all DVC-tracked data to GCS
 
 ### Dataset Upload (`dataset-upload.yml`):
 Three source modes — datasets are pushed directly to DVC (GCS), not staged in Supabase Storage:
-- **gdrive**: Download ZIP from Google Drive URL → prepare dataset → push to DVC
+- **gdrive**: Download ZIP from Google Drive URL → prepare dataset → push to DVC (GCS)
 - **kaggle**: Download dataset from Kaggle → prepare dataset → push to DVC (requires `KAGGLE_USERNAME` + `KAGGLE_KEY` secrets)
 - **predictions**: Export predictions from Supabase (with confidence filter) → prepare dataset → push to DVC
 
@@ -158,13 +167,40 @@ Manually triggered. Exports all predictions (paginated, 1000/page) from Supabase
 
 Supports `dvc_operation_id` for status report-back.
 
-## 8. Admin Dashboard Deploy (`deploy.yml`)
+## 8. Dataset Delete (`dataset-delete.yml`)
 
-Manually triggered. Sends a POST request to the Vercel Deploy Hook URL to trigger a fresh deployment.
+Manually triggered (from admin dashboard or GitHub Actions). Removes a dataset from DVC tracking and cleans up the GCS remote:
+
+```
+Trigger → dvc remove data/<leaf_type>.dvc → dvc gc --cloud → git commit+push → Supabase status update
+```
+
+- Removes the `.dvc` file from Git tracking
+- Runs `dvc gc --cloud --workspace -f` to garbage-collect unreferenced data from GCS
+- Cleans up the local `data/<leaf_type>/` directory
+- Reports status back to `dvc_operations` table (requires `SUPABASE_SERVICE_ROLE_KEY`)
+- The admin dashboard triggers this workflow and waits for completion before cleaning DB records
+
+**Required migration:** `database/migrations/017_dataset_delete.sql` (adds `'delete'` operation and `'deleting'` status).
+
+## 9. Model Rollback (`model-rollback.yml`)
+
+Manually triggered. Rolls back a model version in the registry:
+
+- Sets the target version's status back to `staging`
+- Restores the previous active version (if any)
+- Updates model registry metadata
+- Reports status to audit log
+
+Inputs: `leaf_type`, `version`, `reason`.
+
+## 10. Admin Dashboard Deploy (`deploy.yml`)
+
+Manually triggered. Sends a POST request to the Vercel Deploy Hook URL to trigger a fresh deployment. Uses concurrency group to prevent overlapping deploys.
 
 Alternatively, connect the `admin-dashboard/` directory to Vercel for automatic deploys on push.
 
-## 9. Self-Hosted Runner (Optional)
+## 11. Self-Hosted Runner (Optional)
 
 For Jetson-specific workflows or GPU training:
 

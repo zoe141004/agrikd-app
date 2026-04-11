@@ -56,6 +56,7 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 14 | `database/migrations/014_audit_fixes.sql` | Admin-only guards on dashboard RPCs, profiles UPDATE policy for users, model_reports SELECT policy, audit_log user_id index |
 | 15 | `database/migrations/015_audit_log_cleanup.sql` | Migrates legacy audit_log schema (BIGINT id, actor_email) to correct UUID-based schema, preserves existing data |
 | 16 | `database/migrations/016_fk_constraints.sql` | FK constraints: model_benchmarks + model_versions → model_registry (ON DELETE CASCADE) |
+| 17 | `database/migrations/017_dataset_delete.sql` | Extend dvc_operations for dataset deletion: adds `'delete'` operation and `'deleting'` status to CHECK constraints |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning
@@ -64,6 +65,12 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 - Auto-increment `config_version` trigger
 - `device_id` column added to `predictions` table
 - File: `database/migrations/012_devices.sql`
+
+### Migration 017: Dataset Delete
+- Extends `dvc_operations.operation` CHECK to include `'delete'`
+- Extends `dvc_operations.status` CHECK to include `'deleting'`
+- Required by the `dataset-delete.yml` GitHub Actions workflow and the admin dashboard cascade delete feature
+- File: `database/migrations/017_dataset_delete.sql`
 
 All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
 
@@ -76,7 +83,7 @@ Run the verification script:
 ```
 
 Expected output: All checks should show `[PASS]`. The script verifies:
-- RLS enabled on all required tables (profiles, predictions, model_registry, audit_log, model_benchmarks, model_versions, dvc_operations)
+- RLS enabled on all required tables (profiles, predictions, model_registry, audit_log, model_benchmarks, model_versions, model_reports, pipeline_runs, dvc_operations, devices, provisioning_tokens, model_engines)
 - All policies exist per table
 - `is_admin_role()` function exists and is SECURITY DEFINER
 - `handle_new_user()` trigger on auth.users

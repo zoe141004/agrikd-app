@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–016)
+-- AgriKD — Comprehensive Migration Verification (001–017)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 16 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 17 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -970,6 +970,41 @@ BEGIN
 END $$;
 
 -- =====================================================================
+-- Section 18 — Migration 017: Dataset Delete (CHECK constraints)
+-- =====================================================================
+DO $$
+DECLARE _exists boolean;
+BEGIN
+    -- Check operation CHECK includes 'delete'
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.check_constraints
+        WHERE constraint_name = 'dvc_operations_operation_check'
+          AND check_clause LIKE '%delete%'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '18. Migration 017',
+        'dvc_operations operation CHECK includes delete',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'includes delete' ELSE 'MISSING — run 017_dataset_delete.sql' END
+    );
+
+    -- Check status CHECK includes 'deleting'
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.check_constraints
+        WHERE constraint_name = 'dvc_operations_status_check'
+          AND check_clause LIKE '%deleting%'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '18. Migration 017',
+        'dvc_operations status CHECK includes deleting',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'includes deleting' ELSE 'MISSING — run 017_dataset_delete.sql' END
+    );
+END $$;
+
+-- =====================================================================
 -- OUTPUT 1: FAILURES ONLY (most important — check this first)
 -- =====================================================================
 SELECT
@@ -1006,7 +1041,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED (migrations 001–016)'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–017)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;

@@ -88,15 +88,15 @@ Phase 3 (production audit round 2) applied targeted fixes across all components:
 
 | Layer | Technology | Version / Notes |
 |---|---|---|
-| Mobile Framework | Flutter + Dart | 3.41.4 |
+| Mobile Framework | Flutter + Dart | ^3.11.1 (SDK) |
 | State Management | Riverpod (flutter_riverpod) | 2.6.1 |
 | ML Inference (Mobile) | tflite_flutter | 0.12.1 |
-| Error Tracking (Mobile) | sentry_flutter | ^9.0.0 |
+| Error Tracking (Mobile) | sentry_flutter | ^9.16.1 |
 | ML Inference (Edge) | TensorRT FP16 | JetPack r8.5.2 |
 | Edge GUI | PyQt5 | System package |
 | Edge REST API | Flask | Rate-limited (30 req/min), 10 MB upload limit |
 | Backend | Supabase (PostgreSQL + Auth + Storage) | Managed |
-| Admin Dashboard | React 18 + Vite 5 | SPA on Vercel |
+| Admin Dashboard | React 18 + Vite 6 | SPA on Vercel |
 | Error Tracking (Dashboard) | @sentry/react | ^10.47.0 |
 | MLOps Runtime | Python 3.10 + DVC + GitHub Actions | venv at venv_mlops/ |
 | Edge Hardware | NVIDIA Jetson (ARM64) | L4T-based |
@@ -195,10 +195,10 @@ agrikd/
 │   │   ├── 013_model_engines.sql      # Model engines table (TensorRT), ONNX URL support, engine RPCs
 │   │   ├── 014_audit_fixes.sql        # Admin guards on dashboard RPCs, profile/report policies
 │   │   └── 015_audit_log_cleanup.sql  # audit_log schema normalization (UUID, user_id)
-│   ├── verify_all_migrations.sql      # Comprehensive verify for all 15 migrations
+│   ├── verify_all_migrations.sql      # Comprehensive verify for all 17 migrations
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
-├── .github/workflows/                 # CI/CD (12 workflow files)
+├── .github/workflows/                 # CI/CD (13 workflow files)
 │   ├── ci.yml                         # Lint, test, build APK, dashboard tests, Jetson lint
 │   ├── codeql.yml                     # CodeQL SAST security scanning (JS/TS, Python)
 │   ├── release.yml                    # Tagged release build + GitHub Release
@@ -383,7 +383,7 @@ format to verify numerical fidelity across the conversion pipeline.
 
 ## 7. CI/CD Workflow Map
 
-All 11 workflows live in `.github/workflows/`. Flutter-related jobs use
+All 13 workflows live in `.github/workflows/`. Flutter-related jobs use
 `working-directory: mobile_app` since the Flutter project was relocated from the
 repository root to the `mobile_app/` subdirectory.
 
@@ -396,16 +396,18 @@ alongside `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 
 | Workflow | File | Trigger | Purpose | Notes |
 |---|---|---|---|---|
-| CI | `ci.yml` | Push / PR to `main` | Lint, test, model conversion, build APK | `working-directory: mobile_app`; `--obfuscate`; uploads debug symbols |
+| CI | `ci.yml` | Push / PR to `main`/`develop` | Lint, test, model conversion, build APK, dashboard tests | `working-directory: mobile_app`; `--obfuscate`; uploads debug symbols |
 | Release | `release.yml` | Tag `v*` | Build release APK + GitHub Release | `working-directory: mobile_app`; `--obfuscate`; debug symbols retained 365 days |
+| CodeQL | `codeql.yml` | Push/PR to `main`, weekly | Security scanning (JS/TS, Python) | SAST analysis |
 | Model Pipeline | `model-pipeline.yml` | Manual | Full convert + validate + upload cycle | Runs both tomato and burmese configs |
-| Deploy | `deploy.yml` | Manual | Vercel deploy for admin dashboard | - |
+| Deploy | `deploy.yml` | Manual | Vercel deploy for admin dashboard | Concurrency group to prevent overlapping deploys |
 | Train | `train.yml` | Manual | Run model training | - |
 | Validate Model | `validate-model.yml` | Manual | Cross-format validation only | - |
-| DVC Pull | `dvc-pull.yml` | Manual | Pull dataset files from DVC remote | - |
-| DVC Push | `dvc-push.yml` | Manual | Push dataset files to DVC remote | - |
+| DVC Pull | `dvc-pull.yml` | Manual | Pull dataset files from GCS via DVC | - |
+| DVC Push | `dvc-push.yml` | Manual | Push dataset files to GCS via DVC | - |
 | Export Data | `export-data.yml` | Manual | Export prediction records | - |
-| Dataset Upload | `dataset-upload.yml` | Manual | Upload datasets to storage | - |
+| Dataset Upload | `dataset-upload.yml` | Manual | Upload datasets to DVC (GCS) | - |
+| Dataset Delete | `dataset-delete.yml` | Manual | Delete dataset from DVC + GCS cleanup | `dvc gc --cloud` for remote garbage collection |
 | Model Rollback | `model-rollback.yml` | Manual | Rollback model version in registry | Requires `SUPABASE_SERVICE_ROLE_KEY` |
 
 ### Required CI Secrets
@@ -415,12 +417,12 @@ workflows (the `GITHUB_TOKEN` is auto-provided and not counted):
 
 | Secret | Used By | Purpose |
 |---|---|---|
-| `SUPABASE_URL` | ci.yml, release.yml, model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml | Supabase project URL |
+| `SUPABASE_URL` | ci.yml, release.yml, model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml, dataset-delete.yml, deploy.yml, dvc-pull.yml, dvc-push.yml | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ci.yml, release.yml | Supabase anonymous key for `--dart-define` |
-| `SUPABASE_SERVICE_ROLE_KEY` | model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml | Service role key (bypasses RLS) |
+| `SUPABASE_SERVICE_ROLE_KEY` | model-pipeline.yml, model-rollback.yml, export-data.yml, dataset-upload.yml, dataset-delete.yml, dvc-pull.yml, dvc-push.yml | Service role key (bypasses RLS) |
 | `SENTRY_DSN` | ci.yml, release.yml | Sentry Data Source Name for error tracking |
 | `GOOGLE_WEB_CLIENT_ID` | ci.yml, release.yml | Google OAuth client ID for `--dart-define` |
-| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml | GCS service account JSON for DVC |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | train.yml, validate-model.yml, model-pipeline.yml, dvc-pull.yml, dvc-push.yml, export-data.yml, dataset-upload.yml, dataset-delete.yml | GCS service account JSON for DVC |
 | `VERCEL_DEPLOY_HOOK` | deploy.yml | Vercel deploy webhook URL |
 | `KAGGLE_USERNAME` | dataset-upload.yml | Kaggle API username for external dataset downloads |
 | `KAGGLE_KEY` | dataset-upload.yml | Kaggle API key for external dataset downloads |

@@ -26,7 +26,10 @@ flutter pub get
 1. Create root `.env` from template:
    ```bash
    cd <project-root>
-   cp .env.example .env
+   # Prefer .env.development (has default values):
+   cp .env.development .env
+   # Or use blank template:
+   # cp .env.example .env
    # Edit .env with your actual values
    ```
 
@@ -78,7 +81,7 @@ flutter test --exclude-tags=widget
 flutter test
 ```
 
-Current test count: **89 tests** across 11 test files:
+Current test count: **89 tests** across 14 test files:
 - `test/unit/` — Prediction model, image preprocessor, model constants, model integrity, app strings, app constants
 - `test/provider/` — History provider, settings provider
 - `test/dao/` — PredictionDao, PreferenceDao, ModelDao, SyncQueue

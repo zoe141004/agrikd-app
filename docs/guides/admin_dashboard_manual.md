@@ -3,7 +3,7 @@
 ## Overview
 
 The AgriKD Admin Dashboard is a single-page application built with
-**React 18**, **Vite 5**, **Supabase JS**, and **Sentry** (error tracking).
+**React 18**, **Vite 6**, **Supabase JS**, and **Sentry** (error tracking).
 It provides project administrators with a centralized interface for monitoring
 predictions, managing models and users, and controlling the MLOps pipeline.
 The dashboard is deployed on **Vercel** and communicates directly with the
@@ -92,7 +92,7 @@ User administration panel.
 ### Data Management (`/data`)
 
 Interface for dataset lifecycle operations powered by DVC. Datasets are
-pushed directly to DVC (Google Drive) — Supabase only stores metadata
+pushed directly to DVC (Google Cloud Storage) — Supabase only stores metadata
 via the `dvc_operations` database table.
 
 Five tabs:
@@ -107,9 +107,9 @@ Five tabs:
   Staged datasets appear with metadata (file count, classes, size) and
   can be reviewed before pushing to DVC.
 - **DVC Operations** -- Full history table of all DVC operations (stage,
-  push, pull, export) with status badges, GitHub Actions links, and
+  push, pull, export, delete) with status badges, GitHub Actions links, and
   action buttons. DVC Pull/Verify and Push All controls trigger
-  GitHub Actions workflows against the DVC remote (Google Drive).
+  GitHub Actions workflows against the DVC remote (Google Cloud Storage).
 - **Prediction Data** -- Browse prediction statistics, export CSV/JSON,
   and import CSV (collapsed by default).
 - **Storage Files** -- Two sub-tabs:
@@ -131,8 +131,9 @@ polling every 15 seconds (secondary), and direct database polling every
 The dashboard uses a shared **DataContext** (`src/lib/DataContext.jsx`) to
 keep cross-page state synchronized without requiring page reloads:
 
-- **Leaf type options** are merged from three sources: the `predictions`
-  table (via RPC), the `model_registry` table, and completed `dvc_operations`.
+- **Leaf type options** are merged from four sources: the `predictions`
+  table (via RPC), the `model_registry` table, completed `dvc_operations`
+  (excluding aggregate `all` entries), and DVC tracked dataset names.
   All pages share the same list, so uploading a dataset or model on one page
   immediately updates dropdowns on every other page.
 - **DVC tracked datasets** are loaded once and refreshed when operations
@@ -150,11 +151,18 @@ keep cross-page state synchronized without requiring page reloads:
 ### Data Management (`/data`)
 
 - **Cascade delete dataset** -- Each dataset row has a delete button that
-  removes the dataset and ALL related data in order: model benchmarks →
-  model versions → model registry entries (+ storage files) → pipeline runs →
-  DVC operations → dataset storage files. A confirmation dialog warns the
-  user before proceeding. After deletion, all shared state refreshes
-  automatically.
+  triggers a two-phase deletion process:
+  1. **DVC remote cleanup** -- If GitHub is configured, a `dataset-delete.yml`
+     workflow is triggered to remove the dataset from DVC tracking and
+     garbage-collect unreferenced data from the GCS remote via `dvc gc --cloud`.
+  2. **Database cleanup** -- Only after the GitHub workflow succeeds, the
+     dashboard removes ALL related data: model benchmarks → model versions →
+     model registry entries (+ storage files) → pipeline runs → DVC operations
+     → dataset storage files. If the workflow fails, no database records are
+     deleted and the user is notified.
+  If GitHub is not configured, only database/storage cleanup runs (local-only
+  mode). A confirmation dialog warns the user before proceeding. After
+  deletion, all shared state refreshes automatically.
 - **Upload Model auto-fill** -- When selecting a leaf type in the Upload tab,
   class labels and number of classes are auto-filled from three sources:
   (1) existing models in the registry, (2) DVC dataset metadata from context
@@ -170,13 +178,17 @@ Integration with GitHub Releases.
 
 ### System Health (`/health`)
 
-Operational status overview.
+Operational status overview with four status cards.
 
-- **Supabase status** -- Connection health and API latency.
-- **Database statistics** -- Prediction count, model registry, DVC operations,
-  and pipeline runs.
-- **Storage buckets** -- Probes the three known buckets (`models`, `datasets`,
+- **Database** -- Connection health and API latency with sequential ping tests.
+- **Auth** -- Current session status (Active / No session).
+- **Storage** -- Probes the three known buckets (`models`, `datasets`,
   `prediction-images`) individually and reports how many are accessible.
+- **GitHub API** -- Tests connectivity to the configured GitHub repository
+  (requires PAT in Settings). Shows Connected, HTTP status, Timeout, or
+  Not configured.
+- **Database statistics** -- Prediction count, model registry, DVC operations,
+  pipeline runs, and estimated uptime.
 
 ### Settings (`/settings`)
 
@@ -319,10 +331,12 @@ The following GitHub secrets are used by admin dashboard workflows:
 
 | Secret | Used By |
 |--------|---------|
-| `SUPABASE_URL` | `deploy.yml` (Vercel env var) |
+| `SUPABASE_URL` | `deploy.yml`, `dataset-delete.yml` (Vercel env var, status updates) |
 | `SUPABASE_ANON_KEY` | `deploy.yml` (Vercel env var) |
+| `SUPABASE_SERVICE_ROLE_KEY` | `dataset-delete.yml` (bypass RLS for status updates) |
 | `SENTRY_DSN` | `deploy.yml` (mapped to `VITE_SENTRY_DSN`) |
 | `VERCEL_DEPLOY_HOOK` | `deploy.yml` (webhook trigger) |
+| `GOOGLE_APPLICATION_CREDENTIALS_DATA` | `dataset-delete.yml` (GCS/DVC access) |
 
 ---
 
@@ -335,6 +349,7 @@ The following GitHub secrets are used by admin dashboard workflows:
 | Pipeline trigger fails | GitHub token or workflow permissions | Check repository Actions settings and secrets |
 | CSV export is empty | Active filters exclude all records | Clear filters and retry |
 | Blank page with console errors | JavaScript crash not caught | Check Sentry dashboard for error details, or browser DevTools |
-| Test Connection shows "Not Tested" | Config saved but not tested | Click the "Test Connection" button after saving |
+| Test Connection shows "Not Tested" | Config saved but not tested | Click the "Test Connection" button after entering credentials |
+| Dataset delete fails | Migration 017 not applied | Run `database/migrations/017_dataset_delete.sql` in Supabase SQL Editor |
 | Storage shows "0/3 buckets OK" | Supabase Storage buckets not created | Create `models`, `datasets`, and `prediction-images` buckets in the Supabase dashboard |
 | Leaf type dropdown empty | No predictions, models, or DVC operations | Upload a dataset or model first; the dropdown merges leaf types from all three sources |

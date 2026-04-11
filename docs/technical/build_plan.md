@@ -1,7 +1,7 @@
 # AgriKD Flutter App — Build Plan Chi Tiết
 
 **Ngày tạo:** 2026-03-21
-**Trạng thái hiện tại:** App production-ready (14 screens, 89 tests, `flutter analyze` clean, release APK 31.3 MB arm64)
+**Trạng thái hiện tại:** App production-ready (13 screens, 89 tests, `flutter analyze` clean, release APK 31.3 MB arm64)
 **Mục tiêu:** ~~Hoàn thiện app từ skeleton → production-ready MVP~~ ✅ DONE
 
 ---
@@ -675,7 +675,7 @@ curl http://localhost:8080/health
 - Thêm `path_provider: ^2.1.0` vào `pubspec.yaml`
 
 **6b. DVC Setup**
-- Created `.dvc/config` với Google Drive remote (placeholder `<folder-id>`)
+- Created `.dvc/config` với GCS remote (gs://agrikd-dvc-data/data)
 - Created `.dvc/.gitignore`
 - Created DVC tracking files: `data_tomato.dvc`, `data_burmese_grape_leaf.dvc`
 - DVC remote đã chuyển sang GCS: `gs://agrikd-dvc-data/data`
@@ -883,7 +883,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | Component | Status | Chi tiet |
 |-----------|--------|----------|
 | Core inference | ✅ | TFLite offline, 2 models (Tomato 10 classes, Burmese 5 classes) |
-| Screens | ✅ | 14 screens + 4 stub/mobile variants |
+| Screens | ✅ | 13 screens + 4 stub/mobile variants |
 | Auth | ✅ | Email + Google + Forgot/Reset Password + Deep Link (PKCE) |
 | Sync | ✅ | Auto-sync + manual + exponential backoff + OTA model update |
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
@@ -902,7 +902,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | 1 | **Supabase Dashboard config** | Manual | Site URL + Redirect URLs → `com.agrikd.app://callback` |
 | 2 | **Play Store signing** | Manual | Tao upload keystore + config `key.properties` (hien dung debug signing) |
 | 3 | **Google Sign-In OAuth** | Manual | Tao OAuth 2.0 Client ID tren Google Cloud Console, set `GOOGLE_WEB_CLIENT_ID` |
-| 4 | **DVC remote config** | Manual | Thay `<folder-id>` placeholder bang actual Google Drive folder ID |
+| 4 | **DVC remote config** | ✅ Done | GCS remote configured: `gs://agrikd-dvc-data/data` |
 | 5 | **GitHub Secrets** | Manual | Set `SUPABASE_URL` + `SUPABASE_ANON_KEY` tren GitHub repo |
 | 6 | DB encryption | Optional | `sqflite` → `sqflite_sqlcipher` (khuyen nghi khi publish Play Store) |
 | 7 | Admin: GPS region filter | Deferred | Can map component (Leaflet hoac Google Maps) |
