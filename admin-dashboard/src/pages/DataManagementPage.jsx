@@ -140,7 +140,7 @@ export default function DataManagementPage() {
       // Recovery: check for completed delete ops whose DB cleanup wasn't finished
       // (e.g. user navigated away before cleanup ran)
       for (const op of ops) {
-        if (op.operation === 'delete' && op.status === 'completed') {
+        if (op.operation === 'delete' && op.status === 'completed' && !op.metadata?.db_cleanup) {
           const { count } = await supabase.from('model_registry')
             .select('id', { count: 'exact', head: true })
             .ilike('leaf_type', op.leaf_type)
@@ -152,8 +152,10 @@ export default function DataManagementPage() {
               triggerRefresh()
             } catch (e) { console.warn('Recovery cleanup failed:', e.message) }
           } else {
-            // Data already cleaned, just remove the tracking op
-            await supabase.from('dvc_operations').delete().eq('id', op.id)
+            // Data already cleaned, mark the op as fully cleaned (preserve for history)
+            await supabase.from('dvc_operations').update({
+              metadata: { ...(op.metadata || {}), db_cleanup: true },
+            }).eq('id', op.id)
           }
         }
       }
@@ -241,9 +243,13 @@ export default function DataManagementPage() {
     }
     await deleteRecursive(dsName)
     await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
-    // Clean up the tracking operation itself
+    // Mark the delete operation as completed (preserve for history)
     if (dvcOpId) {
-      await supabase.from('dvc_operations').delete().eq('id', dvcOpId)
+      await supabase.from('dvc_operations').update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        metadata: { deleted: true, leaf_type: dsName, db_cleanup: true },
+      }).eq('id', dvcOpId)
     }
     // Audit log
     logAudit(supabase, 'dataset_deleted', 'dataset', dsName, {
@@ -272,8 +278,7 @@ export default function DataManagementPage() {
           const errMsg = data.error_message || 'Unknown error'
           setError(`DVC deletion failed for "${pendingDel.dsName}": ${errMsg}. Dataset data preserved.`)
           setDvcLog(l => [...l, `[${new Date().toLocaleTimeString()}] ✗ DVC delete failed: ${errMsg}. Database NOT cleaned — data preserved.`])
-          // Clean up only the failed tracking operation
-          await supabase.from('dvc_operations').delete().eq('id', pendingDel.opId)
+          // Keep the failed operation record for history (status already set to 'failed' by workflow)
         }
       } catch (cleanupErr) {
         setError(`Error during delete cleanup: ${cleanupErr.message}`)

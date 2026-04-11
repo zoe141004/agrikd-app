@@ -63,45 +63,44 @@ jobs:
       - name: Locate and remove DVC tracking
         id: dvc_remove
         run: |
-          set -eo pipefail
           DVC_FILE="dvc/data_${LEAF_TYPE}.dvc"
 
           if [ ! -f "$DVC_FILE" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "[WARN] DVC file not found: $DVC_FILE"
+            echo "[INFO] DVC file not found: $DVC_FILE (may have been removed by a previous run)"
             echo "Available .dvc files:"
             ls -la dvc/*.dvc 2>/dev/null || echo "  (none)"
-            echo "Skipping DVC remove — file may have been deleted in a previous run."
-            exit 0
+            echo "Will attempt remote garbage collection to clean orphaned data."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "=== DVC file contents ==="
+            cat "$DVC_FILE"
+
+            # Extract MD5 hash before removal (for verification later)
+            MD5_HASH=$(grep -oP '(?<=md5: )\S+' "$DVC_FILE" || true)
+            echo "md5=$MD5_HASH" >> "$GITHUB_OUTPUT"
+            echo "Extracted MD5 hash: $MD5_HASH"
+
+            # Remove DVC tracking (.dvc file + local cache + gitignore entry)
+            echo "=== Removing DVC tracking for ${LEAF_TYPE} ==="
+            dvc remove "$DVC_FILE" -v
+            echo "DVC remove completed"
           fi
 
-          echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "=== DVC file contents ==="
-          cat "$DVC_FILE"
-
-          # Extract MD5 hash before removal (for verification later)
-          MD5_HASH=$(grep -oP '(?<=md5: )\S+' "$DVC_FILE" || true)
-          echo "md5=$MD5_HASH" >> "$GITHUB_OUTPUT"
-          echo "Extracted MD5 hash: $MD5_HASH"
-
-          # Remove DVC tracking (.dvc file + local cache + gitignore entry)
-          echo "=== Removing DVC tracking for ${LEAF_TYPE} ==="
-          dvc remove "$DVC_FILE" -v
-          echo "DVC remove completed"
-
       - name: Delete data from DVC remote (GCS)
-        if: steps.dvc_remove.outputs.found == 'true'
-        continue-on-error: true
+        id: dvc_gc
         run: |
-          echo "=== Garbage-collecting deleted dataset from GCS remote ==="
+          echo "=== Garbage-collecting unreferenced data from GCS remote ==="
           # dvc gc --cloud --workspace removes all cache files from the remote
           # that are NOT referenced by any .dvc file in the current workspace.
-          # Since we just removed the .dvc file, this dataset's data will be cleaned.
+          # This cleans data for the deleted dataset (whether removed now or previously).
           if dvc gc --cloud --workspace -f -v 2>&1; then
+            echo "gc_ok=true" >> "$GITHUB_OUTPUT"
             echo "Remote garbage collection completed successfully"
           else
-            echo "[WARN] dvc gc --cloud failed — remote data may need manual cleanup"
-            echo "Run manually: gsutil -m rm -r gs://agrikd-dvc-data/data/<hash>"
+            echo "gc_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::dvc gc --cloud failed — remote data may not be fully cleaned"
+            exit 1
           fi
 
       - name: Clean local data directory
@@ -160,13 +159,15 @@ jobs:
         if: inputs.dvc_operation_id != '' && success()
         continue-on-error: true
         run: |
+          DVC_FOUND="${{ steps.dvc_remove.outputs.found || 'false' }}"
+          GC_OK="${{ steps.dvc_gc.outputs.gc_ok || 'false' }}"
           curl -sS --max-time 30 --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"deleted\":true,\"leaf_type\":\"$LEAF_TYPE\",\"remote_cleaned\":true}}"
+            -d "{\"status\":\"completed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"metadata\":{\"deleted\":true,\"leaf_type\":\"$LEAF_TYPE\",\"dvc_file_found\":$DVC_FOUND,\"remote_cleaned\":$GC_OK}}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -175,13 +176,19 @@ jobs:
         if: failure() && inputs.dvc_operation_id != ''
         continue-on-error: true
         run: |
+          DVC_FOUND="${{ steps.dvc_remove.outputs.found || 'false' }}"
+          if [ "$DVC_FOUND" = "false" ]; then
+            ERR_MSG="DVC file not found and remote cleanup failed — data may still exist on GCS"
+          else
+            ERR_MSG="Dataset deletion failed — check GitHub Actions logs for run ${{ github.run_id }}"
+          fi
           curl -sS --max-time 30 --fail-with-body -X PATCH \
             "$SUPABASE_URL/rest/v1/dvc_operations?id=eq.$DVC_OP_ID" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"Dataset deletion failed — check GitHub Actions logs for run ${{ github.run_id }}\"}"
+            -d "{\"status\":\"failed\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error_message\":\"$ERR_MSG\"}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -194,6 +201,7 @@ jobs:
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Leaf Type | \`${LEAF_TYPE}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| DVC File | \`dvc/data_${LEAF_TYPE}.dvc\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Found | ${{ steps.dvc_remove.outputs.found || 'unknown' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DVC File Found | ${{ steps.dvc_remove.outputs.found || 'false' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| MD5 Hash | \`${{ steps.dvc_remove.outputs.md5 || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Remote GC | ${{ steps.dvc_gc.outputs.gc_ok || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
