@@ -8,7 +8,7 @@ import CustomTooltip from '../components/CustomTooltip'
 const PAGE_SIZE = 25
 
 export default function PredictionsPage() {
-  const { leafTypeOptions } = useData()
+  const { leafTypeOptions, refreshKey } = useData()
   const [predictions, setPredictions] = useState([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -23,7 +23,7 @@ export default function PredictionsPage() {
     const controller = new AbortController()
     loadPredictions(controller.signal)
     return () => controller.abort()
-  }, [page, filters])
+  }, [page, filters, refreshKey])
 
   const applyFilters = (query) => {
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)

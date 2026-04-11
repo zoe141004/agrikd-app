@@ -83,15 +83,15 @@ export function DataProvider({ children }) {
         .limit(50)
 
       if (ops && ops.length > 0) {
-        const seen = new Set()
-        const datasets = []
+        // Use a unified Map keyed by normalized dataset name to prevent duplicates
+        const datasetMap = new Map()
         for (const op of ops) {
           const md = op.metadata
           if (md?.datasets) {
             for (const [dsName, dsInfo] of Object.entries(md.datasets)) {
-              if (seen.has(dsName)) continue
-              seen.add(dsName)
-              datasets.push({
+              const key = dsName.toLowerCase().trim()
+              if (datasetMap.has(key)) continue
+              datasetMap.set(key, {
                 name: dsName,
                 file: `data_${dsName}.dvc`,
                 size: dsInfo.total_size || null,
@@ -102,9 +102,10 @@ export function DataProvider({ children }) {
                 lastUpdated: op.completed_at,
               })
             }
-          } else if (md?.file_count != null && !seen.has(op.leaf_type)) {
-            seen.add(op.leaf_type)
-            datasets.push({
+          } else if (md?.file_count != null) {
+            const key = (op.leaf_type || '').toLowerCase().trim()
+            if (!key || datasetMap.has(key)) continue
+            datasetMap.set(key, {
               name: op.leaf_type,
               file: `data_${op.leaf_type}.dvc`,
               size: md.total_size || null,
@@ -116,6 +117,7 @@ export function DataProvider({ children }) {
             })
           }
         }
+        const datasets = [...datasetMap.values()]
         if (datasets.length > 0) {
           if (mountedRef.current) {
             setDvcDatasets(datasets)

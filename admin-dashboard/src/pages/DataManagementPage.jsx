@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 const DTABS = ['Overview', 'Stage Data', 'DVC Operations', 'Prediction Data', 'Storage Files']
 
 export default function DataManagementPage() {
-  const { leafTypeOptions: leafOptions, dvcDatasets, setDvcDatasets, dvcDatasetsLoading: sharedDvcLoading, dvcDatasetsSource, refreshLeafTypes, refreshDvcDatasets, triggerRefresh } = useData()
+  const { leafTypeOptions: leafOptions, dvcDatasets, setDvcDatasets, dvcDatasetsLoading: sharedDvcLoading, dvcDatasetsSource, refreshLeafTypes, refreshDvcDatasets, triggerRefresh, refreshKey } = useData()
   const [dtab, setDtab] = useState('Overview')
   const [stats, setStats] = useState({ total: 0 })
   const [quality, setQuality] = useState([])
@@ -55,6 +55,7 @@ export default function DataManagementPage() {
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
   const [storageSubTab, setStorageSubTab] = useState('Datasets') // 'Datasets' | 'Prediction Images'
+  const [deletingDataset, setDeletingDataset] = useState(null)
 
   // Prediction Images browser
   const [predImages, setPredImages] = useState([])
@@ -66,7 +67,7 @@ export default function DataManagementPage() {
   const [editingLabel, setEditingLabel] = useState(null) // prediction id being edited
   const [editLabelValue, setEditLabelValue] = useState('')
 
-  useEffect(() => { loadData(); loadDvcOperations() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); loadDvcOperations() }, [refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-load quality breakdown when leafOptions change from context
   useEffect(() => {
@@ -495,6 +496,7 @@ export default function DataManagementPage() {
     await supabase.from('predictions').update({ predicted_class_name: newLabel }).eq('id', predId)
     setPredImages(prev => prev.map(p => p.id === predId ? { ...p, predicted_class_name: newLabel } : p))
     setEditingLabel(null)
+    triggerRefresh()
   }
 
   const openPreview = async (pred) => {
@@ -562,7 +564,7 @@ export default function DataManagementPage() {
       }
       setCsvMsg({ type: 'success', text: `Imported ${imported.toLocaleString()} records.` })
       setCsvParsed(null); setCsvFile(null); if (csvRef.current) csvRef.current.value = ''
-      loadData()
+      loadData(); refreshLeafTypes(); triggerRefresh()
     } catch (err) { setCsvMsg({ type: 'error', text: err.message }) }
     finally { setCsvImporting(false) }
   }
@@ -634,6 +636,73 @@ export default function DataManagementPage() {
   const isOperationActive = ['pending', 'staging', 'pushing', 'pulling', 'exporting'].includes(dvcOpStatus)
   const stagedOps = dvcOps.filter(o => o.status === 'staged')
 
+  // ── Cascade delete: remove dataset + all related models, benchmarks, versions, operations, storage files ──
+  const deleteDataset = (dsName) => {
+    setConfirmAction({
+      title: 'Delete Dataset',
+      message: `Permanently delete dataset "${dsName}" and ALL related data?\n\nThis will remove:\n• All DVC operations for this leaf type\n• All models in the registry for this leaf type\n• All model benchmarks and version history\n• All storage files (models + datasets buckets)\n\nThis action cannot be undone.`,
+      danger: true,
+      confirmLabel: 'Delete Everything',
+      onConfirm: async () => {
+        setConfirmAction(null)
+        setDeletingDataset(dsName)
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          const userId = session?.user?.id
+
+          // 1. Delete model benchmarks for this leaf type
+          await supabase.from('model_benchmarks').delete().eq('leaf_type', dsName)
+
+          // 2. Delete model versions for this leaf type
+          await supabase.from('model_versions').delete().eq('leaf_type', dsName)
+
+          // 3. Delete models from registry + remove storage files
+          const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').eq('leaf_type', dsName)
+          if (modelsToDelete?.length) {
+            // Remove model files from storage
+            const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
+              const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
+              return match ? decodeURIComponent(match[1]) : null
+            }).filter(Boolean)
+            if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
+            // Delete registry entries
+            await supabase.from('model_registry').delete().eq('leaf_type', dsName)
+          }
+
+          // 4. Delete pipeline runs for this leaf type
+          await supabase.from('pipeline_runs').delete().eq('leaf_type', dsName)
+
+          // 5. Delete DVC operations for this leaf type
+          await supabase.from('dvc_operations').delete().eq('leaf_type', dsName)
+
+          // 6. Remove dataset files from storage
+          const { data: dsFiles } = await supabase.storage.from('datasets').list(dsName)
+          if (dsFiles?.length) {
+            await supabase.storage.from('datasets').remove(dsFiles.map(f => `${dsName}/${f.name}`))
+          }
+          // Also try root-level file
+          await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
+
+          // 7. Audit log
+          logAudit(supabase, 'dataset_deleted', 'dataset', dsName, {
+            deleted_models: modelsToDelete?.length || 0,
+            triggered_by: userId,
+          })
+
+          // 8. Refresh all shared state
+          await Promise.all([refreshDvcDatasets(), refreshLeafTypes()])
+          loadDvcOperations()
+          loadData()
+          triggerRefresh()
+        } catch (err) {
+          setError(`Failed to delete dataset: ${err.message}`)
+        } finally {
+          setDeletingDataset(null)
+        }
+      }
+    })
+  }
+
   if (loading) return <div className="loading-spinner"><div className="spinner" /><span>Loading data…</span></div>
 
   return (
@@ -693,7 +762,7 @@ export default function DataManagementPage() {
               </div>
               {dvcDatasets.length > 0 ? (
                 <table>
-                  <thead><tr><th>Dataset</th><th>Classes</th><th>Images</th><th>Size</th><th>Version</th><th>Updated</th></tr></thead>
+                  <thead><tr><th>Dataset</th><th>Classes</th><th>Images</th><th>Size</th><th>Version</th><th>Updated</th><th style={{ width: 50 }}></th></tr></thead>
                   <tbody>
                     {dvcDatasets.map(ds => (
                       <tr key={ds.name}>
@@ -703,6 +772,13 @@ export default function DataManagementPage() {
                         <td style={{ fontSize: 12, color: '#64748b' }}>{ds.size != null ? formatBytes(ds.size) : '—'}</td>
                         <td style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ds.md5 ? ds.md5.slice(0, 8) + '…' : '—'}</td>
                         <td style={{ fontSize: 12, color: '#94a3b8' }}>{ds.lastUpdated ? formatDateTime(ds.lastUpdated) : '—'}</td>
+                        <td>
+                          <button className="btn btn-sm" title="Delete dataset and all related data" disabled={deletingDataset === ds.name}
+                            onClick={() => deleteDataset(ds.name)}
+                            style={{ color: '#dc2626', padding: '2px 6px', fontSize: 11 }}>
+                            {deletingDataset === ds.name ? '…' : '✕'}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1341,7 +1417,7 @@ export default function DataManagementPage() {
         setConfirmAction(null)
         const { error } = await supabase.storage.from(storageBucket).remove([f.path])
         if (error) alert('Delete failed: ' + error.message)
-        else loadStorageFiles()
+        else { loadStorageFiles(); triggerRefresh() }
       }
     })
   }

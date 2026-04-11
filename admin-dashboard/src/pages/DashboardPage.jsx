@@ -9,7 +9,7 @@ import { cleanLabel } from '../lib/helpers'
 import CustomTooltip from '../components/CustomTooltip'
 
 export default function DashboardPage() {
-  const { leafTypeOptions } = useData()
+  const { leafTypeOptions, refreshKey } = useData()
   const [stats, setStats] = useState({ total: 0, users: 0, models: 0, devices: 0 })
   const [diseaseData, setDiseaseData] = useState([])
   const [dailyData, setDailyData] = useState([])
@@ -28,7 +28,7 @@ export default function DashboardPage() {
     const controller = new AbortController()
     loadDashboard(true, controller.signal)
     return () => controller.abort()
-  }, [leafFilter])
+  }, [leafFilter, refreshKey])
 
   // Auto-refresh every 60s — single interval, reads latest filter via ref
   useEffect(() => {

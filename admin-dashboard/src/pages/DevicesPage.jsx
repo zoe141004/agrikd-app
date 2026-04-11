@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAudit } from '../lib/helpers'
+import { useData } from '../lib/DataContext'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const STATUS_COLORS = {
@@ -12,6 +13,7 @@ const STATUS_COLORS = {
 }
 
 export default function DevicesPage() {
+  const { triggerRefresh, refreshKey } = useData()
   const [tab, setTab] = useState('fleet')
   const [devices, setDevices] = useState([])
   const [tokens, setTokens] = useState([])
@@ -32,7 +34,7 @@ export default function DevicesPage() {
     mountedRef.current = true
     loadData()
     return () => { mountedRef.current = false }
-  }, [])
+  }, [refreshKey])
 
   const loadData = async () => {
     setLoading(true)
@@ -84,7 +86,7 @@ export default function DevicesPage() {
     if (!err) {
       logAudit(supabase, 'device_updated', 'device', editDevice.id, { device_name: form.device_name, user_id: form.user_id })
       setEditDevice(null)
-      loadData()
+      loadData(); triggerRefresh()
     } else {
       setError(err.message)
     }
@@ -103,7 +105,7 @@ export default function DevicesPage() {
           .eq('id', d.id)
         if (!err) {
           logAudit(supabase, 'device_decommissioned', 'device', d.id, { hostname: d.hostname })
-          loadData()
+          loadData(); triggerRefresh()
         } else setError(err.message)
       }
     })
@@ -134,7 +136,7 @@ export default function DevicesPage() {
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
       setGeneratedToken(`agrikd://${encoded}`)
       setTokenLabel('')
-      loadData()
+      loadData(); triggerRefresh()
     } catch (err) { setError(err.message) }
     setSaving(false)
   }
@@ -148,7 +150,7 @@ export default function DevicesPage() {
       onConfirm: async () => {
         setConfirmAction(null)
         const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', t.id)
-        if (!err) loadData()
+        if (!err) { loadData(); triggerRefresh() }
         else setError(err.message)
       }
     })

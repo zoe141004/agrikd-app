@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 
 export default function SystemHealthPage() {
+  const { refreshKey } = useData()
   const [checks, setChecks] = useState({})
   const [dbStats, setDbStats] = useState({ predictions: 0, models: 0, dvcOps: 0, pipelineRuns: 0, uptime: null })
   const [latencyData, setLatencyData] = useState([])
@@ -14,7 +16,7 @@ export default function SystemHealthPage() {
     mountedRef.current = true
     runHealthChecks()
     return () => { mountedRef.current = false }
-  }, [])
+  }, [refreshKey])
 
   // Auto-refresh every 120 seconds
   useEffect(() => {

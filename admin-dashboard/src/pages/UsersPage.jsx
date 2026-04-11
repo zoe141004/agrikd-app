@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAudit } from '../lib/helpers'
+import { useData } from '../lib/DataContext'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 export default function UsersPage() {
+  const { triggerRefresh, refreshKey } = useData()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -14,7 +16,7 @@ export default function UsersPage() {
   const [error, setError] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
 
-  useEffect(() => { loadUsers() }, [])
+  useEffect(() => { loadUsers() }, [refreshKey])
 
   const loadUsers = async () => {
     setLoading(true)
@@ -48,7 +50,7 @@ export default function UsersPage() {
       setSaving(false)
       if (!error) {
         logAudit(supabase, form.role !== editUser.role ? 'user_role_changed' : 'user_status_changed', 'user', editUser.id, { email: editUser.email, role: form.role, is_active: form.is_active })
-        setEditUser(null); loadUsers()
+        setEditUser(null); loadUsers(); triggerRefresh()
       } else setError('Error: ' + error.message)
     }
     if (editUser.role === 'admin' && form.role !== 'admin') {

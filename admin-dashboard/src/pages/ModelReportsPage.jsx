@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { cleanLabel, formatDateTime } from '../lib/helpers'
+import { useData } from '../lib/DataContext'
 
 export default function ModelReportsPage() {
+  const { refreshKey } = useData()
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -12,7 +14,7 @@ export default function ModelReportsPage() {
   const [versionOptions, setVersionOptions] = useState([])
   const [stats, setStats] = useState([])
 
-  useEffect(() => { loadReports() }, [leafFilter, versionFilter])
+  useEffect(() => { loadReports() }, [leafFilter, versionFilter, refreshKey])
 
   const loadReports = async () => {
     setLoading(true)

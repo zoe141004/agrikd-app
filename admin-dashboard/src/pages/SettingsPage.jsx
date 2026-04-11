@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
 
 export default function SettingsPage() {
-  const { ghConnectionStatus, setGhConnectionStatus } = useData()
+  const { ghConnectionStatus, setGhConnectionStatus, triggerRefresh } = useData()
   const [stab, setStab] = useState('General')
   const [models, setModels] = useState([])
   const [envInfo, setEnvInfo] = useState({})
@@ -56,7 +56,7 @@ export default function SettingsPage() {
     loadSystemInfo()
     const cfg = getGitHubConfig()
     setGhForm({ ghOwner: cfg.ghOwner, ghRepo: cfg.ghRepo, ghToken: cfg.ghToken, ghBranch: cfg.ghBranch })
-  }, [])
+  }, [refreshKey])
 
   useEffect(() => {
     if (stab !== 'Audit Log') return
@@ -136,6 +136,7 @@ export default function SettingsPage() {
       setAdminMsg('Admin role granted to ' + newAdminEmail + '.')
       setNewAdminEmail('')
       logAudit(supabase, 'admin_granted', 'user', profile.id, { email: newAdminEmail })
+      triggerRefresh()
     }
   }
 

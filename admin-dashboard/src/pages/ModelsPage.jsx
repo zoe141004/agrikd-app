@@ -6,30 +6,8 @@ import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
 
-// Fallback dataset metadata for auto-fill when no model_registry entry exists
-const KNOWN_DATASETS = {
-  tomato: {
-    display_name: 'Tomato Disease',
-    num_classes: 10,
-    class_labels: [
-      'Tomato___Bacterial_spot', 'Tomato___Early_blight', 'Tomato___Late_blight',
-      'Tomato___Leaf_Mold', 'Tomato___Septoria_leaf_spot',
-      'Tomato___Spider_mites Two-spotted_spider_mite', 'Tomato___Target_Spot',
-      'Tomato___Tomato_Yellow_Leaf_Curl_Virus', 'Tomato___Tomato_mosaic_virus', 'Tomato___healthy',
-    ],
-  },
-  burmese_grape_leaf: {
-    display_name: 'Burmese Grape Leaf',
-    num_classes: 5,
-    class_labels: [
-      'Anthracnose_Brown_Spot', 'Healthy', 'Insect_Damage',
-      'Leaf_Spot_Yellow', 'Powdery_Mildew',
-    ],
-  },
-}
-
 export default function ModelsPage() {
-  const { leafTypeOptions: sharedLeafTypes, refreshLeafTypes, triggerRefresh } = useData()
+  const { leafTypeOptions: sharedLeafTypes, dvcDatasets, refreshLeafTypes, triggerRefresh, refreshKey } = useData()
   const [tab, setTab] = useState('Registry')
   const [models, setModels] = useState([])
   const [loading, setLoading] = useState(true)
@@ -88,7 +66,7 @@ export default function ModelsPage() {
     }
   }, [])
 
-  useEffect(() => { loadModels(); loadPipelineRuns() }, [])
+  useEffect(() => { loadModels(); loadPipelineRuns() }, [refreshKey])
 
   const loadModels = async () => {
     setLoading(true)
@@ -265,7 +243,7 @@ export default function ModelsPage() {
         updated_at: new Date().toISOString(),
       }).eq('id', editModal.id)
       if (error) throw new Error(error.message)
-      setEditModal(null); loadModels(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version })
+      setEditModal(null); loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version })
     } catch (err) {
       setError('Save failed: ' + err.message)
     }
@@ -338,7 +316,7 @@ export default function ModelsPage() {
           }
         }
         const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
-        if (!error) { loadModels(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
+        if (!error) { loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else setError(error.message)
       }
     })
@@ -359,7 +337,7 @@ export default function ModelsPage() {
           accuracy: m.accuracy_top1, size_mb: null,
         }, { onConflict: 'leaf_type,version' })
         const { error } = await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', m.id)
-        if (!error) { loadModels(); logAudit(supabase, 'model_deactivated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
+        if (!error) { loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_deactivated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else setError(error.message)
       }
     })
@@ -401,6 +379,7 @@ export default function ModelsPage() {
           const { error } = await supabase.from('model_registry').delete().eq('id', m.id)
           if (error) throw new Error(error.message)
           loadModels()
+          refreshLeafTypes(); triggerRefresh()
           logAudit(supabase, 'model_deleted', 'model', m.id, { leaf_type: m.leaf_type, version: m.version })
         } catch (err) { setError('Delete failed: ' + err.message) }
       }
@@ -522,7 +501,7 @@ export default function ModelsPage() {
       setUploadFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadModels()
-      refreshLeafTypes()
+      refreshLeafTypes(); triggerRefresh()
     } catch (err) {
       setUploadMsg({ type: 'error', text: err.message })
     } finally {
@@ -530,8 +509,6 @@ export default function ModelsPage() {
       setUploadProgress(0)
     }
   }
-
-  // ── Validate Tab (Pipeline) ────────────────────────────────────────────────
   const runValidation = async () => {
     if (!valTarget) { setValMsg({ type: 'error', text: 'Select a dataset first.' }); return }
     setValRunning(true); setValMsg(null)
@@ -619,7 +596,7 @@ export default function ModelsPage() {
         for (const b of orphaned) {
           await supabase.from('model_benchmarks').delete().eq('id', b.id)
         }
-        loadModels()
+        loadModels(); triggerRefresh()
       }
     })
   }
@@ -1045,12 +1022,11 @@ export default function ModelsPage() {
                   : (
                     <select className="form-input" value={uploadForm.leaf_type} onChange={e => {
                       const lt = e.target.value
-                      // Find latest model for this leaf type (sorted by updated_at descending in loadModels)
+                      // Priority 1: existing models in registry
                       const existingModels = models.filter(m => m.leaf_type === lt)
                       const existing = existingModels[0]
                       if (existing) {
                         const labels = Array.isArray(existing.class_labels) ? existing.class_labels.join('\n') : ''
-                        // Compute next version from the highest existing version
                         const allVersions = existingModels.map(m => m.version).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
                         const curVer = allVersions[0] || '1.0.0'
                         const parts = curVer.split('.')
@@ -1058,11 +1034,13 @@ export default function ModelsPage() {
                         const nextVer = parts.join('.')
                         setUploadForm(f => ({ ...f, leaf_type: lt, display_name: existing.display_name || '', num_classes: String(existing.num_classes || ''), class_labels_raw: labels, version: nextVer }))
                       } else {
-                        const known = KNOWN_DATASETS[lt]
-                        if (known) {
-                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: known.display_name, num_classes: String(known.num_classes), class_labels_raw: known.class_labels.join('\n'), version: '1.0.0' }))
+                        // Priority 2: DVC dataset metadata from context (auto-filled from upload workflow)
+                        const dvcDs = dvcDatasets.find(d => d.name === lt || d.name?.toLowerCase() === lt?.toLowerCase())
+                        if (dvcDs?.classes && Object.keys(dvcDs.classes).length > 0) {
+                          const classLabels = Object.keys(dvcDs.classes).sort()
+                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: lt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), num_classes: String(classLabels.length), class_labels_raw: classLabels.join('\n'), version: '1.0.0' }))
                         } else {
-                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: '', num_classes: '', class_labels_raw: '', version: '1.0.0' }))
+                          setUploadForm(f => ({ ...f, leaf_type: lt, display_name: lt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), num_classes: dvcDs?.num_classes ? String(dvcDs.num_classes) : '', class_labels_raw: '', version: '1.0.0' }))
                         }
                       }
                     }}>
