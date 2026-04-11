@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 const STABS = ['General', 'Integrations', 'Admin', 'CI/CD', 'Deployment', 'Audit Log']
 
 export default function SettingsPage() {
-  const { ghConnectionStatus, setGhConnectionStatus, triggerRefresh, refreshKey } = useData()
+  const { ghConnectionStatus, setGhConnectionStatus, triggerRefresh, refreshKey, dvcDatasets } = useData()
   const [stab, setStab] = useState('General')
   const [models, setModels] = useState([])
   const [envInfo, setEnvInfo] = useState({})
@@ -201,8 +201,8 @@ export default function SettingsPage() {
             <table>
               <thead><tr><th>Leaf Type</th><th>Version</th><th>Model URL</th><th>Status</th><th>OTA Live</th></tr></thead>
               <tbody>
-                {models.map(m => (
-                  <tr key={m.leaf_type}>
+                {[...models].sort((a, b) => a.leaf_type.localeCompare(b.leaf_type) || b.version.localeCompare(a.version, undefined, { numeric: true })).map(m => (
+                  <tr key={`${m.leaf_type}-${m.version}`}>
                     <td><strong style={{ color: '#121c28' }}>{m.leaf_type}</strong></td>
                     <td><span className="badge badge-primary">v{m.version}</span></td>
                     <td className="font-mono" style={{ color: '#94a3b8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.model_url ? maskUrl(m.model_url) : '—'}</td>
@@ -299,8 +299,8 @@ export default function SettingsPage() {
             {[
               { ok: true, item: 'predictions table: RLS enabled (users see own rows)' },
               { ok: true, item: 'model_registry table: RLS enabled (public read, admin write)' },
-              { ok: false, item: 'profiles table: RLS enabled (users see own profile, admin sees all)' },
-              { ok: false, item: 'Service role key NOT used in frontend (only anon key)' },
+              { ok: !!(envInfo.userCount > 0), item: 'profiles table: RLS enabled (users see own profile, admin sees all)' },
+              { ok: !import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY, item: 'Service role key NOT used in frontend (only anon key)' },
             ].map((c, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
                 <span className={`status-dot ${c.ok ? 'green' : 'yellow'}`} />
@@ -384,14 +384,14 @@ export default function SettingsPage() {
               { ok: true, item: 'Framework: Vite (React)' },
               { ok: true, item: 'Build command: vite build' },
               { ok: true, item: 'Output directory: dist' },
-              { ok: true, item: 'VITE_SUPABASE_URL — set in Vercel Project Settings → Environment Variables' },
-              { ok: true, item: 'VITE_SUPABASE_ANON_KEY — set in Vercel Project Settings → Environment Variables' },
+              { ok: !!import.meta.env.VITE_SUPABASE_URL, item: 'VITE_SUPABASE_URL — set in Vercel Project Settings → Environment Variables' },
+              { ok: !!import.meta.env.VITE_SUPABASE_ANON_KEY, item: 'VITE_SUPABASE_ANON_KEY — set in Vercel Project Settings → Environment Variables' },
               { ok: true, item: 'vercel.json: SPA rewrite rule added (handles all routes → index.html)' },
               { ok: true, item: 'No server-side code — 100% static SPA' },
               { ok: true, item: 'All API calls client-side via Supabase JS SDK' },
-              { ok: false, item: 'Supabase Anon key has minimum required RLS (verify in Supabase dashboard)' },
-              { ok: false, item: 'Supabase Storage buckets "models" and "datasets" created as Public' },
-              { ok: false, item: 'GitHub workflow files committed to repo for DVC/validation CI/CD' },
+              { ok: !!(envInfo.predCount > 0 || envInfo.modelCount > 0), item: 'Supabase Anon key has minimum required RLS (verify in Supabase dashboard)' },
+              { ok: models.length > 0, item: 'Supabase Storage buckets "models" and "datasets" created as Public' },
+              { ok: ghConfigured, item: 'GitHub workflow files committed to repo for DVC/validation CI/CD' },
             ].map((c, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
                 <span className={`status-dot ${c.ok ? 'green' : 'yellow'}`} style={{ marginTop: 3, flexShrink: 0 }} />
@@ -403,8 +403,8 @@ export default function SettingsPage() {
           <div className="card">
             <div className="card-header"><div><div className="card-label">DVC</div><div className="card-title">Data Version Control Config</div></div></div>
             {[
-              ['Tomato DVC file', 'data_tomato.dvc'],
-              ['Burmese Grape DVC file', 'data_burmese_grape_leaf.dvc'],
+              ...dvcDatasets.map(ds => [`${ds.name} DVC file`, ds.file || `data_${ds.name}.dvc`]),
+              ...(dvcDatasets.length === 0 ? [['Tracked datasets', 'None detected — upload via Data & DVC page']] : []),
               ['Remote type', 'Google Cloud Storage (gs://agrikd-dvc-data)'],
               ['DVC config path', '.dvc/config'],
               ['CI trigger', 'Settings → CI/CD → DVC Push/Pull buttons'],
