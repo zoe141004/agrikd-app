@@ -80,6 +80,8 @@ export default function ModelsPage() {
       const benchData = benchRes.status === 'fulfilled' ? benchRes.value?.data : null
       const verData = verRes.status === 'fulfilled' ? verRes.value?.data : null
       if (registryRes.status === 'fulfilled' && registryRes.value?.error) throw new Error(registryRes.value.error.message)
+      if (benchRes.status === 'fulfilled' && benchRes.value?.error) console.warn('Benchmarks load error:', benchRes.value.error.message)
+      if (verRes.status === 'fulfilled' && verRes.value?.error) console.warn('Version history load error:', verRes.value.error.message)
       setModels(data || [])
       setBenchmarks(benchData || [])
       setVersions(verData || [])
@@ -224,25 +226,32 @@ export default function ModelsPage() {
   const saveModel = async () => {
     setSaving(true)
     try {
+      const trimmedVersion = form.version?.trim()
+      if (!trimmedVersion) throw new Error('Version is required.')
+      if (!/^\d+\.\d+\.\d+$/.test(trimmedVersion)) throw new Error('Version must be in semver format (e.g. 1.0.0).')
+      if (form.accuracy_top1 !== '' && form.accuracy_top1 != null) {
+        const acc = Number(form.accuracy_top1)
+        if (isNaN(acc) || acc < 0 || acc > 100) throw new Error('Accuracy must be between 0 and 100.')
+      }
       // If version changed, cascade rename to benchmarks & version archives
-      const versionChanged = form.version !== editModal.version
+      const versionChanged = trimmedVersion !== editModal.version
       // Block status change to 'active' via edit — must use Activate button
       if (form.status === 'active' && editModal.status !== 'active') {
         throw new Error('Use the "Activate" button to set a model to active status.')
       }
       if (versionChanged) {
-        const duplicate = models.find(m => m.leaf_type === editModal.leaf_type && m.version === form.version && m.id !== editModal.id)
-        if (duplicate) throw new Error(`Version v${form.version} already exists for ${editModal.leaf_type}`)
-        const { error: benchErr } = await supabase.from('model_benchmarks').update({ version: form.version })
+        const duplicate = models.find(m => m.leaf_type === editModal.leaf_type && m.version === trimmedVersion && m.id !== editModal.id)
+        if (duplicate) throw new Error(`Version v${trimmedVersion} already exists for ${editModal.leaf_type}`)
+        const { error: benchErr } = await supabase.from('model_benchmarks').update({ version: trimmedVersion })
           .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
         if (benchErr) throw new Error('Benchmark cascade failed: ' + benchErr.message)
-        const { error: verErr } = await supabase.from('model_versions').update({ version: form.version })
+        const { error: verErr } = await supabase.from('model_versions').update({ version: trimmedVersion })
           .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
         if (verErr) throw new Error('Version archive cascade failed: ' + verErr.message)
       }
       const { error } = await supabase.from('model_registry').update({
         display_name: form.display_name,
-        version: form.version,
+        version: trimmedVersion,
         model_url: form.model_url,
         description: form.description,
         status: form.status,
@@ -251,7 +260,7 @@ export default function ModelsPage() {
         updated_at: new Date().toISOString(),
       }).eq('id', editModal.id)
       if (error) throw new Error(error.message)
-      setEditModal(null); loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: form.version })
+      setEditModal(null); loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_updated', 'model', editModal.id, { leaf_type: editModal.leaf_type, version: trimmedVersion })
     } catch (err) {
       setError('Save failed: ' + err.message)
     }
@@ -377,8 +386,12 @@ export default function ModelsPage() {
         try {
           // 1. Delete storage file
           if (m.model_url?.includes('supabase.co/storage')) {
-            const match = m.model_url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
-            if (match) await supabase.storage.from('models').remove([decodeURIComponent(match[1])])
+            try {
+              const match = m.model_url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
+              if (match) await supabase.storage.from('models').remove([decodeURIComponent(match[1])])
+            } catch (storageErr) {
+              console.warn('Storage file deletion failed (may already be removed):', storageErr.message)
+            }
           }
           // 2. Cascade delete benchmarks and version archive
           await supabase.from('model_benchmarks').delete().eq('leaf_type', m.leaf_type).eq('version', m.version)
@@ -398,8 +411,10 @@ export default function ModelsPage() {
   const handleUpload = async (e) => {
     e.preventDefault()
     if (!uploadFile) { setUploadMsg({ type: 'error', text: 'Please select a model file.' }); return }
-    const { leaf_type, display_name, version, description, num_classes, class_labels_raw, is_new_leaf } = uploadForm
+    const { leaf_type, display_name, description, num_classes, class_labels_raw, is_new_leaf } = uploadForm
+    const version = uploadForm.version?.trim()
     if (!leaf_type || !version) { setUploadMsg({ type: 'error', text: 'Leaf type and version are required.' }); return }
+    if (!/^\d+\.\d+\.\d+$/.test(version)) { setUploadMsg({ type: 'error', text: 'Version must be in semver format (e.g. 1.0.0).' }); return }
 
     setUploading(true); setUploadProgress(10); setUploadMsg(null)
 

@@ -56,6 +56,7 @@ export default function DataManagementPage() {
   const [error, setError] = useState(null)
   const [storageSubTab, setStorageSubTab] = useState('Datasets') // 'Datasets' | 'Prediction Images'
   const [deletingDataset, setDeletingDataset] = useState(null)
+  const pendingDeleteRef = useRef(null) // { dsName, opId, userId }
 
   // Prediction Images browser
   const [predImages, setPredImages] = useState([])
@@ -121,7 +122,7 @@ export default function DataManagementPage() {
       // Auto-cleanup stale ops (>30 min without update)
       const STALE_MS = 30 * 60 * 1000
       for (const op of ops) {
-        if (['pending', 'staging', 'pushing', 'pulling', 'exporting'].includes(op.status)) {
+        if (['pending', 'staging', 'pushing', 'pulling', 'exporting', 'deleting'].includes(op.status)) {
           const age = Date.now() - new Date(op.started_at).getTime()
           if (age > STALE_MS) {
             await supabase.from('dvc_operations').update({
@@ -135,10 +136,35 @@ export default function DataManagementPage() {
         }
       }
 
-      setDvcOps(ops)
-      if (ops.length) {
-        const latest = ops[0]
-        if (['pending', 'staging', 'pushing', 'pulling', 'exporting'].includes(latest.status)) {
+      // Recovery: check for completed delete ops whose DB cleanup wasn't finished
+      // (e.g. user navigated away before cleanup ran)
+      for (const op of ops) {
+        if (op.operation === 'delete' && op.status === 'completed') {
+          const { count } = await supabase.from('model_registry')
+            .select('id', { count: 'exact', head: true })
+            .ilike('leaf_type', op.leaf_type)
+          if (count > 0) {
+            // Orphaned cleanup — run it now
+            try {
+              await performDeleteCleanup(op.leaf_type, op.id, op.triggered_by)
+              await Promise.all([refreshDvcDatasets(), refreshLeafTypes()])
+              triggerRefresh()
+            } catch (e) { console.warn('Recovery cleanup failed:', e.message) }
+          } else {
+            // Data already cleaned, just remove the tracking op
+            await supabase.from('dvc_operations').delete().eq('id', op.id)
+          }
+        }
+      }
+
+      // Re-fetch ops after potential cleanup
+      const { data: freshOps } = await supabase.from('dvc_operations').select('*').order('started_at', { ascending: false }).limit(20)
+      const finalOps = freshOps || ops
+
+      setDvcOps(finalOps)
+      if (finalOps.length) {
+        const latest = finalOps[0]
+        if (['pending', 'staging', 'pushing', 'pulling', 'exporting', 'deleting'].includes(latest.status)) {
           setDvcOpStatus(latest.status)
           setDvcOpDismissed(false)
         } else if (latest.status === 'staged') {
@@ -154,11 +180,113 @@ export default function DataManagementPage() {
     }
   }
 
-  // Helper to handle operation completion: refresh shared context data
-  const onOperationComplete = () => {
+  // ── Perform DB cleanup for a deleted dataset (called only after DVC action succeeds) ──
+  const performDeleteCleanup = async (dsName, dvcOpId, userId) => {
+    const ts = () => new Date().toLocaleTimeString()
+    const nameLower = dsName.toLowerCase().trim()
+
+    setDvcLog(l => [...l, `[${ts()}] DVC remote cleanup confirmed. Starting database cleanup…`])
+
+    // Delete model benchmarks
+    await supabase.from('model_benchmarks').delete().ilike('leaf_type', dsName)
+    // Delete model versions
+    await supabase.from('model_versions').delete().ilike('leaf_type', dsName)
+    // Delete models from registry + remove storage files
+    const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').ilike('leaf_type', dsName)
+    if (modelsToDelete?.length) {
+      const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
+        const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
+        return match ? decodeURIComponent(match[1]) : null
+      }).filter(Boolean)
+      if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
+      await supabase.from('model_registry').delete().ilike('leaf_type', dsName)
+    }
+    // Delete pipeline runs
+    await supabase.from('pipeline_runs').delete().ilike('leaf_type', dsName)
+    // Delete DVC operations (except the active delete tracking op)
+    if (dvcOpId) {
+      await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName).neq('id', dvcOpId)
+    } else {
+      await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName)
+    }
+    // Cross-reference cleanup in other operations' metadata.datasets
+    const { data: relatedOps } = await supabase.from('dvc_operations')
+      .select('id, metadata')
+      .not('metadata', 'is', null)
+    for (const op of (relatedOps || [])) {
+      if (op.id === dvcOpId) continue
+      const md = op.metadata
+      if (!md?.datasets) continue
+      const matchKey = Object.keys(md.datasets).find(k => k.toLowerCase().trim() === nameLower)
+      if (!matchKey) continue
+      const remaining = { ...md.datasets }
+      delete remaining[matchKey]
+      if (Object.keys(remaining).length === 0) {
+        await supabase.from('dvc_operations').delete().eq('id', op.id)
+      } else {
+        await supabase.from('dvc_operations').update({ metadata: { ...md, datasets: remaining } }).eq('id', op.id)
+      }
+    }
+    // Storage cleanup (recursive)
+    const deleteRecursive = async (prefix) => {
+      const { data: items } = await supabase.storage.from('datasets').list(prefix, { limit: 200 })
+      if (!items?.length) return
+      const files = items.filter(i => i.id).map(i => prefix ? `${prefix}/${i.name}` : i.name)
+      const folders = items.filter(i => !i.id)
+      for (const folder of folders) {
+        await deleteRecursive(prefix ? `${prefix}/${folder.name}` : folder.name)
+      }
+      if (files.length) await supabase.storage.from('datasets').remove(files)
+    }
+    await deleteRecursive(dsName)
+    await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
+    // Clean up the tracking operation itself
+    if (dvcOpId) {
+      await supabase.from('dvc_operations').delete().eq('id', dvcOpId)
+    }
+    // Audit log
+    logAudit(supabase, 'dataset_deleted', 'dataset', dsName, {
+      deleted_models: modelsToDelete?.length || 0,
+      dvc_workflow_triggered: !!dvcOpId,
+      triggered_by: userId,
+    })
+    setDvcLog(l => [...l, `[${ts()}] ✓ Dataset "${dsName}" fully deleted.`])
+  }
+
+  // Helper to handle operation completion: refresh shared context data + handle pending deletes
+  const onOperationComplete = async () => {
+    const pendingDel = pendingDeleteRef.current
+    if (pendingDel) {
+      try {
+        const { data } = await supabase.from('dvc_operations')
+          .select('status, error_message')
+          .eq('id', pendingDel.opId)
+          .single()
+
+        if (data?.status === 'completed') {
+          // GitHub Action succeeded — now clean up DB
+          await performDeleteCleanup(pendingDel.dsName, pendingDel.opId, pendingDel.userId)
+        } else if (data?.status === 'failed') {
+          // GitHub Action FAILED — preserve all DB data
+          const errMsg = data.error_message || 'Unknown error'
+          setError(`DVC deletion failed for "${pendingDel.dsName}": ${errMsg}. Dataset data preserved.`)
+          setDvcLog(l => [...l, `[${new Date().toLocaleTimeString()}] ✗ DVC delete failed: ${errMsg}. Database NOT cleaned — data preserved.`])
+          // Clean up only the failed tracking operation
+          await supabase.from('dvc_operations').delete().eq('id', pendingDel.opId)
+        }
+      } catch (cleanupErr) {
+        setError(`Error during delete cleanup: ${cleanupErr.message}`)
+      } finally {
+        pendingDeleteRef.current = null
+        setDeletingDataset(null)
+      }
+    }
+
+    // Always refresh shared context
     loadDvcOperations()
     refreshDvcDatasets()
     refreshLeafTypes()
+    triggerRefresh()
   }
 
   // ── Realtime subscription (mirrors subscribeToPipelineRun) ────────────────
@@ -634,10 +762,10 @@ export default function DataManagementPage() {
   }
 
   const ghNotConfigured = !getGitHubConfig().ghToken
-  const isOperationActive = ['pending', 'staging', 'pushing', 'pulling', 'exporting'].includes(dvcOpStatus)
+  const isOperationActive = ['pending', 'staging', 'pushing', 'pulling', 'exporting', 'deleting'].includes(dvcOpStatus)
   const stagedOps = dvcOps.filter(o => o.status === 'staged')
 
-  // ── Cascade delete: remove dataset + all related models, benchmarks, versions, operations, storage files ──
+  // ── Cascade delete: trigger DVC workflow, then clean DB only after workflow succeeds ──
   const deleteDataset = (dsName) => {
     setConfirmAction({
       title: 'Delete Dataset',
@@ -651,120 +779,46 @@ export default function DataManagementPage() {
         try {
           const { data: { session } } = await supabase.auth.getSession()
           const userId = session?.user?.id
-          const nameLower = dsName.toLowerCase().trim()
 
-          // ── Step 1: Trigger GitHub Actions workflow to remove DVC tracking ──
-          let dvcOpId = null
-          try {
-            const { ghToken } = getGitHubConfig()
-            if (ghToken) {
-              // Create tracking operation
-              const { data: op } = await supabase.from('dvc_operations').insert({
-                leaf_type: dsName,
-                operation: 'delete',
-                source: 'manual',
-                status: 'pending',
-                triggered_by: userId,
-                metadata: { action: 'cascade_delete' },
-              }).select().single()
-              dvcOpId = op?.id
+          const { ghToken } = getGitHubConfig()
 
-              setDvcLog(l => [...l, `[${ts()}] Triggering DVC delete workflow for "${dsName}"…`])
-              await triggerGitHubWorkflow('dataset-delete.yml', {
-                leaf_type: dsName,
-                dvc_operation_id: dvcOpId || '',
-              })
-              setDvcLog(l => [...l, `[${ts()}] Workflow dispatched. DVC remote cleanup in progress…`])
+          if (ghToken) {
+            // ── GitHub configured: trigger workflow and WAIT for completion ──
+            const { data: op } = await supabase.from('dvc_operations').insert({
+              leaf_type: dsName,
+              operation: 'delete',
+              source: 'manual',
+              status: 'pending',
+              triggered_by: userId,
+              metadata: { action: 'cascade_delete' },
+            }).select().single()
 
-              if (op) {
-                setDvcOps(prev => [op, ...prev])
-                subscribeToDvcOp(op.id)
-              }
-            } else {
-              setDvcLog(l => [...l, `[${ts()}] GitHub not configured — skipping DVC remote cleanup.`])
-            }
-          } catch (wfErr) {
-            // Workflow trigger failed — continue with Supabase cleanup anyway
-            setDvcLog(l => [...l, `[${ts()}] DVC workflow failed: ${wfErr.message}. Continuing with database cleanup…`])
-          }
+            if (!op) throw new Error('Failed to create tracking operation')
 
-          // ── Step 2: Clean up Supabase database (case-insensitive) ──
-          // Delete model benchmarks
-          await supabase.from('model_benchmarks').delete().ilike('leaf_type', dsName)
+            setDvcLog(l => [...l, `[${ts()}] Triggering DVC delete workflow for "${dsName}"…`])
+            await triggerGitHubWorkflow('dataset-delete.yml', {
+              leaf_type: dsName,
+              dvc_operation_id: op.id,
+            })
+            setDvcLog(l => [...l, `[${ts()}] Workflow dispatched. Waiting for completion before cleaning database…`])
 
-          // Delete model versions
-          await supabase.from('model_versions').delete().ilike('leaf_type', dsName)
-
-          // Delete models from registry + remove storage files
-          const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').ilike('leaf_type', dsName)
-          if (modelsToDelete?.length) {
-            const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
-              const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
-              return match ? decodeURIComponent(match[1]) : null
-            }).filter(Boolean)
-            if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
-            await supabase.from('model_registry').delete().ilike('leaf_type', dsName)
-          }
-
-          // Delete pipeline runs
-          await supabase.from('pipeline_runs').delete().ilike('leaf_type', dsName)
-
-          // Delete DVC operations (except the active delete operation we just created)
-          if (dvcOpId) {
-            await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName).neq('id', dvcOpId)
+            // Store pending delete — DB cleanup will happen in onOperationComplete when status='completed'
+            pendingDeleteRef.current = { dsName, opId: op.id, userId }
+            setDvcOps(prev => [op, ...prev])
+            subscribeToDvcOp(op.id)
+            setDvcOpStatus('deleting')
           } else {
-            await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName)
+            // ── No GitHub: clean up database directly (DVC remote won't be cleaned) ──
+            setDvcLog(l => [...l, `[${ts()}] GitHub not configured — performing database cleanup only…`])
+            await performDeleteCleanup(dsName, null, userId)
+            await Promise.all([refreshDvcDatasets(), refreshLeafTypes()])
+            loadDvcOperations()
+            loadData()
+            triggerRefresh()
+            setDeletingDataset(null)
           }
-
-          // Clean up other operations that reference this dataset in metadata.datasets
-          const { data: relatedOps } = await supabase.from('dvc_operations')
-            .select('id, metadata')
-            .not('metadata', 'is', null)
-          for (const op of (relatedOps || [])) {
-            if (op.id === dvcOpId) continue
-            const md = op.metadata
-            if (!md?.datasets) continue
-            const matchKey = Object.keys(md.datasets).find(k => k.toLowerCase().trim() === nameLower)
-            if (!matchKey) continue
-            const remaining = { ...md.datasets }
-            delete remaining[matchKey]
-            if (Object.keys(remaining).length === 0) {
-              await supabase.from('dvc_operations').delete().eq('id', op.id)
-            } else {
-              await supabase.from('dvc_operations').update({ metadata: { ...md, datasets: remaining } }).eq('id', op.id)
-            }
-          }
-
-          // ── Step 3: Remove files from Supabase storage (recursive) ──
-          const deleteRecursive = async (prefix) => {
-            const { data: items } = await supabase.storage.from('datasets').list(prefix, { limit: 200 })
-            if (!items?.length) return
-            const files = items.filter(i => i.id).map(i => prefix ? `${prefix}/${i.name}` : i.name)
-            const folders = items.filter(i => !i.id)
-            for (const folder of folders) {
-              await deleteRecursive(prefix ? `${prefix}/${folder.name}` : folder.name)
-            }
-            if (files.length) await supabase.storage.from('datasets').remove(files)
-          }
-          await deleteRecursive(dsName)
-          await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
-
-          // ── Step 4: Audit log ──
-          logAudit(supabase, 'dataset_deleted', 'dataset', dsName, {
-            deleted_models: modelsToDelete?.length || 0,
-            dvc_workflow_triggered: !!dvcOpId,
-            triggered_by: userId,
-          })
-
-          // ── Step 5: Refresh all shared state ──
-          setDvcLog(l => [...l, `[${ts()}] Database cleanup complete. Refreshing…`])
-          await Promise.all([refreshDvcDatasets(), refreshLeafTypes()])
-          loadDvcOperations()
-          loadData()
-          triggerRefresh()
         } catch (err) {
           setError(`Failed to delete dataset: ${err.message}`)
-        } finally {
           setDeletingDataset(null)
         }
       }

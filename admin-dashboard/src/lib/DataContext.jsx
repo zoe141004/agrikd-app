@@ -37,7 +37,11 @@ export function DataProvider({ children }) {
     return () => { mountedRef.current = false }
   }, [])
 
-  // ── Load leaf type options (merged from 3 sources) ──
+  // Ref to track current dvcDatasets for use in refreshLeafTypes (avoids dep cycle)
+  const dvcDatasetsRef = useRef(dvcDatasets)
+  useEffect(() => { dvcDatasetsRef.current = dvcDatasets }, [dvcDatasets])
+
+  // ── Load leaf type options (merged from 3 DB sources + current dvcDatasets) ──
   const refreshLeafTypes = useCallback(async () => {
     setLeafTypeLoading(true)
     try {
@@ -61,7 +65,10 @@ export function DataProvider({ children }) {
         ? [...new Set((dvcRes.value?.data || []).map(r => r.leaf_type))].filter(Boolean)
         : []
 
-      const merged = [...new Set([...rpcLeafs, ...registryLeafs, ...dvcLeafs])].sort()
+      // Also include names from current dvcDatasets (handles "pull all" metadata.datasets)
+      const dvcDatasetNames = (dvcDatasetsRef.current || []).map(d => d.name).filter(Boolean)
+
+      const merged = [...new Set([...rpcLeafs, ...registryLeafs, ...dvcLeafs, ...dvcDatasetNames])].sort()
       if (mountedRef.current) setLeafTypeOptions(merged)
     } catch (err) {
       console.warn('Failed to load leaf type options:', err.message)
@@ -235,6 +242,20 @@ export function DataProvider({ children }) {
     refreshDvcDatasets()
     checkGhConfigPresence()
   }, [refreshKey, refreshLeafTypes, refreshDvcDatasets, checkGhConfigPresence])
+
+  // ── Ensure leafTypeOptions includes all dvcDatasets names ──
+  // (Handles "pull all" operations where leaf_type='all' is excluded from dvc query
+  //  but individual datasets exist in metadata.datasets)
+  useEffect(() => {
+    if (dvcDatasets.length > 0) {
+      const dvcNames = dvcDatasets.map(d => d.name).filter(Boolean)
+      setLeafTypeOptions(prev => {
+        const merged = [...new Set([...prev, ...dvcNames])].sort()
+        if (merged.length === prev.length && merged.every((v, i) => v === prev[i])) return prev
+        return merged
+      })
+    }
+  }, [dvcDatasets])
 
   // ── Auto-refresh shared data on route navigation ──
   const location = useLocation()

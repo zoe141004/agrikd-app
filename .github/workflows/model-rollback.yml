@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: model-rollback-${{ inputs.leaf_type }}
+  cancel-in-progress: false
+
 # Required secrets:
 #   SUPABASE_URL             - Supabase project URL
 #   SUPABASE_SERVICE_ROLE_KEY - Service role key (bypasses RLS)

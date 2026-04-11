@@ -67,23 +67,36 @@ export default function SettingsPage() {
   }, [stab])
 
   const saveGitHub = () => {
-    sessionStorage.setItem('gh_owner', ghForm.ghOwner)
-    sessionStorage.setItem('gh_repo', ghForm.ghRepo)
-    sessionStorage.setItem('gh_token', ghForm.ghToken)
-    sessionStorage.setItem('gh_branch', ghForm.ghBranch || 'main')
+    const owner = (ghForm.ghOwner || '').trim()
+    const repo = (ghForm.ghRepo || '').trim()
+    const token = (ghForm.ghToken || '').trim()
+    if (!owner) { setGhTestMsg({ type: 'error', text: 'Owner is required.' }); return }
+    if (!repo) { setGhTestMsg({ type: 'error', text: 'Repository name is required.' }); return }
+    if (!token) { setGhTestMsg({ type: 'error', text: 'Personal Access Token is required.' }); return }
+    sessionStorage.setItem('gh_owner', owner)
+    sessionStorage.setItem('gh_repo', repo)
+    sessionStorage.setItem('gh_token', token)
+    sessionStorage.setItem('gh_branch', (ghForm.ghBranch || 'main').trim())
     setGhSaved(true)
     setTimeout(() => setGhSaved(false), 2000)
   }
 
   const testGitHub = async () => {
-    const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
-    if (!ghToken) { setGhTestMsg({ type: 'error', text: 'Save GitHub config first.' }); setGhConnectionStatus('error'); return }
+    // Validate form fields first (not sessionStorage) so user gets immediate feedback
+    const owner = (ghForm.ghOwner || '').trim()
+    const repo = (ghForm.ghRepo || '').trim()
+    const token = (ghForm.ghToken || '').trim()
+    if (!owner || !repo || !token) {
+      setGhTestMsg({ type: 'error', text: 'Complete and save GitHub config first (Owner, Repo, Token required).' })
+      setGhConnectionStatus('error')
+      return
+    }
     setGhTesting(true); setGhTestMsg(null)
     try {
-      validateGitHubSlugs(ghOwner, ghRepo)
+      validateGitHubSlugs(owner, repo)
       const ghController = new AbortController()
       const timeoutId = setTimeout(() => ghController.abort(), 10000)
-      const res = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' }, signal: ghController.signal })
       clearTimeout(timeoutId)
       const data = await res.json()
       if (res.ok) {

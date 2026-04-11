@@ -44,6 +44,12 @@ export default function UsersPage() {
 
   const saveUser = async () => {
     if (!useProfiles) return setError('Requires a profiles table in Supabase.')
+    if (!['user', 'admin'].includes(form.role)) { setError('Invalid role value.'); return }
+    // Prevent admin from revoking their own role
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    if (currentUser && editUser.id === currentUser.id && form.role !== editUser.role) {
+      setError('You cannot change your own role.'); return
+    }
     const doSave = async () => {
       setSaving(true)
       const { error } = await supabase.from('profiles').update({ role: form.role, is_active: form.is_active }).eq('id', editUser.id)
