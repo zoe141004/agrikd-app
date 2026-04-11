@@ -20,6 +20,7 @@ export default function PredictionsPage() {
   const [classDist, setClassDist] = useState([])
 
   useEffect(() => {
+    setSelected(null)
     const controller = new AbortController()
     loadPredictions(controller.signal)
     return () => controller.abort()

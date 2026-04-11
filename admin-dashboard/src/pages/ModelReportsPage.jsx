@@ -39,7 +39,7 @@ export default function ModelReportsPage() {
         const leaves = [...new Set((data || []).map(r => r.leaf_type).filter(Boolean))]
         const versions = [...new Set((data || []).map(r => r.model_version).filter(Boolean))]
         setLeafOptions(leaves.sort())
-        setVersionOptions(versions.sort())
+        setVersionOptions(versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })))
 
         // Aggregate: reports per version
         const versionCounts = {}

@@ -99,7 +99,7 @@ export default function DashboardPage() {
         const day = (r.created_at || '').slice(0, 10)
         dayCounts[day] = (dayCounts[day] || 0) + 1
       })
-      setDailyData(Object.entries(dayCounts).map(([date, count]) => ({ date: date.slice(5), count })))
+      setDailyData(Object.entries(dayCounts).sort((a, b) => a[0].localeCompare(b[0])).map(([date, count]) => ({ date: date.slice(5), count })))
     }
 
     setRecentPreds(recent || [])

@@ -51,7 +51,7 @@ export default function DataManagementPage() {
   // Storage Files state
   const [storedFiles, setStoredFiles] = useState([])
   const [storageLoading, setStorageLoading] = useState(false)
-  const [storageBucket] = useState('datasets')
+  const [storageBucket, setStorageBucket] = useState('datasets')
   const [confirmAction, setConfirmAction] = useState(null)
   const [error, setError] = useState(null)
   const [storageSubTab, setStorageSubTab] = useState('Datasets') // 'Datasets' | 'Prediction Images'
@@ -1231,7 +1231,7 @@ export default function DataManagementPage() {
               <button key={t} onClick={() => {
                 setStorageSubTab(t)
                 if (t === 'Prediction Images' && predImages.length === 0) loadPredictionImages(true)
-                if (t === 'Datasets' && storedFiles.length === 0) loadStorageFiles()
+                if (t === 'Datasets') loadStorageFiles()
               }} style={{ padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: storageSubTab === t ? '#0284c7' : '#64748b', borderBottom: `2px solid ${storageSubTab === t ? '#0284c7' : 'transparent'}`, fontFamily: 'inherit' }}>
                 {t}
               </button>
@@ -1243,7 +1243,13 @@ export default function DataManagementPage() {
             <div>
               <div className="card">
                 <div className="card-header">
-                  <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in &quot;{storageBucket}&quot; bucket</div></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div><div className="card-label">Supabase Storage</div><div className="card-title">Files in &quot;{storageBucket}&quot; bucket</div></div>
+                    <select className="form-input" value={storageBucket} onChange={e => { setStorageBucket(e.target.value); setStoredFiles([]); loadStorageFiles(e.target.value) }} style={{ width: 140, padding: '4px 8px', fontSize: 12 }}>
+                      <option value="datasets">datasets</option>
+                      <option value="models">models</option>
+                    </select>
+                  </div>
                   <button className="btn btn-sm btn-primary" onClick={() => loadStorageFiles()} disabled={storageLoading}>
                     {storageLoading ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Loading&hellip;</> : 'Refresh'}
                   </button>
@@ -1398,13 +1404,23 @@ export default function DataManagementPage() {
     const b = bucket || storageBucket
     setStorageLoading(true)
     try {
-      const { data: folders } = await supabase.storage.from(b).list('', { limit: 100 })
       const allFiles = []
-      for (const folder of (folders || [])) {
-        if (folder.id) { allFiles.push({ ...folder, folder: '(root)', path: folder.name }); continue }
-        const { data: files } = await supabase.storage.from(b).list(folder.name, { limit: 100 })
-        for (const f of (files || [])) allFiles.push({ ...f, folder: folder.name, path: `${folder.name}/${f.name}` })
+      // Recursive listing — Supabase Storage can nest folders arbitrarily
+      const listRecursive = async (prefix) => {
+        const { data } = await supabase.storage.from(b).list(prefix, { limit: 200 })
+        if (!data) return
+        for (const item of data) {
+          const fullPath = prefix ? `${prefix}/${item.name}` : item.name
+          if (item.id) {
+            // It's a file (has id/metadata)
+            allFiles.push({ ...item, folder: prefix || '(root)', path: fullPath })
+          } else {
+            // It's a folder — recurse
+            await listRecursive(fullPath)
+          }
+        }
       }
+      await listRecursive('')
       setStoredFiles(allFiles)
     } catch (err) { setError('Failed to list storage: ' + err.message) }
     setStorageLoading(false)

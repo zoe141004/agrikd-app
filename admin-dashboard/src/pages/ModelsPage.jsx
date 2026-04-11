@@ -227,6 +227,8 @@ export default function ModelsPage() {
       // If version changed, cascade rename to benchmarks & version archives
       const versionChanged = form.version !== editModal.version
       if (versionChanged) {
+        const duplicate = models.find(m => m.leaf_type === editModal.leaf_type && m.version === form.version && m.id !== editModal.id)
+        if (duplicate) throw new Error(`Version v${form.version} already exists for ${editModal.leaf_type}`)
         await supabase.from('model_benchmarks').update({ version: form.version })
           .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
         await supabase.from('model_versions').update({ version: form.version })
@@ -565,7 +567,7 @@ export default function ModelsPage() {
     benchmarks.filter(b => b.leaf_type === leafType && b.version === version)
 
   const getVersionsForLeaf = (leafType) =>
-    versions.filter(v => v.leaf_type === leafType)
+    versions.filter(v => v.leaf_type === leafType).sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
 
   // Available leaf types and versions from benchmark data (filtered to registry-matching only)
   const registryKeys = new Set(models.map(m => `${m.leaf_type}|${m.version}`))
@@ -1024,6 +1026,7 @@ export default function ModelsPage() {
                       const lt = e.target.value
                       // Priority 1: existing models in registry
                       const existingModels = models.filter(m => m.leaf_type === lt)
+                        .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
                       const existing = existingModels[0]
                       if (existing) {
                         const labels = Array.isArray(existing.class_labels) ? existing.class_labels.join('\n') : ''
