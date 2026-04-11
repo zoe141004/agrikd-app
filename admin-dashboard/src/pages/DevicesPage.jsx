@@ -13,7 +13,7 @@ const STATUS_COLORS = {
 }
 
 export default function DevicesPage() {
-  const { triggerRefresh, refreshKey } = useData()
+  const { triggerRefresh, refreshKey, leafTypeOptions } = useData()
   const [tab, setTab] = useState('fleet')
   const [devices, setDevices] = useState([])
   const [tokens, setTokens] = useState([])
@@ -24,6 +24,7 @@ export default function DevicesPage() {
   const [editDevice, setEditDevice] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
   const [tokenLabel, setTokenLabel] = useState('')
   const [generatedToken, setGeneratedToken] = useState('')
@@ -66,6 +67,7 @@ export default function DevicesPage() {
       interval_seconds: d.desired_config?.interval_seconds || 86400,
       default_leaf_type: d.desired_config?.default_leaf_type || 'tomato',
     })
+    setFormError(null)
     setEditDevice(d)
   }
 
@@ -85,10 +87,10 @@ export default function DevicesPage() {
     setSaving(false)
     if (!err) {
       logAudit(supabase, 'device_updated', 'device', editDevice.id, { device_name: form.device_name, user_id: form.user_id })
-      setEditDevice(null)
+      setEditDevice(null); setFormError(null)
       loadData(); triggerRefresh()
     } else {
-      setError(err.message)
+      setFormError(err.message)
     }
   }
 
@@ -440,12 +442,16 @@ export default function DevicesPage() {
               )}
               <div style={{ marginBottom: 12 }}>
                 <label className="form-label">Default Leaf Type</label>
-                <input
-                  className="input"
+                <select
+                  className="form-input"
                   value={form.default_leaf_type}
                   onChange={e => setForm(f => ({ ...f, default_leaf_type: e.target.value }))}
-                  placeholder="tomato"
-                />
+                >
+                  {leafTypeOptions.map(lt => <option key={lt} value={lt}>{lt.replace(/_/g, ' ')}</option>)}
+                  {!leafTypeOptions.includes(form.default_leaf_type) && form.default_leaf_type && (
+                    <option value={form.default_leaf_type}>{form.default_leaf_type}</option>
+                  )}
+                </select>
               </div>
               <div style={{ marginTop: 8, padding: 8, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#64748b' }}>
                 <strong>HW ID:</strong> {editDevice.hw_id}<br/>
@@ -454,6 +460,7 @@ export default function DevicesPage() {
               </div>
             </div>
             <div className="modal-footer">
+              {formError && <div className="alert alert-danger" style={{ marginBottom: 8, fontSize: 13 }}>{formError}</div>}
               <button className="btn" onClick={() => setEditDevice(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveDevice} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Changes'}

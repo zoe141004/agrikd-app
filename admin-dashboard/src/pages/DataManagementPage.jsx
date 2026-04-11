@@ -537,10 +537,11 @@ export default function DataManagementPage() {
   }
 
   const parseCSV = async (file) => {
+    if (file.size > 50 * 1024 * 1024) { setCsvMsg({ type: 'error', text: 'CSV too large. Max 50 MB.' }); return }
     const text = await file.text()
     const lines = text.split('\n').filter(l => l.trim())
     if (lines.length < 2) { setCsvMsg({ type: 'error', text: 'CSV has no data rows.' }); return }
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+    const headers = parseCSVLine(lines[0])
     const rows = lines.slice(1).map(line => {
       const values = parseCSVLine(line); const row = {}
       headers.forEach((h, i) => { row[h] = (values[i] || '').replace(/^"|"$/g, '') || null })
@@ -559,7 +560,7 @@ export default function DataManagementPage() {
       for (let i = 0; i < all.length; i += 100) {
         const batch = all.slice(i, i + 100)
         const { error } = await supabase.from('predictions').insert(batch)
-        if (error) throw new Error(`Batch ${Math.floor(i / 100) + 1} failed: ${error.message}`)
+        if (error) throw new Error(`Import failed at row ${i + 1}: ${error.message}`)
         imported += batch.length; setCsvProgress(Math.round(imported / all.length * 100))
       }
       setCsvMsg({ type: 'success', text: `Imported ${imported.toLocaleString()} records.` })
@@ -587,7 +588,7 @@ export default function DataManagementPage() {
       if (!allData.length) { setCsvMsg({ type: 'error', text: 'No data to export.' }); return }
       const name = `agrikd-data-${new Date().toISOString().slice(0, 10)}`
       if (fmt === 'csv') {
-        const h = Object.keys(allData[0])
+        const h = [...new Set(allData.flatMap(r => Object.keys(r)))]
         downloadFile([h.join(','), ...allData.map(r => h.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n'), `${name}.csv`, 'text/csv')
       } else downloadFile(JSON.stringify(allData, null, 2), `${name}.json`, 'application/json')
     } catch (err) { setCsvMsg({ type: 'error', text: 'Export failed: ' + err.message }) }
@@ -1406,7 +1407,8 @@ export default function DataManagementPage() {
     try {
       const allFiles = []
       // Recursive listing — Supabase Storage can nest folders arbitrarily
-      const listRecursive = async (prefix) => {
+      const listRecursive = async (prefix, depth = 0) => {
+        if (depth > 10) return
         const { data } = await supabase.storage.from(b).list(prefix, { limit: 200 })
         if (!data) return
         for (const item of data) {
@@ -1416,7 +1418,7 @@ export default function DataManagementPage() {
             allFiles.push({ ...item, folder: prefix || '(root)', path: fullPath })
           } else {
             // It's a folder — recurse
-            await listRecursive(fullPath)
+            await listRecursive(fullPath, depth + 1)
           }
         }
       }

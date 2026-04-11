@@ -50,7 +50,7 @@ export default function UsersPage() {
       setSaving(false)
       if (!error) {
         logAudit(supabase, form.role !== editUser.role ? 'user_role_changed' : 'user_status_changed', 'user', editUser.id, { email: editUser.email, role: form.role, is_active: form.is_active })
-        setEditUser(null); loadUsers(); triggerRefresh()
+        setEditUser(null); setError(null); loadUsers(); triggerRefresh()
       } else setError('Error: ' + error.message)
     }
     if (editUser.role === 'admin' && form.role !== 'admin') {

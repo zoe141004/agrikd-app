@@ -226,13 +226,19 @@ export default function ModelsPage() {
     try {
       // If version changed, cascade rename to benchmarks & version archives
       const versionChanged = form.version !== editModal.version
+      // Block status change to 'active' via edit — must use Activate button
+      if (form.status === 'active' && editModal.status !== 'active') {
+        throw new Error('Use the "Activate" button to set a model to active status.')
+      }
       if (versionChanged) {
         const duplicate = models.find(m => m.leaf_type === editModal.leaf_type && m.version === form.version && m.id !== editModal.id)
         if (duplicate) throw new Error(`Version v${form.version} already exists for ${editModal.leaf_type}`)
-        await supabase.from('model_benchmarks').update({ version: form.version })
+        const { error: benchErr } = await supabase.from('model_benchmarks').update({ version: form.version })
           .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
-        await supabase.from('model_versions').update({ version: form.version })
+        if (benchErr) throw new Error('Benchmark cascade failed: ' + benchErr.message)
+        const { error: verErr } = await supabase.from('model_versions').update({ version: form.version })
           .eq('leaf_type', editModal.leaf_type).eq('version', editModal.version)
+        if (verErr) throw new Error('Version archive cascade failed: ' + verErr.message)
       }
       const { error } = await supabase.from('model_registry').update({
         display_name: form.display_name,
@@ -1034,6 +1040,7 @@ export default function ModelsPage() {
                         const curVer = allVersions[0] || '1.0.0'
                         const parts = curVer.split('.')
                         parts[1] = String(parseInt(parts[1] || '0') + 1)
+                        if (parts.length > 2) parts[2] = '0'
                         const nextVer = parts.join('.')
                         setUploadForm(f => ({ ...f, leaf_type: lt, display_name: existing.display_name || '', num_classes: String(existing.num_classes || ''), class_labels_raw: labels, version: nextVer }))
                       } else {
@@ -1352,9 +1359,10 @@ export default function ModelsPage() {
               <label className="form-label">Status</label>
               <select className="form-input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
                 <option value="staging">Staging</option>
-                <option value="active">Active</option>
+                {editModal?.status === 'active' && <option value="active">Active</option>}
                 <option value="backup">Backup</option>
               </select>
+              {editModal?.status !== 'active' && <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Use the "Activate" button to set a model to active.</p>}
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setEditModal(null)}>Cancel</button>

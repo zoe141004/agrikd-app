@@ -60,6 +60,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (stab !== 'Audit Log') return
+    setAuditPage(0)
     const controller = new AbortController()
     loadAuditLogs(controller.signal)
     return () => controller.abort()
