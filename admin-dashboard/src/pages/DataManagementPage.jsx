@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
-import { downloadFile, formatBytes, formatDateTime, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, validateGitHubSlugs, logAudit } from '../lib/helpers'
+import { downloadFile, formatBytes, formatDateTime, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const DTABS = ['Overview', 'Stage Data', 'DVC Operations', 'Prediction Data', 'Storage Files']
 
 export default function DataManagementPage() {
-  const { leafTypeOptions: leafOptions, dvcDatasets, setDvcDatasets, dvcDatasetsLoading: sharedDvcLoading, dvcDatasetsSource, refreshLeafTypes, refreshDvcDatasets, triggerRefresh, refreshKey } = useData()
+  const { leafTypeOptions: leafOptions, dvcDatasets, dvcDatasetsLoading: sharedDvcLoading, dvcDatasetsSource, refreshLeafTypes, refreshDvcDatasets, triggerRefresh, refreshKey } = useData()
   const [dtab, setDtab] = useState('Overview')
   const [stats, setStats] = useState({ total: 0 })
   const [quality, setQuality] = useState([])
@@ -41,7 +41,7 @@ export default function DataManagementPage() {
   const [dvcLog, setDvcLog] = useState([])
 
   // CSV import state
-  const [csvFile, setCsvFile] = useState(null)
+  const [, setCsvFile] = useState(null)
   const [csvParsed, setCsvParsed] = useState(null)
   const [csvImporting, setCsvImporting] = useState(false)
   const [csvProgress, setCsvProgress] = useState(0)

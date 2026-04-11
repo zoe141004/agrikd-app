@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
-import { cleanLabel, formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
+import { formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
@@ -45,7 +45,7 @@ export default function ModelsPage() {
 
   // Version history
   const [versions, setVersions] = useState([])
-  const [expandedVersions, setExpandedVersions] = useState(null)
+  // expandedVersions reserved for future version history UI
 
   // Pipeline tracking (Supabase Realtime + GitHub API polling fallback)
   const [pipelineStatus, setPipelineStatus] = useState(null)
@@ -411,7 +411,7 @@ export default function ModelsPage() {
   const handleUpload = async (e) => {
     e.preventDefault()
     if (!uploadFile) { setUploadMsg({ type: 'error', text: 'Please select a model file.' }); return }
-    const { leaf_type, display_name, description, num_classes, class_labels_raw, is_new_leaf } = uploadForm
+    const { leaf_type, display_name, description, num_classes, class_labels_raw } = uploadForm
     const version = uploadForm.version?.trim()
     if (!leaf_type || !version) { setUploadMsg({ type: 'error', text: 'Leaf type and version are required.' }); return }
     if (!/^\d+\.\d+\.\d+$/.test(version)) { setUploadMsg({ type: 'error', text: 'Version must be in semver format (e.g. 1.0.0).' }); return }
