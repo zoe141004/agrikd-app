@@ -61,6 +61,27 @@ export default function SystemHealthPage() {
       results.storage = { ok: activeBuckets.length > 0, label: `${activeBuckets.length}/${knownBuckets.length} buckets OK`, detail: activeBuckets }
     } catch { results.storage = { ok: false, label: 'Unavailable' } }
 
+    // GitHub API check
+    try {
+      const ghToken = sessionStorage.getItem('gh_token')
+      const ghOwner = sessionStorage.getItem('gh_owner')
+      const ghRepo = sessionStorage.getItem('gh_repo')
+      if (ghToken && ghOwner && ghRepo) {
+        const ghCtrl = new AbortController()
+        const ghTimeout = setTimeout(() => ghCtrl.abort(), 8000)
+        const ghRes = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, {
+          headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' },
+          signal: ghCtrl.signal,
+        })
+        clearTimeout(ghTimeout)
+        results.github = { ok: ghRes.ok, label: ghRes.ok ? 'Connected' : `HTTP ${ghRes.status}` }
+      } else {
+        results.github = { ok: false, label: 'Not configured' }
+      }
+    } catch (e) {
+      results.github = { ok: false, label: e.name === 'AbortError' ? 'Timeout' : 'Unreachable' }
+    }
+
     // Real latency measurements (3 sequential pings)
     const latencyResults = []
     for (let i = 0; i < 3; i++) {
@@ -81,6 +102,7 @@ export default function SystemHealthPage() {
     { key: 'database', label: 'Database', desc: 'Supabase PostgreSQL' },
     { key: 'auth', label: 'Authentication', desc: 'Supabase Auth' },
     { key: 'storage', label: 'Storage', desc: 'Supabase Storage' },
+    { key: 'github', label: 'GitHub', desc: 'Actions & CI/CD' },
   ]
 
   return (

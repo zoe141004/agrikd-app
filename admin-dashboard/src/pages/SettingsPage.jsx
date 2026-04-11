@@ -478,10 +478,11 @@ export default function SettingsPage() {
   )
 
   async function loadAuditLogs(signal, page = 0) {
+    const safePage = Math.max(0, page || 0)
     setAuditLoading(true)
     setAuditError(null)
     try {
-      const from = page * AUDIT_PAGE_SIZE
+      const from = safePage * AUDIT_PAGE_SIZE
       const to = from + AUDIT_PAGE_SIZE - 1
       const { data, error: err } = await supabase
         .from('audit_log').select('*')
@@ -490,7 +491,7 @@ export default function SettingsPage() {
       if (err) throw err
       setAuditLogs(data || [])
       setAuditHasMore((data || []).length >= AUDIT_PAGE_SIZE)
-      setAuditPage(page)
+      setAuditPage(safePage)
     } catch (err) {
       if (err.name !== 'AbortError' && !signal?.aborted) {
         setAuditError(err.message || 'Failed to load audit logs')
