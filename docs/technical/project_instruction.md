@@ -656,6 +656,13 @@ Lan sau mo app → Doc user_preferences, dung delegate da luu (skip retry)
 
 ## 6. Database Schema (SQLite - sqflite)
 
+**Schema version**: 3 (managed by `app_database.dart`)
+
+**Migration strategy**: All schema migrations (v1→v2, v2→v3) are wrapped in a single
+`db.transaction()` block. If any step fails (e.g. disk full, app crash), the entire
+upgrade rolls back atomically — preventing half-applied migrations that would
+corrupt the local database on retry.
+
 ### 6.1 predictions
 Luu lich su chan doan cua nguoi dung.
 ```sql

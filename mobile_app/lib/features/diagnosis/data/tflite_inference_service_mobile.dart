@@ -65,8 +65,9 @@ class TfliteInferenceService {
       // Skip if same model+version already loaded
       if (_currentLeafType == leafType &&
           _currentVersion == version &&
-          _interpreter != null)
+          _interpreter != null) {
         return;
+      }
 
       _disposeInterpreter();
 

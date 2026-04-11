@@ -396,7 +396,7 @@ class SyncEngine:
                 "local_id": pred["id"],
             }
             if device_id:
-                payload["device_id"] = device_id
+                payload["device_id"] = int(device_id)
             payload_list.append(payload)
 
         try:

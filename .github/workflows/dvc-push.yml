@@ -54,9 +54,7 @@ jobs:
 
       - name: DVC Push
         run: |
-          echo "Pulling DVC cache to verify remote sync..."
-          dvc pull || echo "No DVC files to pull (new repo or empty tracking)"
-          echo "Pushing to DVC remote..."
+          echo "Pushing tracked data to DVC remote..."
           dvc push -v
 
       - name: Cleanup GCS credentials

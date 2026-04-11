@@ -62,81 +62,82 @@ class AppDatabase {
     int oldVersion,
     int newVersion,
   ) async {
-    if (oldVersion < 2) {
-      // Add role column for Active/Fallback model architecture
-      await db.execute(
-        "ALTER TABLE models ADD COLUMN role TEXT NOT NULL DEFAULT 'active' "
-        "CHECK (role IN ('active', 'fallback', 'archived'))",
-      );
-      // Remove old UNIQUE(leaf_type) by recreating table
-      // SQLite doesn't support DROP CONSTRAINT, so we migrate via temp table
-      await db.execute('''
-        CREATE TABLE models_v2 (
-          id              INTEGER PRIMARY KEY AUTOINCREMENT,
-          leaf_type       TEXT NOT NULL,
-          version         TEXT NOT NULL,
-          file_path       TEXT NOT NULL,
-          sha256_checksum TEXT NOT NULL,
-          num_classes     INTEGER NOT NULL,
-          class_labels    TEXT NOT NULL,
-          accuracy_top1   REAL,
-          is_bundled      INTEGER NOT NULL DEFAULT 1,
-          is_active       INTEGER NOT NULL DEFAULT 1,
-          role            TEXT NOT NULL DEFAULT 'active'
-                          CHECK (role IN ('active', 'fallback', 'archived')),
-          updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-          UNIQUE(leaf_type, role)
-        )
-      ''');
-      await db.execute('''
-        INSERT INTO models_v2 (id, leaf_type, version, file_path,
-          sha256_checksum, num_classes, class_labels, accuracy_top1,
-          is_bundled, is_active, role, updated_at)
-        SELECT id, leaf_type, version, file_path,
-          sha256_checksum, num_classes, class_labels, accuracy_top1,
-          is_bundled, is_active, 'active', updated_at
-        FROM models
-      ''');
-      await db.execute('DROP TABLE models');
-      await db.execute('ALTER TABLE models_v2 RENAME TO models');
-    }
-    if (oldVersion < 3) {
-      // REQ-3: Support multiple active versions per leaf_type.
-      // Change UNIQUE(leaf_type, role) → UNIQUE(leaf_type, version).
-      // Add is_selected column to track which active version is used for inference.
-      await db.execute('''
-        CREATE TABLE models_v3 (
-          id              INTEGER PRIMARY KEY AUTOINCREMENT,
-          leaf_type       TEXT NOT NULL,
-          version         TEXT NOT NULL,
-          file_path       TEXT NOT NULL,
-          sha256_checksum TEXT NOT NULL,
-          num_classes     INTEGER NOT NULL,
-          class_labels    TEXT NOT NULL,
-          accuracy_top1   REAL,
-          is_bundled      INTEGER NOT NULL DEFAULT 1,
-          is_active       INTEGER NOT NULL DEFAULT 1,
-          role            TEXT NOT NULL DEFAULT 'active'
-                          CHECK (role IN ('active', 'fallback', 'archived')),
-          is_selected     INTEGER NOT NULL DEFAULT 0,
-          updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-          UNIQUE(leaf_type, version)
-        )
-      ''');
-      await db.execute('''
-        INSERT INTO models_v3 (id, leaf_type, version, file_path,
-          sha256_checksum, num_classes, class_labels, accuracy_top1,
-          is_bundled, is_active, role, is_selected, updated_at)
-        SELECT id, leaf_type, version, file_path,
-          sha256_checksum, num_classes, class_labels, accuracy_top1,
-          is_bundled, is_active, role,
-          CASE WHEN role = 'active' THEN 1 ELSE 0 END,
-          updated_at
-        FROM models
-      ''');
-      await db.execute('DROP TABLE models');
-      await db.execute('ALTER TABLE models_v3 RENAME TO models');
-    }
+    // Wrap ALL migration steps in a single transaction so that if any step
+    // fails (e.g. disk full, power loss) the entire upgrade rolls back
+    // atomically. sqflite only bumps PRAGMA user_version after onUpgrade
+    // returns successfully, so a single transaction prevents half-applied
+    // migrations that would fail on retry.
+    await db.transaction((txn) async {
+      if (oldVersion < 2) {
+        await txn.execute(
+          "ALTER TABLE models ADD COLUMN role TEXT NOT NULL DEFAULT 'active' "
+          "CHECK (role IN ('active', 'fallback', 'archived'))",
+        );
+        await txn.execute('''
+          CREATE TABLE models_v2 (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            leaf_type       TEXT NOT NULL,
+            version         TEXT NOT NULL,
+            file_path       TEXT NOT NULL,
+            sha256_checksum TEXT NOT NULL,
+            num_classes     INTEGER NOT NULL,
+            class_labels    TEXT NOT NULL,
+            accuracy_top1   REAL,
+            is_bundled      INTEGER NOT NULL DEFAULT 1,
+            is_active       INTEGER NOT NULL DEFAULT 1,
+            role            TEXT NOT NULL DEFAULT 'active'
+                            CHECK (role IN ('active', 'fallback', 'archived')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(leaf_type, role)
+          )
+        ''');
+        await txn.execute('''
+          INSERT INTO models_v2 (id, leaf_type, version, file_path,
+            sha256_checksum, num_classes, class_labels, accuracy_top1,
+            is_bundled, is_active, role, updated_at)
+          SELECT id, leaf_type, version, file_path,
+            sha256_checksum, num_classes, class_labels, accuracy_top1,
+            is_bundled, is_active, 'active', updated_at
+          FROM models
+        ''');
+        await txn.execute('DROP TABLE models');
+        await txn.execute('ALTER TABLE models_v2 RENAME TO models');
+      }
+      if (oldVersion < 3) {
+        await txn.execute('''
+          CREATE TABLE models_v3 (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            leaf_type       TEXT NOT NULL,
+            version         TEXT NOT NULL,
+            file_path       TEXT NOT NULL,
+            sha256_checksum TEXT NOT NULL,
+            num_classes     INTEGER NOT NULL,
+            class_labels    TEXT NOT NULL,
+            accuracy_top1   REAL,
+            is_bundled      INTEGER NOT NULL DEFAULT 1,
+            is_active       INTEGER NOT NULL DEFAULT 1,
+            role            TEXT NOT NULL DEFAULT 'active'
+                            CHECK (role IN ('active', 'fallback', 'archived')),
+            is_selected     INTEGER NOT NULL DEFAULT 0,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(leaf_type, version)
+          )
+        ''');
+        await txn.execute('''
+          INSERT INTO models_v3 (id, leaf_type, version, file_path,
+            sha256_checksum, num_classes, class_labels, accuracy_top1,
+            is_bundled, is_active, role, is_selected, updated_at)
+          SELECT id, leaf_type, version, file_path,
+            sha256_checksum, num_classes, class_labels, accuracy_top1,
+            is_bundled, is_active, role,
+            CASE WHEN role = 'active' THEN 1 ELSE 0 END,
+            updated_at
+          FROM models
+        ''');
+        await txn.execute('DROP TABLE models');
+        await txn.execute('ALTER TABLE models_v3 RENAME TO models');
+      }
+    });
   }
 
   static Future<void> _onCreate(Database db, int version) async {

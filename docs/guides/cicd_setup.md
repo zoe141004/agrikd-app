@@ -129,7 +129,8 @@ Steps:
 4. Evaluate on test dataset (quality gate: configurable min accuracy)
 5. Compute SHA-256 hashes
 6. Upload TFLite model + benchmark results to Supabase
-7. Update pipeline_runs table status (converting → evaluating → completed/failed)
+7. **Auto-activate**: If fewer than 2 active models exist for the leaf_type, the new model is promoted to `active` **before** archiving existing active models to `model_versions`. This activate-first order prevents a window where no model is active if a network failure interrupts the process.
+8. Update pipeline_runs table status (converting → evaluating → completed/failed)
 
 ## 6. DVC Workflows
 
@@ -148,6 +149,7 @@ Uses 3 retries with 10s backoff.
 ```
 Manual trigger → Push all DVC-tracked data to GCS
 ```
+Pushes local tracked data directly (`dvc push -v`) — no prior `dvc pull` required, which avoids unnecessary disk usage on GitHub runners at scale.
 
 ### Dataset Upload (`dataset-upload.yml`):
 Three source modes — datasets are pushed directly to DVC (GCS), not staged in Supabase Storage:

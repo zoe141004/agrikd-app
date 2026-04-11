@@ -27,6 +27,11 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
   List<String>? _loadedClassLabels;
   int? _loadedNumClasses;
 
+  /// Cached selected model record to avoid redundant DB queries on every
+  /// diagnose() call for the same leaf type.
+  String? _cachedLeafType;
+  Map<String, dynamic>? _cachedSelectedModel;
+
   DiagnosisRepositoryImpl({
     required TfliteInferenceService inferenceService,
     required PredictionDao predictionDao,
@@ -39,8 +44,16 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
   @override
   Future<void> loadModel(String leafType) async {
-    // 1. Try selected OTA model from DB
-    final active = await _modelDao.getSelected(leafType);
+    // Use cached DB record if same leafType (avoids ~5ms DB query per capture)
+    Map<String, dynamic>? active;
+    if (_cachedLeafType == leafType) {
+      active = _cachedSelectedModel;
+    } else {
+      active = await _modelDao.getSelected(leafType);
+      _cachedLeafType = leafType;
+      _cachedSelectedModel = active;
+    }
+
     if (active != null && (active['is_bundled'] as int) == 0) {
       final filePath = active['file_path'] as String;
       final activeVersion = active['version'] as String;
@@ -58,6 +71,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
       // Selected OTA failed — try removing and selecting another
       await _modelDao.removeVersion(leafType, activeVersion);
+      _cachedSelectedModel = null;
+      _cachedLeafType = null;
 
       final fallback = await _modelDao.getSelected(leafType);
       if (fallback != null && (fallback['is_bundled'] as int) == 0) {
@@ -215,6 +230,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
 
   @override
   void dispose() {
+    _cachedLeafType = null;
+    _cachedSelectedModel = null;
     _inferenceService.dispose();
   }
 }

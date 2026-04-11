@@ -93,6 +93,7 @@ Current test count: **89 tests** across 14 test files:
 - **Image URLs**: Prediction images use `createSignedUrl()` (365-day expiry) for the private `prediction-images` bucket. Public URLs would return 403.
 - **Auth resilience**: On `AuthException`, the sync service attempts `refreshSession()` before marking items as permanently failed. This handles token expiry (1h idle).
 - **Model version cache**: The TFLite inference service tracks both `leafType` and `version`. OTA model updates for the same leaf type correctly trigger a reload.
+- **Model selection cache**: `DiagnosisRepositoryImpl` caches the last `_modelDao.getSelected()` result per leaf type, avoiding a redundant ~5ms SQLite query on every consecutive capture of the same leaf type. Cache is invalidated on leaf type switch, model removal, or dispose.
 
 ## 5. Build Release APK
 

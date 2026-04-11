@@ -842,12 +842,14 @@ cloud database.
 2. Up to `batch_size` (default: 50) records are sent per cycle.
 3. Each batch is posted as a single JSON array to the Supabase REST API
    (`/rest/v1/predictions`) with proper `apikey` and `Authorization` headers.
-4. On successful upload (HTTP 200 or 201), the local record is marked as synced
+4. `device_id` is sent as an integer (matching Supabase `BIGINT` column type)
+   to avoid implicit type coercion.
+5. On successful upload (HTTP 200 or 201), the local record is marked as synced
    with a `synced_at` timestamp.
-5. On network error, the current batch is aborted (remaining records are retried
+6. On network error, the current batch is aborted (remaining records are retried
    in the next cycle). This prevents excessive retries during connectivity
    outages.
-6. If `supabase_url` or `supabase_key` are empty in `config.json`, sync is
+7. If `supabase_url` or `supabase_key` are empty in `config.json`, sync is
    silently skipped and the system operates fully offline.
 
 ### 9.2 Configuring Credentials

@@ -91,7 +91,7 @@ class JetsonDatabase:
                     json.dumps(result.get("all_confidences")),
                     result.get("inference_time_ms"),
                     image_path,
-                    str(device_id) if device_id else None,
+                    device_id if device_id else None,
                 ),
             )
             self.conn.commit()

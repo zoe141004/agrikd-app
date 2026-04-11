@@ -402,7 +402,22 @@ def main():
         except (json.JSONDecodeError, TypeError):
             active_models = []
 
-        # Archive current active models into model_versions before any activation
+        # Activate new model FIRST (before archiving) so that if archiving
+        # fails mid-way, at least the new model is already active.
+        if len(active_models) < 2:
+            act_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
+            ok_act, _ = supabase_request(
+                act_url, {**api_headers, "Prefer": "return=minimal"},
+                {"status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}, "PATCH"
+            )
+            if ok_act:
+                print(f"  [OK] Auto-activated: only {len(active_models)} active model(s) for {leaf_type}, promoted v{version} to active")
+            else:
+                print(f"  [WARN] Auto-activate failed for {leaf_type} v{version}")
+        else:
+            print(f"  [INFO] {len(active_models)} active models for {leaf_type} — new model stays staging (admin must activate manually)")
+
+        # Archive current active models into model_versions (informational copy)
         for am in active_models:
             archive_payload = {
                 "leaf_type": am.get("leaf_type"),
@@ -417,19 +432,6 @@ def main():
             ok_ar, _ = supabase_request(archive_url, archive_headers, archive_payload, "POST")
             if ok_ar:
                 print(f"  [OK] Archived active model {am.get('leaf_type')} v{am.get('version')} to model_versions")
-
-        if len(active_models) < 2:
-            act_url = f"{supabase_url}/rest/v1/model_registry?leaf_type=eq.{encoded_leaf}&version=eq.{encoded_ver}"
-            ok_act, _ = supabase_request(
-                act_url, {**api_headers, "Prefer": "return=minimal"},
-                {"status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}, "PATCH"
-            )
-            if ok_act:
-                print(f"  [OK] Auto-activated: only {len(active_models)} active model(s) for {leaf_type}, promoted v{version} to active")
-            else:
-                print(f"  [WARN] Auto-activate failed for {leaf_type} v{version}")
-        else:
-            print(f"  [INFO] {len(active_models)} active models for {leaf_type} — new model stays staging (admin must activate manually)")
 
     # Update pipeline status to 'completed' (with warning if partial failures)
     if fail_count > 0:
