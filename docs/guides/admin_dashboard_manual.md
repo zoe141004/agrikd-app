@@ -136,10 +136,30 @@ keep cross-page state synchronized without requiring page reloads:
   All pages share the same list, so uploading a dataset or model on one page
   immediately updates dropdowns on every other page.
 - **DVC tracked datasets** are loaded once and refreshed when operations
-  complete.
+  complete. Deduplication uses a unified Map keyed by normalized (lowercase)
+  dataset name to prevent double-counting from stage + push operations.
 - **GitHub connection status** is shared across Settings and other pages that
   depend on GitHub integration.
+- **Auto-refresh on mutations** -- Every create, update, and delete operation
+  across the entire dashboard (models, datasets, users, devices, settings)
+  calls `triggerRefresh()`, which increments a shared `refreshKey` counter.
+  All page-level `useEffect` hooks depend on `refreshKey`, so data reloads
+  automatically across every page without manual page refresh.
 - Navigating between pages automatically refreshes shared leaf type data.
+
+### Data Management (`/data`)
+
+- **Cascade delete dataset** -- Each dataset row has a delete button that
+  removes the dataset and ALL related data in order: model benchmarks →
+  model versions → model registry entries (+ storage files) → pipeline runs →
+  DVC operations → dataset storage files. A confirmation dialog warns the
+  user before proceeding. After deletion, all shared state refreshes
+  automatically.
+- **Upload Model auto-fill** -- When selecting a leaf type in the Upload tab,
+  class labels and number of classes are auto-filled from three sources:
+  (1) existing models in the registry, (2) DVC dataset metadata from context
+  (class names extracted from upload workflow), (3) auto-generated display
+  name with empty fields as fallback.
 
 ### Releases (`/releases`)
 
