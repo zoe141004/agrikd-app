@@ -111,8 +111,13 @@ sudo ./setup_jetson.sh
 
 | Mode | Runtime | Python | Isolation |
 |------|---------|--------|-----------|
-| **Headless REST API** | Docker container (`agrikd-edge:latest`) | Container Python (L4T base) | Full Docker isolation, GPU via `--runtime=nvidia` |
-| **GUI Desktop App** | Host (system Python) | `/usr/bin/python3` + apt packages | System packages (`python3-pyqt5`, `python3-opencv`) |
+| **Headless REST API** | Docker container (`agrikd-edge:latest`) | Python 3.8 (L4T base image) | Full Docker isolation, GPU via `--runtime=nvidia` |
+| **GUI Desktop App** | Host (system Python 3.10) | `/usr/bin/python3` + apt packages | System packages (`python3-pyqt5`, `python3-opencv`) |
+
+> **Python version note:** The Docker container uses Python 3.8 from the L4T base image
+> because (a) deadsnakes PPA does not support ARM64, and (b) TensorRT Python bindings
+> are pre-compiled for 3.8. This is fully isolated and does not affect the host.
+> The Jetson host, dev environment, and CI all use Python 3.10 (project standard).
 
 ### Step 1 -- Check Platform
 
