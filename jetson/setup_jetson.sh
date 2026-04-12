@@ -368,7 +368,7 @@ set -e
 echo ""
 
 # ── 9. Download ONNX models from Supabase ───────────────────
-echo "[9/13] Downloading ONNX models from Supabase..."
+echo "[9/13] Downloading models from Supabase..."
 if [ ! -f "$CFG" ]; then
     echo "  [WARN] Config not found: $CFG — skipping model download."
     echo "  Place .onnx files manually at: $INSTALL_DIR/models/"
@@ -379,9 +379,19 @@ else
 
     if [ -z "$CFG_SUPA_URL" ] || [ -z "$CFG_SUPA_KEY" ]; then
         echo "  [WARN] Supabase credentials not found in config.json."
-        echo "  Skipping ONNX download. Place ONNX files manually at:"
-        echo "    $INSTALL_DIR/models/<leaf_type>_student.onnx"
+        echo "  Skipping model download. Place files manually at:"
+        echo "    $INSTALL_DIR/models/<leaf_type>_student.engine (or .onnx)"
     else
+        # Detect device hardware tag (same as upload in step 10)
+        HW_MODEL="unknown"
+        TRT_VER="unknown"
+        if [ -f /proc/device-tree/model ]; then
+            HW_MODEL=$(cat /proc/device-tree/model | tr -d '\0' | tr '[:upper:]' '[:lower:]' | sed 's/nvidia //;s/ developer kit//;s/ /-/g')
+        fi
+        TRT_VER=$(dpkg -l tensorrt 2>/dev/null | awk '/^ii/{print $3}' | cut -d'-' -f1 || echo "unknown")
+        DEVICE_TAG="${HW_MODEL}_trt${TRT_VER}"
+        echo "  Device tag: $DEVICE_TAG"
+
         for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
             engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
             onnx_file="$INSTALL_DIR/models/${leaf_type}_student.onnx"
@@ -391,6 +401,28 @@ else
                 continue
             fi
 
+            # Try 1: Download pre-built .engine for this exact device + TRT version
+            ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${DEVICE_TAG}/${leaf_type}_student.engine"
+            echo "  Trying pre-built engine for $leaf_type ($DEVICE_TAG)..."
+            HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
+                ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
+                # Sanity check: engine should be at least 100KB
+                if [ "$ENGINE_SIZE" -gt 102400 ]; then
+                    chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+                    echo "  [OK] Downloaded pre-built engine for $leaf_type (${ENGINE_SIZE} bytes)"
+                    echo "       Built on: $DEVICE_TAG — no conversion needed!"
+                    continue
+                else
+                    echo "  [WARN] Downloaded file too small (${ENGINE_SIZE} bytes) — invalid engine"
+                    rm -f "$engine_file"
+                fi
+            else
+                rm -f "$engine_file"
+                echo "  No pre-built engine available — falling back to ONNX download"
+            fi
+
+            # Try 2: Download ONNX and convert locally in step 10
             echo "  Fetching ONNX URL for $leaf_type..."
             ONNX_RESP=$(curl -sf \
                 "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
