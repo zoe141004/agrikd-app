@@ -140,3 +140,20 @@ GRANT EXECUTE ON FUNCTION public.device_poll_config(UUID) TO anon, authenticated
 GRANT EXECUTE ON FUNCTION public.device_ack_config(UUID, JSONB) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.device_heartbeat(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.device_push_predictions(UUID, JSONB) TO anon, authenticated;
+
+-- 5. Enable Realtime for devices table (dashboard auto-refresh)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND tablename = 'devices'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.devices;
+        RAISE NOTICE 'Added devices to supabase_realtime publication';
+    ELSE
+        RAISE NOTICE 'devices already in supabase_realtime publication';
+    END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE WARNING 'Cannot alter publication — run manually: ALTER PUBLICATION supabase_realtime ADD TABLE public.devices;';
+END $$;

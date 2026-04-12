@@ -35,7 +35,21 @@ export default function DevicesPage() {
   useEffect(() => {
     mountedRef.current = true
     loadData()
-    return () => { mountedRef.current = false }
+
+    // Realtime subscription: auto-refresh when devices table changes
+    const channel = supabase
+      .channel('devices-realtime')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'devices',
+      }, () => {
+        if (mountedRef.current) loadData()
+      })
+      .subscribe()
+
+    return () => {
+      mountedRef.current = false
+      supabase.removeChannel(channel)
+    }
   }, [refreshKey])
 
   useEffect(() => {
