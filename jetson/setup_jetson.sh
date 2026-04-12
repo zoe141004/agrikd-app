@@ -204,163 +204,116 @@ CFG="$INSTALL_DIR/config/config.json"
 # Ensure config.json exists
 if [ ! -f "$CFG" ]; then
     echo "  [WARN] config.json not found at $CFG — creating minimal config."
-    python3 -c "
-import json
-cfg = {
-    'camera': {'source': 0, 'width': 640, 'height': 480, 'mode': 'manual'},
-    'inference': {'input_size': 224, 'imagenet_mean': [0.485, 0.456, 0.406], 'imagenet_std': [0.229, 0.224, 0.225]},
-    'models': {},
-    'sync': {'supabase_url': '', 'supabase_key': '', 'batch_size': 50, 'interval_seconds': 300},
-    'server': {'host': '0.0.0.0', 'port': 8080, 'api_key': ''},
-    'database': {'path': 'data/agrikd_jetson.db'},
-    'logging': {'level': 'INFO', 'file': 'logs/agrikd.log', 'max_bytes': 104857600, 'backup_count': 5}
+    cat > "$CFG" << 'MINCFG'
+{
+    "camera": {"source": 0, "width": 640, "height": 480, "mode": "manual"},
+    "inference": {"input_size": 224, "imagenet_mean": [0.485, 0.456, 0.406], "imagenet_std": [0.229, 0.224, 0.225]},
+    "models": {},
+    "sync": {"supabase_url": "", "supabase_key": "", "batch_size": 50, "interval_seconds": 300},
+    "server": {"host": "0.0.0.0", "port": 8080, "api_key": ""},
+    "database": {"path": "data/agrikd_jetson.db"},
+    "logging": {"level": "INFO", "file": "logs/agrikd.log", "max_bytes": 104857600, "backup_count": 5}
 }
-with open('$CFG', 'w') as f:
-    json.dump(cfg, f, indent=4)
-"
+MINCFG
     chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
 fi
 
-# Export env vars BEFORE the heredoc so Python can read them
-export CFG_PATH="$CFG"
-export REPO_ROOT_PATH="$REPO_ROOT"
+# Write a temp Python script (avoids heredoc + env var issues entirely)
+INJECT_SCRIPT="/tmp/_agrikd_inject_creds.py"
+cat > "$INJECT_SCRIPT" << 'PYEOF'
+import json, sys, os
 
-# Use a single Python script to handle ALL credential injection logic.
-# This avoids shell variable issues (CRLF, quoting, subshell capture).
-set +e
-python3 << 'INJECT_CREDS'
-import json, os, sys
+def main():
+    cfg_path = sys.argv[1]
+    repo_root = sys.argv[2]
 
-cfg_path = os.environ.get("CFG_PATH", "/opt/agrikd/config/config.json")
-repo_root = os.environ.get("REPO_ROOT_PATH", "")
-env_supa_url = os.environ.get("SUPABASE_URL", "")
-env_supa_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    print(f"  Config: {cfg_path}")
+    print(f"  Repo:   {repo_root}")
 
-print(f"  Config path: {cfg_path}")
-print(f"  Repo root:   {repo_root}")
-
-# Load config
-try:
+    # Load config
     with open(cfg_path) as f:
         cfg = json.load(f)
-except Exception as e:
-    print(f"  [ERROR] Cannot read {cfg_path}: {e}")
-    sys.exit(1)
 
-cfg.setdefault("sync", {})
-existing_url = cfg["sync"].get("supabase_url", "").strip()
-existing_key = cfg["sync"].get("supabase_key", "").strip()
+    cfg.setdefault("sync", {})
+    existing_url = cfg["sync"].get("supabase_url", "").strip()
+    existing_key = cfg["sync"].get("supabase_key", "").strip()
 
-if existing_url and existing_key:
-    print(f"  [OK] Supabase credentials already in config.json.")
-    print(f"  URL: {existing_url[:50]}...")
-    sys.exit(0)
+    if existing_url and existing_key:
+        print(f"  [OK] Credentials already present.")
+        print(f"  URL: {existing_url[:50]}...")
+        return 0
 
-print("  Credentials missing — attempting auto-detect...")
+    print("  Credentials empty — scanning .env files...")
 
-# Method 1: Read from repo .env / .env.development
-auto_url = ""
-auto_key = ""
-for env_name in [".env", ".env.development"]:
-    env_path = os.path.join(repo_root, env_name) if repo_root else ""
-    if env_path and os.path.isfile(env_path):
-        print(f"  Checking: {env_path}")
-        try:
-            with open(env_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            for line in content.splitlines():
-                line = line.strip().replace("\r", "")
-                if line.startswith("SUPABASE_URL=") and not auto_url:
-                    auto_url = line.split("=", 1)[1].strip()
-                elif line.startswith("SUPABASE_ANON_KEY=") and not auto_key:
-                    auto_key = line.split("=", 1)[1].strip()
-        except Exception as e:
-            print(f"  [WARN] Cannot read {env_path}: {e}")
-    else:
-        full = os.path.join(repo_root, env_name) if repo_root else env_name
-        print(f"  Not found: {full}")
-    if auto_url and auto_key:
-        break
+    # Scan .env files in repo root
+    auto_url = ""
+    auto_key = ""
+    for name in [".env", ".env.development"]:
+        path = os.path.join(repo_root, name)
+        exists = os.path.isfile(path)
+        print(f"  {path} → {'FOUND' if exists else 'not found'}")
+        if exists and (not auto_url or not auto_key):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip().replace("\r", "")
+                    if line.startswith("#") or "=" not in line:
+                        continue
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip()
+                    if key == "SUPABASE_URL" and not auto_url:
+                        auto_url = val
+                    elif key == "SUPABASE_ANON_KEY" and not auto_key:
+                        auto_key = val
 
-# Method 2: Environment variables
-if not auto_url and env_supa_url:
-    auto_url = env_supa_url.strip()
-    print(f"  Using SUPABASE_URL from env var")
-if not auto_key and env_supa_key:
-    auto_key = env_supa_key.strip()
-    print(f"  Using SUPABASE_ANON_KEY from env var")
+    if not auto_url or not auto_key:
+        print(f"  [FAIL] Could not find credentials.")
+        print(f"  auto_url={'SET' if auto_url else 'EMPTY'}, auto_key={'SET' if auto_key else 'EMPTY'}")
+        return 2
 
-if auto_url and auto_key:
-    print(f"  [AUTO] Injecting credentials into config.json.")
+    print(f"  [AUTO] Found credentials:")
     print(f"  URL: {auto_url[:50]}...")
     print(f"  KEY: {auto_key[:25]}...")
+
+    # Inject
     cfg["sync"]["supabase_url"] = auto_url
     cfg["sync"]["supabase_key"] = auto_key
-    try:
-        with open(cfg_path, "w") as f:
-            json.dump(cfg, f, indent=4)
-        # Verify
-        with open(cfg_path) as f:
-            check = json.load(f)
-        v = check.get("sync", {}).get("supabase_url", "")
-        if v:
-            print(f"  [VERIFIED] config.json updated successfully.")
-        else:
-            print(f"  [ERROR] Verification failed!")
-            sys.exit(1)
-    except Exception as e:
-        print(f"  [ERROR] Failed to write: {e}")
-        sys.exit(1)
-else:
-    print("  [WARN] Could not auto-detect credentials.")
-    if not auto_url:
-        print("  Missing: SUPABASE_URL")
-    if not auto_key:
-        print("  Missing: SUPABASE_ANON_KEY")
-    sys.exit(2)
-INJECT_CREDS
+    with open(cfg_path, "w") as f:
+        json.dump(cfg, f, indent=4)
+
+    # Verify
+    with open(cfg_path) as f:
+        check = json.load(f)
+    if check.get("sync", {}).get("supabase_url", ""):
+        print(f"  [VERIFIED] config.json updated.")
+        return 0
+    else:
+        print(f"  [ERROR] Write failed verification!")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYEOF
+
+# Run the injection script with explicit args (no env vars needed)
+set +e
+python3 "$INJECT_SCRIPT" "$CFG" "$REPO_ROOT"
 INJECT_RESULT=$?
 set -e
+rm -f "$INJECT_SCRIPT"
 
 if [ $INJECT_RESULT -eq 0 ]; then
     echo ""
 elif [ $INJECT_RESULT -eq 2 ]; then
-    # Interactive fallback — offer provisioning token or manual entry
-    echo "  Supabase credentials are needed to download models and sync data."
+    # Interactive fallback
     echo ""
     echo "  Options:"
-    echo "    1) Paste a provisioning token from Admin Dashboard (recommended)"
-    echo "       Dashboard → Devices → Provisioning Tokens → Generate Token"
-    echo "    2) Enter Supabase URL and anon key manually"
-    echo "    3) Skip — configure later (models must be placed manually)"
+    echo "    1) Enter Supabase URL and anon key manually"
+    echo "    2) Skip — configure later"
     echo ""
-    read -rp "  Choice [1/2/3]: " CRED_CHOICE
-
+    read -rp "  Choice [1/2]: " CRED_CHOICE
     case "$CRED_CHOICE" in
         1)
-            read -rp "  Paste provisioning token (or path to .token file): " PROVISION_INPUT
-            if [ -n "$PROVISION_INPUT" ]; then
-                cd "$INSTALL_DIR"
-                set +e
-                if [ -f "$PROVISION_INPUT" ]; then
-                    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
-                else
-                    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
-                fi
-                PROV_EXIT=$?
-                set -e
-                cd "$SCRIPT_DIR"
-                if [ $PROV_EXIT -eq 0 ]; then
-                    echo "  [OK] Device provisioned. Credentials injected into config.json."
-                else
-                    echo "  [WARN] Provisioning failed (exit $PROV_EXIT). Setup continues."
-                    echo "  You can re-provision later: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
-                fi
-            else
-                echo "  [SKIP] Empty input — skipping provisioning."
-            fi
-            ;;
-        2)
             read -rp "  Supabase URL: " MANUAL_URL
             read -rp "  Supabase Anon Key: " MANUAL_KEY
             if [ -n "$MANUAL_URL" ] && [ -n "$MANUAL_KEY" ]; then
@@ -374,19 +327,17 @@ c['sync']['supabase_key'] = sys.argv[3].strip()
 with open(sys.argv[1], 'w') as f:
     json.dump(c, f, indent=4)
 " "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
-                echo "  [OK] Credentials saved to config.json."
+                echo "  [OK] Credentials saved."
             else
-                echo "  [WARN] Incomplete credentials — skipping."
+                echo "  [WARN] Incomplete — skipping."
             fi
             ;;
         *)
-            echo "  Skipped credential configuration."
-            echo "  To configure later, edit: $CFG"
-            echo "  Or run: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+            echo "  Skipped. Edit later: $CFG"
             ;;
     esac
 else
-    echo "  [ERROR] Credential injection failed. Setup continues."
+    echo "  [ERROR] Credential injection failed (exit=$INJECT_RESULT)."
     echo "  Edit manually: $CFG"
 fi
 echo ""
