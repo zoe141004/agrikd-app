@@ -184,15 +184,16 @@ echo "[7/13] Installing GUI Python dependencies (system pip)..."
 # numpy and opencv come from apt (python3-numpy, python3-opencv)
 # PyQt5 comes from apt (python3-pyqt5)
 # flask + waitress are for headless (Docker only), but requests is needed for sync
+# Host uses Python 3.10 so we can install fully patched versions
 pip3 install --break-system-packages \
-    requests==2.31.0 \
-    flask==3.0.3 \
-    waitress==2.1.2 \
+    requests==2.33.0 \
+    flask==3.1.3 \
+    waitress==3.0.2 \
     2>/dev/null \
 || pip3 install \
-    requests==2.31.0 \
-    flask==3.0.3 \
-    waitress==2.1.2
+    requests==2.33.0 \
+    flask==3.1.3 \
+    waitress==3.0.2
 echo "  [OK] GUI dependencies installed."
 echo ""
 

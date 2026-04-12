@@ -10,9 +10,13 @@
 #   - Docker container uses Python 3.8 (from L4T base image, required for TensorRT bindings)
 #   - Jetson host / dev / CI use Python 3.10 (project standard)
 #   - See Dockerfile header comments for why Docker cannot use 3.10.
+#
+# SECURITY: waitress 3.0.0 is the max version for Python 3.8.
+#   CVE fixes (3.0.1+) require Python 3.9+. Docker health server is internal-only
+#   (localhost via --network=host) so risk is minimal. Host pip install uses 3.0.2.
 
 numpy==1.24.4
 opencv-python-headless==4.8.1.78
 flask==3.0.3
-waitress==2.1.2
-requests==2.31.0
+waitress==3.0.0
+requests==2.32.4
