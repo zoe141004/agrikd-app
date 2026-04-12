@@ -222,8 +222,7 @@ describe('computeSHA256', () => {
   })
 
   it('handles empty file', async () => {
-    const emptyBuffer = new Uint8Array(0).buffer
-    const file = { arrayBuffer: () => Promise.resolve(emptyBuffer) }
+    const file = createMockFile('')
     const hash = await computeSHA256(file)
     expect(hash).toBe(
       'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
