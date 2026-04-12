@@ -712,7 +712,7 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=$INSTALL_DIR /dev/video* /dev/dri
+ReadWritePaths=$INSTALL_DIR /dev/video0 /dev/video1 /dev/dri
 
 [Install]
 WantedBy=multi-user.target
