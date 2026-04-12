@@ -480,8 +480,7 @@ else
         "$TRTEXEC" \
             --onnx="$onnx_file" \
             --saveEngine="$engine_file" \
-            --fp16 \
-            --workspace=1024
+            --fp16
         TRT_EXIT=$?
         set -e
 
