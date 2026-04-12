@@ -902,24 +902,35 @@ shown above.
 
 The sync engine runs as a background daemon thread in both headless and GUI
 modes. It periodically pushes locally stored predictions to the Supabase
-cloud database.
+cloud database and polls for device config updates from the admin dashboard.
 
 ### 9.1 Sync Behavior
 
-1. Every `interval_seconds` (default: 300 seconds / 5 minutes), the sync engine
-   queries the local SQLite database for unsynced predictions.
-2. Up to `batch_size` (default: 50) records are sent per cycle.
-3. Each batch is posted as a single JSON array to the Supabase REST API
-   (`/rest/v1/predictions`) with proper `apikey` and `Authorization` headers.
-4. `device_id` is sent as an integer (matching Supabase `BIGINT` column type)
-   to avoid implicit type coercion.
-5. On successful upload (HTTP 200 or 201), the local record is marked as synced
-   with a `synced_at` timestamp.
-6. On network error, the current batch is aborted (remaining records are retried
-   in the next cycle). This prevents excessive retries during connectivity
-   outages.
-7. If `supabase_url` or `supabase_key` are empty in `config.json`, sync is
-   silently skipped and the system operates fully offline.
+All device↔Supabase communication uses **RPC functions** (SECURITY DEFINER)
+instead of direct REST table queries. This is required because Supabase's
+gateway does not forward custom HTTP headers to PostgREST, making header-based
+RLS policies ineffective.
+
+**Prerequisite**: Migration `020_device_sync_rpcs.sql` must be applied to
+Supabase before sync will work. Run it in the Supabase SQL Editor.
+
+Each sync cycle (every `interval_seconds`, default 300s) performs:
+
+1. **Config poll** — calls `device_poll_config(device_token)` RPC to receive
+   `desired_config`, `config_version`, `status`, and `user_id` from the admin
+   dashboard.
+2. **Prediction push** — calls `device_push_predictions(device_token, predictions)`
+   RPC with up to `batch_size` (default: 50) unsynced records from local SQLite.
+   Skipped if no user is assigned.
+3. **Heartbeat** — calls `device_heartbeat(device_token)` RPC to update
+   `last_seen_at` and set `status=online` (if a user is assigned).
+4. **Config ACK** — when a new config version is detected, applies it locally
+   then calls `device_ack_config(device_token, reported_config)` so the
+   dashboard shows "Synced" instead of "Pending".
+
+On network error, the current cycle is aborted and retried on the next
+interval. Predictions stay safely in local SQLite until synced.
+If `supabase_url` or `supabase_key` are empty, sync is silently skipped.
 
 ### 9.2 Configuring Credentials
 

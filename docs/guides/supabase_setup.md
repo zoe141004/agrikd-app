@@ -57,14 +57,26 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 15 | `database/migrations/015_audit_log_cleanup.sql` | Migrates legacy audit_log schema (BIGINT id, actor_email) to correct UUID-based schema, preserves existing data |
 | 16 | `database/migrations/016_fk_constraints.sql` | FK constraints: model_benchmarks + model_versions → model_registry (ON DELETE CASCADE) |
 | 17 | `database/migrations/017_dataset_delete.sql` | Extend dvc_operations for dataset deletion: adds `'delete'` operation and `'deleting'` status to CHECK constraints |
+| 18 | `database/migrations/018_provision_device_rpc.sql` | Atomic provision_device RPC (SECURITY DEFINER): token validation + device registration + token claim in single transaction |
+| 19 | `database/migrations/019_engine_upload_policy.sql` | Storage policy for TensorRT engine uploads |
+| 20 | `database/migrations/020_device_sync_rpcs.sql` | Device sync RPC functions: device_poll_config, device_ack_config, device_heartbeat, device_push_predictions (replaces header-based RLS) |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning
 - `devices` table — Jetson device registry with Device Shadow
-- RLS policies for admin, user, device self-access via `X-Device-Token` header
+- RLS policies for admin, user, and device self-access
 - Auto-increment `config_version` trigger
 - `device_id` column added to `predictions` table
 - File: `database/migrations/012_devices.sql`
+
+### Migration 020: Device Sync RPCs
+- Replaces direct REST queries with SECURITY DEFINER RPC functions
+- Root cause: Supabase gateway does not forward custom `X-Device-Token` headers to PostgREST, making header-based RLS policies ineffective
+- `device_poll_config(token)` — returns desired_config, config_version, status, user_id
+- `device_ack_config(token, config)` — ACK applied config (sets reported_config)
+- `device_heartbeat(token)` — update last_seen_at + status
+- `device_push_predictions(token, predictions)` — batch insert predictions with device ownership validation
+- File: `database/migrations/020_device_sync_rpcs.sql`
 
 ### Migration 017: Dataset Delete
 - Extends `dvc_operations.operation` CHECK to include `'delete'`

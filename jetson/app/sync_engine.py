@@ -17,8 +17,6 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
-
 import requests
 
 # fcntl is Unix-only; graceful fallback for dev/testing on Windows
@@ -166,15 +164,17 @@ class SyncEngine:
     # ── Authentication ────────────────────────────────────────────────
 
     def _get_headers(self):
-        """Build auth headers: prefer device_token, fallback to JWT."""
+        """Build Supabase gateway auth headers.
+
+        X-Device-Token is no longer needed for RLS (we use RPC params),
+        but apikey + Authorization are required by the Supabase gateway.
+        """
         headers = {
             "apikey": self.supabase_key,
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.supabase_key}",
         }
-        if self._device_state and self._device_state.get("device_token"):
-            headers["X-Device-Token"] = str(self._device_state["device_token"])
-            headers["Authorization"] = f"Bearer {self.supabase_key}"
-        elif self._access_token:
+        if self._access_token:
             headers["Authorization"] = f"Bearer {self._access_token}"
         return headers
 
@@ -208,6 +208,10 @@ class SyncEngine:
     def _poll_device_config(self):
         """Poll Supabase for desired_config, user assignment, and status.
 
+        Uses RPC (device_poll_config) instead of direct REST query because
+        Supabase gateway does not forward custom X-Device-Token headers to
+        PostgREST, making header-based RLS policies ineffective.
+
         Handles: assign, unassign, reassign, config updates.
         Skips silently if device is not provisioned.
         """
@@ -215,29 +219,33 @@ class SyncEngine:
             return
 
         token = self._device_state["device_token"]
-        url = (
-            f"{self.supabase_url}/rest/v1/devices"
-            f"?device_token=eq.{token}"
-            f"&select=desired_config,config_version,status,user_id"
-        )
+        url = f"{self.supabase_url}/rest/v1/rpc/device_poll_config"
 
         try:
-            resp = self._session.get(url, headers=self._get_headers(), timeout=10, verify=True)
+            resp = self._session.post(
+                url,
+                headers=self._get_headers(),
+                json={"p_device_token": token},
+                timeout=15,
+                verify=True,
+            )
         except requests.RequestException as e:
             logger.warning("Config poll failed (network): %s", e)
             return
 
+        if resp.status_code != 200:
+            logger.debug("Config poll: HTTP %d", resp.status_code)
+            return
+
         try:
-            data = resp.json()
+            device = resp.json()
         except ValueError:
-            logger.debug("Config poll: non-JSON response (HTTP %d)", resp.status_code)
+            logger.debug("Config poll: non-JSON response")
             return
 
-        if resp.status_code != 200 or not data:
-            logger.debug("Config poll: no data (HTTP %d)", resp.status_code)
+        if not device:
+            logger.debug("Config poll: device not found")
             return
-
-        device = data[0]
 
         # Unassign detection: user_id cleared or status='unassigned'
         if not device.get("user_id") or device["status"] == "unassigned":
@@ -285,22 +293,20 @@ class SyncEngine:
             self._report_config(desired, remote_ver)
 
     def _report_config(self, config, version):
-        """ACK: report applied config back to Supabase."""
+        """ACK: report applied config back to Supabase via RPC."""
         if not self._device_state:
             return
 
         token = self._device_state["device_token"]
-        url = f"{self.supabase_url}/rest/v1/devices?device_token=eq.{token}"
-        headers = self._get_headers()
-        headers["Prefer"] = "return=minimal"
+        url = f"{self.supabase_url}/rest/v1/rpc/device_ack_config"
 
         try:
-            resp = self._session.patch(
+            resp = self._session.post(
                 url,
-                headers=headers,
+                headers=self._get_headers(),
                 json={
-                    "reported_config": config,
-                    "status": "online",
+                    "p_device_token": token,
+                    "p_reported_config": config,
                 },
                 timeout=10,
                 verify=True,
@@ -308,7 +314,6 @@ class SyncEngine:
             if resp.status_code in (200, 204):
                 with self._state_lock:
                     self._device_state["config_version_applied"] = version
-                    # Correction D: store reported_config for GUI comparison
                     self._device_state["reported_config"] = config
                 self._save_device_state()
                 logger.info("Config v%d ACK sent", version)
@@ -320,23 +325,21 @@ class SyncEngine:
             logger.warning("Config ACK failed (network): %s", e)
 
     def _update_last_seen(self):
-        """Heartbeat: update last_seen_at + status on Supabase."""
+        """Heartbeat: update last_seen_at + status on Supabase via RPC."""
         if not self._device_state:
             return
 
         token = self._device_state["device_token"]
-        url = f"{self.supabase_url}/rest/v1/devices?device_token=eq.{token}"
-        body = {"last_seen_at": datetime.now(timezone.utc).isoformat()}
-
-        # Only set status=online if device has an assigned user
-        if self._device_state.get("user_id"):
-            body["status"] = "online"
-
-        headers = self._get_headers()
-        headers["Prefer"] = "return=minimal"
+        url = f"{self.supabase_url}/rest/v1/rpc/device_heartbeat"
 
         try:
-            self._session.patch(url, headers=headers, json=body, timeout=10, verify=True)
+            self._session.post(
+                url,
+                headers=self._get_headers(),
+                json={"p_device_token": token},
+                timeout=10,
+                verify=True,
+            )
         except requests.RequestException:
             pass  # Heartbeat is best-effort
 
@@ -356,17 +359,13 @@ class SyncEngine:
         if not unsynced:
             return
 
-        # Determine user_id and device_id
+        # Check user assignment — skip push if no user assigned
         user_id = None
-        device_id = None
         if self._device_state:
             user_id = self._device_state.get("user_id")
-            device_id = self._device_state.get("device_id")
         elif self._user_id:
-            # Legacy fallback: use JWT user_id
             user_id = self._user_id
 
-        # Correction A: no user_id → skip POST only, loop keeps running
         if not user_id:
             logger.debug(
                 "No user assigned — %d predictions queued locally",
@@ -377,8 +376,8 @@ class SyncEngine:
         logger.info("Syncing %d predictions...", len(unsynced))
 
         headers = self._get_headers()
-        headers["Prefer"] = "return=minimal"
-        url = f"{self.supabase_url}/rest/v1/predictions"
+        url = f"{self.supabase_url}/rest/v1/rpc/device_push_predictions"
+        token = self._device_state["device_token"] if self._device_state else None
 
         payload_list = []
         for pred in unsynced:
@@ -387,7 +386,6 @@ class SyncEngine:
             model_version = model_cfg.get("version", "1.0.0")
 
             payload = {
-                "user_id": user_id,
                 "leaf_type": leaf_type,
                 "predicted_class_index": pred["class_index"],
                 "predicted_class_name": pred["class_name"],
@@ -401,15 +399,19 @@ class SyncEngine:
                 "created_at": pred["created_at"],
                 "local_id": pred["id"],
             }
-            if device_id:
-                try:
-                    payload["device_id"] = int(device_id)
-                except (ValueError, TypeError):
-                    logger.warning("device_id '%s' is not numeric, skipping field", device_id)
             payload_list.append(payload)
 
         try:
-            resp = self._session.post(url, headers=headers, json=payload_list, timeout=30, verify=True)
+            resp = self._session.post(
+                url,
+                headers=headers,
+                json={
+                    "p_device_token": token,
+                    "p_predictions": payload_list,
+                },
+                timeout=30,
+                verify=True,
+            )
             if resp.status_code in (200, 201):
                 for pred in unsynced:
                     self.db.mark_synced(pred["id"])
@@ -421,7 +423,6 @@ class SyncEngine:
                     "Server error during sync: HTTP %d — will retry next cycle",
                     resp.status_code,
                 )
-                # Let outer run() loop handle backoff
                 raise requests.exceptions.HTTPError(
                     f"Server error: {resp.status_code}"
                 )

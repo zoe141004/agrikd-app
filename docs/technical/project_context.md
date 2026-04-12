@@ -193,8 +193,13 @@ agrikd/
 │   │   ├── 012_devices.sql            # Device management: provisioning_tokens, devices, RLS, Device Shadow
 │   │   ├── 013_model_engines.sql      # Model engines table (TensorRT), ONNX URL support, engine RPCs
 │   │   ├── 014_audit_fixes.sql        # Admin guards on dashboard RPCs, profile/report policies
-│   │   └── 015_audit_log_cleanup.sql  # audit_log schema normalization (UUID, user_id)
-│   ├── verify_all_migrations.sql      # Comprehensive verify for all 17 migrations
+│   │   ├── 015_audit_log_cleanup.sql  # audit_log schema normalization (UUID, user_id)
+│   │   ├── 016_fk_constraints.sql     # FK: model_benchmarks + model_versions → model_registry (CASCADE)
+│   │   ├── 017_dataset_delete.sql     # Extend dvc_operations for dataset deletion
+│   │   ├── 018_provision_device_rpc.sql # Atomic provision_device RPC (SECURITY DEFINER)
+│   │   ├── 019_engine_upload_policy.sql # Storage policy for TensorRT engine uploads
+│   │   └── 020_device_sync_rpcs.sql   # Device sync RPCs: poll, ack, heartbeat, push predictions
+│   ├── verify_all_migrations.sql      # Comprehensive verify for all migrations
 │   └── verify_rls_policies.sql        # RLS audit: tables, policies, triggers, storage, indexes
 │
 ├── .github/workflows/                 # CI/CD (13 workflow files)
