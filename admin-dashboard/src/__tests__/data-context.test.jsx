@@ -8,7 +8,7 @@ import { render, screen, act, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
 
-// ── Use vi.hoisted so mock variables survive vi.mock hoisting ──────────────
+// ── Mock state survives vi.mock hoisting via vi.hoisted ────────────────────
 const mockState = vi.hoisted(() => ({
   rpcResult: { data: [], error: null },
   registryResult: { data: [], error: null },
@@ -16,55 +16,67 @@ const mockState = vi.hoisted(() => ({
   dvcOpsDatasetResult: { data: [], error: null },
 }))
 
-function buildChain(resolveWith) {
-  const chain = {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    neq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    not: vi.fn().mockReturnThis(),
-    is: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    limit: vi.fn(() => Promise.resolve(resolveWith)),
-    single: vi.fn(() => Promise.resolve(resolveWith)),
+vi.mock('../lib/supabase', () => {
+  // buildChain must be inside factory to survive vi.mock hoisting
+  function buildChain(resolveWith) {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      neq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      not: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn(() => Promise.resolve(resolveWith)),
+      single: vi.fn(() => Promise.resolve(resolveWith)),
+    }
+    for (const m of ['select', 'eq', 'neq', 'in', 'not', 'is', 'order']) {
+      chain[m].mockReturnValue(chain)
+    }
+    return chain
   }
-  for (const m of ['select', 'eq', 'neq', 'in', 'not', 'is', 'order']) {
-    chain[m].mockReturnValue(chain)
-  }
-  return chain
-}
 
-vi.mock('../lib/supabase', () => ({
-  supabase: {
-    rpc: vi.fn((fnName) => {
-      if (fnName === 'get_leaf_type_options') return Promise.resolve(mockState.rpcResult)
-      return Promise.resolve({ data: null, error: null })
-    }),
-    from: vi.fn((table) => {
-      if (table === 'model_registry') return buildChain(mockState.registryResult)
-      if (table === 'dvc_operations') {
-        const chain = buildChain(mockState.dvcOpsLeafResult)
-        chain.limit = vi.fn((n) => {
-          return Promise.resolve(n >= 200 ? mockState.dvcOpsLeafResult : mockState.dvcOpsDatasetResult)
-        })
-        return chain
-      }
-      return buildChain({ data: [], error: null })
-    }),
-    auth: {
-      getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
-      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
-    },
-  },
-}))
-
-vi.mock('../lib/helpers', async (importOriginal) => {
-  const original = await importOriginal()
   return {
-    ...original,
-    getGitHubConfig: vi.fn(() => ({ ghToken: '', ghOwner: '', ghRepo: '', ghBranch: 'main' })),
+    supabase: {
+      rpc: vi.fn((fnName) => {
+        if (fnName === 'get_leaf_type_options') return Promise.resolve(mockState.rpcResult)
+        return Promise.resolve({ data: null, error: null })
+      }),
+      from: vi.fn((table) => {
+        if (table === 'model_registry') return buildChain(mockState.registryResult)
+        if (table === 'dvc_operations') {
+          const chain = buildChain(mockState.dvcOpsLeafResult)
+          chain.limit = vi.fn((n) => {
+            return Promise.resolve(n >= 200 ? mockState.dvcOpsLeafResult : mockState.dvcOpsDatasetResult)
+          })
+          return chain
+        }
+        return buildChain({ data: [], error: null })
+      }),
+      auth: {
+        getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
+        onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+      },
+    },
   }
 })
+
+vi.mock('../lib/helpers', () => ({
+  getGitHubConfig: vi.fn(() => ({ ghToken: '', ghOwner: '', ghRepo: '', ghBranch: 'main' })),
+  validateGitHubSlugs: vi.fn(),
+  cleanLabel: vi.fn((s) => s || 'Unknown'),
+  maskUrl: vi.fn((s) => s || '—'),
+  formatDateTime: vi.fn((s) => s || ''),
+  formatBytes: vi.fn((n) => `${n} B`),
+  checkRateLimit: vi.fn(() => ({ allowed: true })),
+  triggerGitHubWorkflow: vi.fn(),
+  getGitHubWorkflowRuns: vi.fn(),
+  computeSHA256: vi.fn(),
+  logAudit: vi.fn(),
+  downloadFile: vi.fn(),
+  uploadToStorage: vi.fn(),
+  ensureBucket: vi.fn(),
+}))
 
 import { DataProvider, useData } from '../lib/DataContext'
 
