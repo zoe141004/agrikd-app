@@ -279,7 +279,14 @@ class SyncEngine:
         remote_ver = device.get("config_version", 0)
         desired = device.get("desired_config")
 
-        if remote_ver > applied_ver and desired:
+        # ACK when: new version available OR first sync (applied=0, never ACK'd)
+        needs_ack = (remote_ver > applied_ver) or (
+            applied_ver == 0
+            and desired
+            and self._device_state.get("reported_config") is None
+        )
+
+        if needs_ack and desired:
             logger.info(
                 "Config update: v%d -> v%d: %s",
                 applied_ver, remote_ver, json.dumps(desired),
