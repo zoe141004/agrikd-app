@@ -201,7 +201,7 @@ echo "[8/13] Configuring Supabase credentials..."
 echo ""
 CFG="$INSTALL_DIR/config/config.json"
 
-# Check if credentials already present (e.g., sync_env.py ran or config.json was pre-populated)
+# Ensure config.json exists
 if [ ! -f "$CFG" ]; then
     echo "  [WARN] config.json not found at $CFG — creating minimal config."
     python3 -c "
@@ -221,16 +221,44 @@ with open('$CFG', 'w') as f:
     chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
 fi
 
+# Check if credentials already present in config.json
 EXISTING_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
 EXISTING_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))" 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_URL" ] && [ -n "$EXISTING_KEY" ]; then
     echo "  [OK] Supabase credentials already configured in config.json."
     echo "  URL: ${EXISTING_URL:0:40}..."
-elif [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
-    # Accept from environment variables (for CI/CD or scripted installs)
-    echo "  [OK] Using credentials from environment variables."
-    python3 -c "
+else
+    # ── Auto-detect credentials from repo .env / .env.development ──
+    # These files contain public keys (safe to read) and are committed in the repo.
+    AUTO_URL=""
+    AUTO_KEY=""
+    for env_file in "$REPO_ROOT/.env" "$REPO_ROOT/.env.development"; do
+        if [ -f "$env_file" ] && [ -z "$AUTO_URL" ]; then
+            AUTO_URL=$(grep -E '^SUPABASE_URL=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)
+            AUTO_KEY=$(grep -E '^SUPABASE_ANON_KEY=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)
+        fi
+    done
+
+    if [ -n "$AUTO_URL" ] && [ -n "$AUTO_KEY" ]; then
+        # Auto-fill from repo .env files
+        echo "  [AUTO] Found credentials in repo .env files — injecting into config.json."
+        python3 -c "
+import json, sys
+cfg_path = sys.argv[1]
+with open(cfg_path) as f:
+    c = json.load(f)
+c.setdefault('sync', {})
+c['sync']['supabase_url'] = sys.argv[2]
+c['sync']['supabase_key'] = sys.argv[3]
+with open(cfg_path, 'w') as f:
+    json.dump(c, f, indent=4)
+" "$CFG" "$AUTO_URL" "$AUTO_KEY"
+        echo "  URL: ${AUTO_URL:0:40}..."
+    elif [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
+        # Accept from environment variables (for CI/CD or scripted installs)
+        echo "  [OK] Using credentials from environment variables."
+        python3 -c "
 import json, sys
 cfg_path = sys.argv[1]
 with open(cfg_path) as f:
@@ -241,47 +269,48 @@ c['sync']['supabase_key'] = sys.argv[3]
 with open(cfg_path, 'w') as f:
     json.dump(c, f, indent=4)
 " "$CFG" "$SUPABASE_URL" "$SUPABASE_ANON_KEY"
-else
-    # Offer provisioning token (recommended) or manual entry
-    echo "  Supabase credentials are needed to download models and sync data."
-    echo ""
-    echo "  Options:"
-    echo "    1) Paste a provisioning token from Admin Dashboard (recommended)"
-    echo "       Dashboard → Devices → Provisioning Tokens → Generate Token"
-    echo "    2) Enter Supabase URL and anon key manually"
-    echo "    3) Skip — configure later (models must be placed manually)"
-    echo ""
-    read -rp "  Choice [1/2/3]: " CRED_CHOICE
+    else
+        # Interactive fallback — offer provisioning token or manual entry
+        echo "  Supabase credentials are needed to download models and sync data."
+        echo "  Could not auto-detect from repo .env files or environment variables."
+        echo ""
+        echo "  Options:"
+        echo "    1) Paste a provisioning token from Admin Dashboard (recommended)"
+        echo "       Dashboard → Devices → Provisioning Tokens → Generate Token"
+        echo "    2) Enter Supabase URL and anon key manually"
+        echo "    3) Skip — configure later (models must be placed manually)"
+        echo ""
+        read -rp "  Choice [1/2/3]: " CRED_CHOICE
 
-    case "$CRED_CHOICE" in
-        1)
-            read -rp "  Paste provisioning token (or path to .token file): " PROVISION_INPUT
-            if [ -n "$PROVISION_INPUT" ]; then
-                cd "$INSTALL_DIR"
-                set +e  # Provisioning failure should not abort setup
-                if [ -f "$PROVISION_INPUT" ]; then
-                    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
+        case "$CRED_CHOICE" in
+            1)
+                read -rp "  Paste provisioning token (or path to .token file): " PROVISION_INPUT
+                if [ -n "$PROVISION_INPUT" ]; then
+                    cd "$INSTALL_DIR"
+                    set +e  # Provisioning failure should not abort setup
+                    if [ -f "$PROVISION_INPUT" ]; then
+                        sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
+                    else
+                        sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
+                    fi
+                    PROV_EXIT=$?
+                    set -e
+                    cd "$SCRIPT_DIR"
+                    if [ $PROV_EXIT -eq 0 ]; then
+                        echo "  [OK] Device provisioned. Credentials injected into config.json."
+                    else
+                        echo "  [WARN] Provisioning failed (exit $PROV_EXIT). Setup continues."
+                        echo "  You can re-provision later: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+                    fi
                 else
-                    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
+                    echo "  [SKIP] Empty input — skipping provisioning."
                 fi
-                PROV_EXIT=$?
-                set -e
-                cd "$SCRIPT_DIR"
-                if [ $PROV_EXIT -eq 0 ]; then
-                    echo "  [OK] Device provisioned. Credentials injected into config.json."
-                else
-                    echo "  [WARN] Provisioning failed (exit $PROV_EXIT). Setup continues."
-                    echo "  You can re-provision later: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
-                fi
-            else
-                echo "  [SKIP] Empty input — skipping provisioning."
-            fi
-            ;;
-        2)
-            read -rp "  Supabase URL: " MANUAL_URL
-            read -rp "  Supabase Anon Key: " MANUAL_KEY
-            if [ -n "$MANUAL_URL" ] && [ -n "$MANUAL_KEY" ]; then
-                python3 -c "
+                ;;
+            2)
+                read -rp "  Supabase URL: " MANUAL_URL
+                read -rp "  Supabase Anon Key: " MANUAL_KEY
+                if [ -n "$MANUAL_URL" ] && [ -n "$MANUAL_KEY" ]; then
+                    python3 -c "
 import json, sys
 cfg_path = sys.argv[1]
 with open(cfg_path) as f:
@@ -292,17 +321,18 @@ c['sync']['supabase_key'] = sys.argv[3]
 with open(cfg_path, 'w') as f:
     json.dump(c, f, indent=4)
 " "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
-                echo "  [OK] Credentials saved to config.json."
-            else
-                echo "  [WARN] Incomplete credentials — skipping."
-            fi
-            ;;
-        *)
-            echo "  Skipped credential configuration."
-            echo "  To configure later, edit: $CFG"
-            echo "  Or run: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
-            ;;
-    esac
+                    echo "  [OK] Credentials saved to config.json."
+                else
+                    echo "  [WARN] Incomplete credentials — skipping."
+                fi
+                ;;
+            *)
+                echo "  Skipped credential configuration."
+                echo "  To configure later, edit: $CFG"
+                echo "  Or run: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+                ;;
+        esac
+    fi
 fi
 echo ""
 
