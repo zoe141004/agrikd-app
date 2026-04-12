@@ -62,7 +62,11 @@ class SyncEngine:
         self._state_lock = threading.Lock()
 
         # Active config from remote (thread-safe read for main.py)
-        self._active_config = None
+        # Initialize from persisted state so config survives restarts
+        self._active_config = (
+            self._device_state.get("desired_config")
+            if self._device_state else None
+        )
         self._config_lock = threading.Lock()
 
         if self._device_state:
