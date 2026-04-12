@@ -108,8 +108,7 @@ set -e
 if [ $PYCUDA_OK -eq 0 ] && [ -n "$PYCUDA_VER" ]; then
     echo "  [OK] PyCUDA $PYCUDA_VER"
 else
-    echo "  [WARN] PyCUDA not found."
-    echo "  Install: pip3 install pycuda"
+    echo "  [INFO] PyCUDA not found — will be installed in step 7."
 fi
 
 echo "  [OK] Platform: $ARCH"
@@ -119,11 +118,11 @@ echo ""
 if ! id "$SERVICE_USER" &>/dev/null; then
     echo "[2/13] Creating service user: $SERVICE_USER"
     useradd -m -s /bin/bash "$SERVICE_USER"
-    usermod -aG video "$SERVICE_USER"
+    usermod -aG video,render "$SERVICE_USER"
 else
     echo "[2/13] User $SERVICE_USER already exists"
-    # Ensure groups
-    usermod -aG video "$SERVICE_USER" 2>/dev/null || true
+    # Ensure groups (video for cameras/nvhost, render for /dev/dri)
+    usermod -aG video,render "$SERVICE_USER" 2>/dev/null || true
 fi
 echo ""
 
@@ -201,22 +200,33 @@ apt-get install -y --no-install-recommends \
 echo "  [OK] System packages installed (PyQt5, OpenCV, v4l-utils)."
 echo ""
 
-# ── 7. Install GUI Python dependencies (system pip) ─────────
-echo "[7/13] Installing GUI Python dependencies (system pip)..."
-# Only install packages not already available via apt
+# ── 7. Install Python dependencies (system pip) ─────────────
+echo "[7/13] Installing Python dependencies (system pip)..."
 # numpy and opencv come from apt (python3-numpy, python3-opencv)
 # PyQt5 comes from apt (python3-pyqt5)
 # flask + waitress: headless REST API server
 # requests: Supabase sync engine
+# PyCUDA: CUDA memory management for TRT inference
+# numpy pinned to 1.24.x — PyCUDA is compiled against numpy 1.x ABI
+
+# Set CUDA env for PyCUDA compilation (needs cuda.h header)
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export CPATH="$CUDA_HOME/targets/aarch64-linux/include:${CPATH:-}"
+export LIBRARY_PATH="$CUDA_HOME/targets/aarch64-linux/lib:${LIBRARY_PATH:-}"
+
 pip3 install --break-system-packages \
+    "numpy>=1.24,<2" \
     requests==2.33.0 \
     flask==3.1.3 \
     waitress==3.0.2 \
+    pycuda \
     2>/dev/null \
 || pip3 install \
+    "numpy>=1.24,<2" \
     requests==2.33.0 \
     flask==3.1.3 \
-    waitress==3.0.2
+    waitress==3.0.2 \
+    pycuda
 echo "  [OK] GUI dependencies installed."
 echo ""
 

@@ -1,16 +1,16 @@
 # AgriKD Jetson — Python Dependencies
 # Used by: system pip install (setup_jetson.sh step 7)
 #
-# NOTE: TensorRT and PyCUDA are provided by the NVIDIA JetPack SDK.
-#       Do NOT add them here.
+# NOTE: TensorRT is provided by the NVIDIA JetPack SDK (apt).
+# NOTE: PyCUDA is installed via pip (requires CUDA headers from JetPack).
 # NOTE: PyQt5 is installed via apt (python3-pyqt5) for GPU acceleration.
-#       Do NOT add it here.
 #
-# setup_jetson.sh installs newer patched versions for the host.
-# This file pins minimum-compatible versions for reference.
+# IMPORTANT: numpy MUST stay <2.0 — PyCUDA compiles against numpy 1.x ABI
+# and will crash with numpy 2.x ("_ARRAY_API not found").
 
-numpy==1.24.4
+numpy>=1.24,<2
 opencv-python-headless==4.8.1.78
 flask==3.1.3
 waitress==3.0.2
-requests==2.32.4
+requests==2.33.0
+pycuda

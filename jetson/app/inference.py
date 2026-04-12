@@ -75,6 +75,9 @@ class TensorRTInference:
 
         self.context = self.engine.create_execution_context()
 
+        # Detect TRT version to choose correct execution API
+        self._trt_version = int(trt.__version__.split(".")[0])
+
         # Allocate host and device buffers
         self.h_input = cuda.pagelocked_empty(
             (1, 3, self.input_size, self.input_size), dtype=np.float32
@@ -85,6 +88,13 @@ class TensorRTInference:
         self.d_input = cuda.mem_alloc(self.h_input.nbytes)
         self.d_output = cuda.mem_alloc(self.h_output.nbytes)
         self.stream = cuda.Stream()
+
+        # TRT 10+: use execute_async_v3 with named tensors
+        if self._trt_version >= 10:
+            self._input_name = self.engine.get_tensor_name(0)
+            self._output_name = self.engine.get_tensor_name(1)
+            self.context.set_tensor_address(self._input_name, int(self.d_input))
+            self.context.set_tensor_address(self._output_name, int(self.d_output))
 
     def preprocess(self, frame):
         """Preprocess BGR frame to NCHW float32 tensor."""
@@ -114,10 +124,16 @@ class TensorRTInference:
         start = time.perf_counter()
 
         cuda.memcpy_htod_async(self.d_input, self.h_input, self.stream)
-        self.context.execute_async_v2(
-            bindings=[int(self.d_input), int(self.d_output)],
-            stream_handle=self.stream.handle,
-        )
+
+        if self._trt_version >= 10:
+            # TRT 10+: addresses already set in _load_engine
+            self.context.execute_async_v3(stream_handle=self.stream.handle)
+        else:
+            # TRT 8.x legacy path
+            self.context.execute_async_v2(
+                bindings=[int(self.d_input), int(self.d_output)],
+                stream_handle=self.stream.handle,
+            )
         cuda.memcpy_dtoh_async(self.h_output, self.d_output, self.stream)
         self.stream.synchronize()
 
