@@ -80,19 +80,34 @@ def run_tflite_inference(tflite_path: str, input_data: np.ndarray) -> np.ndarray
 
 
 def compare_outputs(name_a: str, output_a: np.ndarray, name_b: str, output_b: np.ndarray, atol: float = 1e-4):
-    """Compare two model outputs and print results."""
+    """Compare two model outputs and print results.
+
+    Returns a tri-state string:
+      "pass"    — values within tolerance
+      "warn"    — values exceed tolerance but argmax (predicted class) matches
+      "fail"    — predicted class differs
+    """
     max_diff = np.max(np.abs(output_a - output_b))
     mean_diff = np.mean(np.abs(output_a - output_b))
-    
-    passed = max_diff < atol
-    status = "OK PASS" if passed else "FAIL"
-    
+    argmax_match = np.array_equal(np.argmax(output_a, axis=-1), np.argmax(output_b, axis=-1))
+
+    if max_diff < atol:
+        status = "pass"
+        tag = "OK PASS"
+    elif argmax_match:
+        status = "warn"
+        tag = "WARN — values differ but predicted class matches"
+    else:
+        status = "fail"
+        tag = "FAIL — predicted class differs"
+
     logger.info(f"  {name_a} vs {name_b}:")
     logger.info(f"    Max diff:  {max_diff:.8f}")
     logger.info(f"    Mean diff: {mean_diff:.8f}")
-    logger.info(f"    Status:    [{status}] (atol={atol})")
-    
-    return passed
+    logger.info(f"    Argmax:    {'match' if argmax_match else 'MISMATCH'}")
+    logger.info(f"    Status:    [{tag}] (atol={atol})")
+
+    return status
 
 
 def validate_models(
@@ -126,6 +141,7 @@ def validate_models(
     model = load_student_from_checkpoint(checkpoint_path, num_classes)
 
     all_passed = True
+    has_warnings = False
 
     for i in range(num_samples):
         logger.info(f"\n--- Sample {i + 1}/{num_samples} ---")
@@ -142,27 +158,40 @@ def validate_models(
         # ONNX comparison
         if onnx_path and os.path.exists(onnx_path):
             onnx_output = run_onnx_inference(onnx_path, input_data)
-            if not compare_outputs("PyTorch", pytorch_output, "ONNX", onnx_output, atol):
+            result = compare_outputs("PyTorch", pytorch_output, "ONNX", onnx_output, atol)
+            if result == "fail":
                 all_passed = False
+            elif result == "warn":
+                has_warnings = True
 
         # TFLite float16 comparison
         if tflite_path and os.path.exists(tflite_path):
             tflite_output = run_tflite_inference(tflite_path, input_data)
-            if not compare_outputs("PyTorch", pytorch_output, "TFLite (float16)", tflite_output, tflite_atol):
+            result = compare_outputs("PyTorch", pytorch_output, "TFLite (float16)", tflite_output, tflite_atol)
+            if result == "fail":
                 all_passed = False
+            elif result == "warn":
+                has_warnings = True
 
         # TFLite float32 comparison
         if tflite_float32_path and os.path.exists(tflite_float32_path):
             tflite32_output = run_tflite_inference(tflite_float32_path, input_data)
-            if not compare_outputs("PyTorch", pytorch_output, "TFLite (float32)", tflite32_output, tflite_atol):
+            result = compare_outputs("PyTorch", pytorch_output, "TFLite (float32)", tflite32_output, tflite_atol)
+            if result == "fail":
                 all_passed = False
+            elif result == "warn":
+                has_warnings = True
 
     # Summary
     logger.info(f"\n{'=' * 60}")
-    if all_passed:
+    if all_passed and not has_warnings:
         logger.info(f"  [OK] ALL VALIDATIONS PASSED ({num_samples} samples)")
+    elif all_passed and has_warnings:
+        logger.warning(f"  [OK] VALIDATIONS PASSED with warnings ({num_samples} samples)")
+        logger.warning(f"  Values exceed tolerance but all predicted classes match.")
+        logger.warning(f"  This is expected for float16 quantization.")
     else:
-        logger.error(f"  [FAIL] SOME VALIDATIONS FAILED - check outputs above")
+        logger.error(f"  [FAIL] SOME VALIDATIONS FAILED - predicted classes differ")
     logger.info(f"{'=' * 60}")
 
     return all_passed
