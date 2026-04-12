@@ -126,7 +126,8 @@ BEGIN
             COALESCE((v_pred->>'created_at')::TIMESTAMPTZ, now()),
             v_device_id,
             (v_pred->>'local_id')::INTEGER
-        );
+        )
+        ON CONFLICT DO NOTHING;
         v_count := v_count + 1;
     END LOOP;
 
