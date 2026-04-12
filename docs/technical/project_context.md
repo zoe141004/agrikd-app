@@ -157,7 +157,6 @@ agrikd/
 │   ├── config/
 │   │   ├── config.example.json        # Template (committed); fill and rename to config.json
 │   │   └── config.json                # Runtime config (gitignored, never committed)
-│   ├── Dockerfile                     # DEPRECATED (JetPack 5 only)
 │   ├── setup_jetson.sh                # First-boot provisioning
 │   ├── agrikd.service                 # systemd unit (headless)
 │   └── agrikd-gui.service             # systemd unit (GUI)

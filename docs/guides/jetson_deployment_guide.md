@@ -127,11 +127,17 @@ PyCUDA are available.
 
 ```bash
 useradd -m -s /bin/bash agrikd
-usermod -aG video agrikd
+usermod -aG video,render agrikd
 ```
 
-A dedicated `agrikd` user is created with `video` group membership (camera
-access). If the user already exists, only group membership is ensured.
+A dedicated `agrikd` user is created with two group memberships:
+
+| Group | Purpose |
+|-------|---------|
+| `video` | Access to `/dev/video*` (USB/CSI cameras) and `/dev/nvhost-*`, `/dev/nvmap` (NVIDIA GPU devices) |
+| `render` | Access to `/dev/dri/renderD*` (GPU hardware acceleration required by CUDA/TensorRT runtime) |
+
+If the user already exists, only group membership is ensured.
 
 ### Step 3 -- Create Directories
 
@@ -181,14 +187,24 @@ apt-get install -y --no-install-recommends \
 > `apt`. Using system Python ensures PyQt5, TensorRT, and PyCUDA all coexist
 > without conflicts.
 
-### Step 7 -- Install GUI Python Dependencies
+### Step 7 -- Install Python Dependencies
 
 ```bash
-pip3 install requests flask waitress
+export CUDA_HOME=/usr/local/cuda
+pip3 install "numpy>=1.24,<2" requests flask waitress pycuda
 ```
 
-Installs minimal pip packages that are not available via apt. Both headless
-and GUI modes need `flask`, `waitress`, and `requests`.
+Installs pip packages not available via apt:
+
+| Package | Purpose |
+|---------|---------|
+| `numpy>=1.24,<2` | Pinned to 1.x — PyCUDA is compiled against numpy 1.x ABI and crashes with numpy 2.x |
+| `flask` + `waitress` | Headless REST API server |
+| `requests` | Supabase sync engine |
+| `pycuda` | CUDA memory management for TensorRT inference (requires `CUDA_HOME` for compilation) |
+
+> **Why pin numpy < 2?** PyCUDA's C extension is compiled against numpy 1.x ABI.
+> Installing numpy 2.x causes `AttributeError: _ARRAY_API not found` at runtime.
 
 ### Step 8 -- Configure Supabase Credentials
 
@@ -942,16 +958,15 @@ journalctl -u agrikd | grep "Sync complete"
 
 ---
 
-## 10. Docker Deployment (DEPRECATED)
+## 10. Docker Deployment (REMOVED)
 
-> **⚠️ Docker deployment is deprecated and no longer supported.**
+> **⚠️ Docker deployment has been removed.**
 > NVIDIA does not provide an official JetPack 6 Docker base image with
-> TRT 10.x + Python 3.10. The Dockerfile in this repository targets
-> JetPack 5 (TRT 8.5, Python 3.8, CUDA 11.4) and is incompatible with
-> JetPack 6 hardware. TensorRT engines are not portable across versions.
+> TRT 10.x + Python 3.10. The previous Dockerfile targeted JetPack 5
+> (TRT 8.5, Python 3.8, CUDA 11.4) which is incompatible with JetPack 6
+> hardware. TensorRT engines are not portable across major versions.
 >
 > **Use host-native deployment via systemd** (see sections 3–4 above).
-> The Dockerfile is kept in the repository as a reference only.
 
 ---
 

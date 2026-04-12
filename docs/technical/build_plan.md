@@ -629,7 +629,7 @@ npm run dev
 
 | File | Mô tả |
 |------|-------|
-| `Dockerfile` | DEPRECATED — L4T TensorRT container (JetPack 5 only, kept for reference) |
+| `setup_jetson.sh` | Host-native deployment script (13 steps, systemd services) |
 | `config/config.json` | Camera, models, sync, server, logging configuration |
 | `app/main.py` | Main entry point: load engines, camera, sync thread, health server, manual/periodic modes |
 | `app/inference.py` | `TensorRTInference` class: load engine, preprocess (ImageNet norm, HWC→CHW), predict with PyCUDA |

@@ -712,7 +712,7 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=$INSTALL_DIR /dev/video0 /dev/video1
+ReadWritePaths=$INSTALL_DIR /dev/video* /dev/dri
 
 [Install]
 WantedBy=multi-user.target
@@ -784,13 +784,23 @@ else
 fi
 echo ""
 
-# ── 13. Camera permissions ────────────────────────────────────
-echo "[13/13] Verifying camera permissions..."
+# ── 13. Camera and GPU permissions ─────────────────────────────
+echo "[13/13] Verifying camera and GPU permissions..."
+
+# video group: /dev/video* camera access
 if getent group video | grep -q "$SERVICE_USER"; then
-    echo "  [OK] User $SERVICE_USER is in 'video' group."
+    echo "  [OK] User $SERVICE_USER is in 'video' group (camera access)."
 else
     usermod -aG video "$SERVICE_USER"
-    echo "  [OK] Added $SERVICE_USER to 'video' group."
+    echo "  [OK] Added $SERVICE_USER to 'video' group (camera access)."
+fi
+
+# render group: /dev/dri GPU access (required by CUDA/TensorRT)
+if getent group render 2>/dev/null | grep -q "$SERVICE_USER"; then
+    echo "  [OK] User $SERVICE_USER is in 'render' group (GPU access)."
+else
+    usermod -aG render "$SERVICE_USER" 2>/dev/null || true
+    echo "  [OK] Added $SERVICE_USER to 'render' group (GPU access)."
 fi
 
 # List cameras if v4l2-ctl is available

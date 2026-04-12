@@ -39,7 +39,7 @@ def _read_file(path):
 
 def _get_mac_address():
     """Get MAC address from the first available network interface."""
-    for iface in ("eth0", "wlan0", "enp0s3", "docker0"):
+    for iface in ("eth0", "wlan0", "enp0s3"):
         mac = _read_file(f"/sys/class/net/{iface}/address")
         if mac and mac != "00:00:00:00:00:00":
             return mac

@@ -197,7 +197,6 @@ app/
 |   |   |-- lib/supabase.js           # Supabase client
 |
 |-- jetson/                           # Jetson Edge Deployment
-|   |-- Dockerfile                    # DEPRECATED — L4T TensorRT container (JetPack 5 only)
 |   |-- app/                          # main.py, inference.py, camera.py, database.py, sync_engine.py
 |   |-- config/config.json            # Camera, models, sync settings
 |   |-- agrikd.service                # Systemd unit file
@@ -918,7 +917,6 @@ Files:
 - `app/sync_engine.py`: HTTP sync to Supabase REST API (batch 50)
 - `app/health_server.py`: Flask REST API
 - `config/config.json`: All settings (camera, models, sync, logging)
-- `Dockerfile`: DEPRECATED (JetPack 5 only, kept for reference)
 - `agrikd.service`: Systemd unit for headless REST API (auto-start)
 - `agrikd-gui.service`: Systemd unit for host GUI (manual start)
 - `setup_jetson.sh`: Self-contained deployment script (13 steps)

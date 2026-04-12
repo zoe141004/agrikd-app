@@ -91,8 +91,14 @@ class TensorRTInference:
 
         # TRT 10+: use execute_async_v3 with named tensors
         if self._trt_version >= 10:
-            self._input_name = self.engine.get_tensor_name(0)
-            self._output_name = self.engine.get_tensor_name(1)
+            self._input_name = None
+            self._output_name = None
+            for i in range(self.engine.num_io_tensors):
+                name = self.engine.get_tensor_name(i)
+                if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                    self._input_name = name
+                else:
+                    self._output_name = name
             self.context.set_tensor_address(self._input_name, int(self.d_input))
             self.context.set_tensor_address(self._output_name, int(self.d_output))
 

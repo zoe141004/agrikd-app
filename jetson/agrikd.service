@@ -35,7 +35,7 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=/opt/agrikd
+ReadWritePaths=/opt/agrikd /dev/video* /dev/dri
 
 [Install]
 WantedBy=multi-user.target
