@@ -656,6 +656,31 @@ echo ""
 echo "[11/13] Installing systemd services..."
 
 # Headless service: Docker container with GPU access
+# Auto-detect host Python site-packages for TensorRT/PyCUDA bind-mount
+HOST_SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/lib/python3/dist-packages")
+HOST_TENSORRT_LIB=$(python3 -c "import tensorrt, os; print(os.path.dirname(tensorrt.__file__))" 2>/dev/null || echo "")
+echo "  Host site-packages: $HOST_SITE_PKGS"
+
+# Build volume mounts for TensorRT + PyCUDA
+EXTRA_MOUNTS=""
+if [ -d "$HOST_SITE_PKGS/tensorrt" ]; then
+    EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/tensorrt:/usr/lib/python3/dist-packages/tensorrt:ro"
+fi
+if [ -d "$HOST_SITE_PKGS/pycuda" ]; then
+    EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/pycuda:/usr/lib/python3/dist-packages/pycuda:ro"
+fi
+# Also mount tensorrt_libs and pycuda egg-info if they exist
+for pkg in tensorrt_libs tensorrt_bindings; do
+    if [ -d "$HOST_SITE_PKGS/$pkg" ]; then
+        EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/$pkg:/usr/lib/python3/dist-packages/$pkg:ro"
+    fi
+done
+# Fallback: mount entire dist-packages read-only if specific dirs not found
+if [ -z "$EXTRA_MOUNTS" ] && [ -d "$HOST_SITE_PKGS" ]; then
+    echo "  [WARN] Specific TensorRT/PyCUDA dirs not found — mounting full site-packages"
+    EXTRA_MOUNTS="-v $HOST_SITE_PKGS:/usr/lib/python3/dist-packages:ro"
+fi
+
 cat > /etc/systemd/system/agrikd.service << SYSTEMD
 [Unit]
 Description=AgriKD Edge Inference Service (Docker)
@@ -674,6 +699,7 @@ ExecStart=/usr/bin/docker run --rm --name agrikd-headless \\
     -v $INSTALL_DIR/models:/app/models:ro \\
     -v $INSTALL_DIR/data:/app/data \\
     -v $INSTALL_DIR/logs:/app/logs \\
+    $EXTRA_MOUNTS \\
     $DOCKER_IMAGE:$DOCKER_TAG
 ExecStop=/usr/bin/docker stop agrikd-headless
 Restart=always

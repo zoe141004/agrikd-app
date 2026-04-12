@@ -34,7 +34,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensure CUDA/TensorRT library paths are visible at runtime
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH}"
+
 # Install Python dependencies (pinned versions from requirements.txt)
+# NOTE: TensorRT and PyCUDA are NOT installed here — they are provided at
+# runtime via --runtime=nvidia and host bind-mounts configured in setup_jetson.sh.
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 

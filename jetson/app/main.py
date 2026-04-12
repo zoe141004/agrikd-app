@@ -160,10 +160,11 @@ def check_ready(config):
     if isinstance(cam_source, str) and cam_source.startswith("/dev/") and not os.path.exists(cam_source):
         errors.append(f"Camera device not found: {cam_source}")
 
-    # Check database directory is writable
+    # Check database directory is writable (create if missing)
     db_path = config.get("database", {}).get("path", "")
     if db_path:
         db_dir = os.path.dirname(db_path) or "."
+        os.makedirs(db_dir, exist_ok=True)
         if not os.access(db_dir, os.W_OK):
             errors.append(f"Database directory not writable: {db_dir}")
 
