@@ -6,10 +6,11 @@ After=graphical-session.target
 Type=simple
 User=agrikd
 Environment=DISPLAY=:0
+Environment=XAUTHORITY=/run/user/1000/gdm/Xauthority
 Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/opt/agrikd
 ExecStart=/usr/bin/python3 /opt/agrikd/app/gui_app.py
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 # Resource limits for Jetson
@@ -19,8 +20,8 @@ CPUQuota=80%
 # Security hardening (no PrivateTmp — GUI needs X11 access via /tmp/.X11-unix)
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/agrikd /tmp/.X11-unix
+ProtectHome=read-only
+ReadWritePaths=/opt/agrikd /tmp/.X11-unix /run/user
 
 [Install]
 WantedBy=graphical-session.target

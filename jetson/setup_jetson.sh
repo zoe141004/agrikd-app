@@ -552,6 +552,22 @@ WantedBy=multi-user.target
 SYSTEMD
 
 # GUI service: runs on host (needs display + camera)
+# Auto-detect XAUTHORITY path for X11 access
+XAUTH_PATH=""
+for xauth_candidate in \
+    "/run/user/$(id -u $SERVICE_USER)/gdm/Xauthority" \
+    "/home/$SERVICE_USER/.Xauthority" \
+    "/run/user/1000/gdm/Xauthority"; do
+    if [ -f "$xauth_candidate" ]; then
+        XAUTH_PATH="$xauth_candidate"
+        break
+    fi
+done
+# Grant X11 access to service user
+if command -v xhost &>/dev/null; then
+    DISPLAY=:0 xhost +SI:localuser:$SERVICE_USER 2>/dev/null || true
+fi
+
 cat > /etc/systemd/system/agrikd-gui.service << SYSTEMD
 [Unit]
 Description=AgriKD GUI Application (Host)
@@ -561,10 +577,15 @@ After=graphical.target
 Type=simple
 User=$SERVICE_USER
 Environment=DISPLAY=:0
+Environment=XAUTHORITY=${XAUTH_PATH:-/run/user/1000/gdm/Xauthority}
+Environment=PYTHONUNBUFFERED=1
+Environment=QT_QPA_PLATFORM=xcb
 WorkingDirectory=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $INSTALL_DIR/app/gui_app.py --config $INSTALL_DIR/config/config.json
 Restart=on-failure
 RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR /tmp/.X11-unix /run/user
 
 [Install]
 WantedBy=graphical.target
