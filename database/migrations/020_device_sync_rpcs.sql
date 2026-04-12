@@ -106,12 +106,14 @@ BEGIN
     END IF;
 
     -- Insert each prediction
+    -- Note: 'source' column is defined in 001_tables.sql but may not exist
+    -- in older deployments. We skip it; device_id already identifies origin.
     FOR v_pred IN SELECT * FROM jsonb_array_elements(p_predictions)
     LOOP
         INSERT INTO public.predictions (
             user_id, leaf_type, predicted_class_index, predicted_class_name,
             confidence, all_confidences, inference_time_ms, model_version,
-            source, created_at, device_id, local_id
+            created_at, device_id, local_id
         ) VALUES (
             v_user_id,
             v_pred->>'leaf_type',
@@ -121,7 +123,6 @@ BEGIN
             v_pred->'all_confidences',
             (v_pred->>'inference_time_ms')::REAL,
             v_pred->>'model_version',
-            COALESCE(v_pred->>'source', 'jetson'),
             COALESCE((v_pred->>'created_at')::TIMESTAMPTZ, now()),
             v_device_id,
             (v_pred->>'local_id')::INTEGER

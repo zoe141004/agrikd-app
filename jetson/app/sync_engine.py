@@ -395,7 +395,6 @@ class SyncEngine:
                 else None,
                 "inference_time_ms": pred.get("inference_time_ms"),
                 "model_version": model_version,
-                "source": "jetson",
                 "created_at": pred["created_at"],
                 "local_id": pred["id"],
             }
