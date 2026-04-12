@@ -46,27 +46,30 @@ from PyQt5.QtWidgets import (
 
 from camera import CameraCapture
 from database import JetsonDatabase
-from inference import TensorRTInference
+from inference import InferenceWorkerPool
 
 # ---------------------------------------------------------------------------
-# Logging
+# Logging (deferred — file handler added after CWD is resolved in main())
 # ---------------------------------------------------------------------------
-
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
 
 logger = logging.getLogger("agrikd_gui")
-logger.setLevel(logging.INFO)
-_handler = RotatingFileHandler(
-    os.path.join(LOG_DIR, "agrikd_gui.log"),
-    maxBytes=100 * 1024 * 1024,  # 100 MB
-    backupCount=5,
-)
-_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-)
-logger.addHandler(_handler)
-logger.addHandler(logging.StreamHandler(sys.stdout))
+
+
+def _setup_logging():
+    """Configure file logging. Must be called AFTER os.chdir()."""
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(
+        os.path.join(log_dir, "agrikd_gui.log"),
+        maxBytes=100 * 1024 * 1024,  # 100 MB
+        backupCount=5,
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    logger.addHandler(handler)
+    logger.addHandler(logging.StreamHandler(sys.stdout))
 
 # ---------------------------------------------------------------------------
 # Worker threads
@@ -115,21 +118,27 @@ class CameraThread(QThread):
         self.wait(3000)
 
 
-class InferenceWorker(QThread):
-    """Run TensorRT inference in a background thread."""
+class InferenceBridge(QThread):
+    """Bridge between Qt UI and InferenceWorkerPool.
+
+    Submits a job to the pool (which owns the CUDA context on its own
+    thread) and emits Qt signals when the result is ready.  This avoids
+    CUDA context-affinity violations (C1) and shared-buffer races (C2).
+    """
 
     result_ready = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, engine, frame, leaf_type):
+    def __init__(self, pool, leaf_type, frame):
         super().__init__()
-        self.engine = engine
-        self.frame = frame.copy()
+        self._pool = pool
         self.leaf_type = leaf_type
+        self.frame = frame.copy()
 
     def run(self):
         try:
-            result = self.engine.predict(self.frame)
+            future = self._pool.submit(self.leaf_type, self.frame)
+            result = future.result(timeout=30)
             result["leaf_type"] = self.leaf_type
             self.result_ready.emit(result)
         except Exception as e:
@@ -150,10 +159,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1080, 640)
 
         # State
-        self.engines = {}
+        self._pool = None
         self.current_frame = None
         self.camera_thread = None
-        self._inference_worker = None
+        self._inference_bridge = None
+        self._prediction_count = 0
 
         # Modules
         self.camera = CameraCapture(config["camera"])
@@ -163,7 +173,7 @@ class MainWindow(QMainWindow):
         self.image_base = os.path.join("data", "images")
         os.makedirs(self.image_base, exist_ok=True)
 
-        self._load_engines()
+        self._init_pool()
         self._build_ui()
         self._update_status()
 
@@ -172,26 +182,22 @@ class MainWindow(QMainWindow):
         self._status_timer.timeout.connect(self._update_status)
         self._status_timer.start(30000)
 
-        logger.info("GUI initialized — %d engines loaded", len(self.engines))
+        loaded = self._pool.available_engines() if self._pool else []
+        logger.info("GUI initialized — %d engines loaded", len(loaded))
 
-    # ── Engine loading ─────────────────────────────────────────────────
+    # ── Engine loading (via InferenceWorkerPool) ─────────────────────
 
-    def _load_engines(self):
-        inference_cfg = self.config.get("inference", {})
-        for leaf_type, model_cfg in self.config["models"].items():
-            engine_path = model_cfg["engine_path"]
-            if os.path.exists(engine_path):
-                try:
-                    self.engines[leaf_type] = TensorRTInference(
-                        engine_path, model_cfg,
-                        expected_sha256=model_cfg.get("sha256_checksum"),
-                        inference_config=inference_cfg,
-                    )
-                    logger.info("Loaded engine: %s (%s)", leaf_type, engine_path)
-                except Exception as e:
-                    logger.error("Failed to load %s: %s", leaf_type, e)
-            else:
-                logger.warning("Engine not found: %s", engine_path)
+    def _init_pool(self):
+        """Initialize InferenceWorkerPool — engines load on the pool's
+        dedicated CUDA thread, avoiding context-affinity issues (C1)."""
+        try:
+            self._pool = InferenceWorkerPool(
+                self.config["models"],
+                inference_config=self.config.get("inference", {}),
+            )
+        except RuntimeError as e:
+            logger.error("Failed to initialize inference pool: %s", e)
+            self._pool = None
 
     # ── UI construction ────────────────────────────────────────────────
 
@@ -362,9 +368,21 @@ class MainWindow(QMainWindow):
         self._run_inference(frame)
 
     def _run_inference(self, frame):
+        # C2: Prevent concurrent inference (guard against rapid clicks)
+        if self._inference_bridge and self._inference_bridge.isRunning():
+            return
+
         leaf_type = self.model_selector.currentData()
-        engine = self.engines.get(leaf_type)
-        if engine is None:
+        if self._pool is None:
+            QMessageBox.warning(
+                self,
+                "No Engine",
+                "TensorRT inference is not available.\n"
+                "Check CUDA/TensorRT installation on this device.",
+            )
+            return
+        available = self._pool.available_engines()
+        if leaf_type not in available:
             QMessageBox.warning(
                 self,
                 "No Engine",
@@ -376,10 +394,10 @@ class MainWindow(QMainWindow):
         self.btn_file.setEnabled(False)
         self.status_bar.showMessage("Running inference...")
 
-        self._inference_worker = InferenceWorker(engine, frame, leaf_type)
-        self._inference_worker.result_ready.connect(self._on_result)
-        self._inference_worker.error.connect(self._on_inference_error)
-        self._inference_worker.start()
+        self._inference_bridge = InferenceBridge(self._pool, leaf_type, frame)
+        self._inference_bridge.result_ready.connect(self._on_result)
+        self._inference_bridge.error.connect(self._on_inference_error)
+        self._inference_bridge.start()
 
     def _on_result(self, result):
         self.btn_capture.setEnabled(True)
@@ -406,9 +424,9 @@ class MainWindow(QMainWindow):
             self.conf_table.setItem(i, 1, item)
 
         # Show analyzed image thumbnail
-        # Fix 1.4: Use the inference worker's frozen frame copy, NOT
+        # Fix 1.4: Use the inference bridge's frozen frame copy, NOT
         # self.current_frame which may have advanced during inference
-        analyzed_frame = self._inference_worker.frame
+        analyzed_frame = self._inference_bridge.frame
         if analyzed_frame is not None:
             self._display_frame(analyzed_frame, self.analyzed_preview)
 
@@ -417,7 +435,12 @@ class MainWindow(QMainWindow):
 
         # Save to database
         self.db.save_prediction(leaf_type, result, image_path=image_path)
-        self.db.cleanup_old_records()
+
+        # M9: Throttle cleanup to every 50 predictions
+        self._prediction_count += 1
+        if self._prediction_count % 50 == 0:
+            self.db.cleanup_old_records()
+
         self._update_status()
 
         logger.info(
@@ -471,7 +494,7 @@ class MainWindow(QMainWindow):
 
     def _update_status(self):
         stats = self.db.get_stats()
-        models_loaded = ", ".join(self.engines.keys()) or "none"
+        models_loaded = ", ".join(self._pool.available_engines()) if self._pool else "none"
         device_status = self._get_device_status()
         self.status_bar.showMessage(
             f"{device_status}  |  "
@@ -522,6 +545,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._stop_camera()
+        if self._pool:
+            self._pool.shutdown()
         self.db.close()
         logger.info("GUI closed")
         event.accept()
@@ -543,6 +568,7 @@ def main():
     else:
         install_root = os.path.dirname(script_dir)
     os.chdir(install_root)
+    _setup_logging()
 
     parser = argparse.ArgumentParser(description="AgriKD Jetson GUI")
     parser.add_argument(
@@ -560,6 +586,15 @@ def main():
 
     with open(config_path, "r") as f:
         config = json.load(f)
+
+    # H2: Basic config validation
+    for section in ("camera", "models", "database"):
+        if section not in config:
+            print(f"[ERROR] Config missing required section: '{section}'")
+            sys.exit(1)
+    if not config["models"]:
+        print("[ERROR] Config 'models' section is empty")
+        sys.exit(1)
 
     print(f"Starting AgriKD GUI with config: {config_path}")
     print(f"Working directory: {os.getcwd()}")

@@ -42,18 +42,26 @@ class CameraCapture:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self._backoff = _INITIAL_BACKOFF  # Reset on success
 
-    def _open_with_reconnect(self):
-        """Open camera with exponential backoff reconnection."""
-        while True:
+    def _open_with_reconnect(self, max_retries=5):
+        """Open camera with exponential backoff reconnection.
+
+        Retries up to *max_retries* times before raising TimeoutError,
+        preventing infinite blocking during shutdown (H4).
+        """
+        for attempt in range(max_retries):
             try:
                 self._open()
                 return
             except TimeoutError:
                 logger.warning(
-                    "Camera reconnect failed, retrying in %ds", self._backoff,
+                    "Camera reconnect failed (%d/%d), retrying in %ds",
+                    attempt + 1, max_retries, self._backoff,
                 )
                 time.sleep(self._backoff)
                 self._backoff = min(self._backoff * 2, _MAX_BACKOFF)
+        raise TimeoutError(
+            f"Camera failed to open after {max_retries} retries"
+        )
 
     @staticmethod
     def _validate_frame(frame):

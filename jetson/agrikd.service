@@ -1,3 +1,6 @@
+# TEMPLATE — setup_jetson.sh generates the actual Docker-based service.
+# This file is a reference for non-Docker (host-only) installs.
+
 [Unit]
 Description=AgriKD Edge Inference Service
 After=network-online.target
@@ -14,9 +17,6 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=agrikd
 Environment=PYTHONUNBUFFERED=1
-
-# Watchdog: systemd restarts if no heartbeat in 120s
-WatchdogSec=120
 
 # Crash loop protection: max 5 restarts in 300 seconds
 StartLimitBurst=5

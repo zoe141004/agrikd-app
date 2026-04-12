@@ -7,7 +7,7 @@ import os
 import secrets
 import time
 from collections import defaultdict
-from threading import Lock
+from threading import Lock, Thread
 
 import cv2
 import numpy as np
@@ -202,10 +202,12 @@ def predict():
         # Fix 2.8: Pass device_id so API predictions are traceable
         _db.save_prediction(leaf_type, result, device_id=_device_id)
 
-        # M4: Throttle cleanup to every 100 predictions
+        # Throttle cleanup to every 100 predictions, run in background (H7)
         _prediction_count += 1
         if _prediction_count % 100 == 0:
-            _db.cleanup_old_records()
+            Thread(
+                target=_db.cleanup_old_records, daemon=True, name="db-cleanup"
+            ).start()
 
         return jsonify({
             "leaf_type": leaf_type,

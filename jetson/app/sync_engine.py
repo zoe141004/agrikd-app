@@ -227,11 +227,17 @@ class SyncEngine:
             logger.warning("Config poll failed (network): %s", e)
             return
 
-        if resp.status_code != 200 or not resp.json():
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.debug("Config poll: non-JSON response (HTTP %d)", resp.status_code)
+            return
+
+        if resp.status_code != 200 or not data:
             logger.debug("Config poll: no data (HTTP %d)", resp.status_code)
             return
 
-        device = resp.json()[0]
+        device = data[0]
 
         # Unassign detection: user_id cleared or status='unassigned'
         if not device.get("user_id") or device["status"] == "unassigned":
@@ -396,7 +402,10 @@ class SyncEngine:
                 "local_id": pred["id"],
             }
             if device_id:
-                payload["device_id"] = int(device_id)
+                try:
+                    payload["device_id"] = int(device_id)
+                except (ValueError, TypeError):
+                    logger.warning("device_id '%s' is not numeric, skipping field", device_id)
             payload_list.append(payload)
 
         try:

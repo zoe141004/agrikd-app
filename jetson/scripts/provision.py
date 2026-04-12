@@ -345,7 +345,7 @@ def provision(token_data, force=False):
     print()
     print("=" * 40)
     print(f"Provisioned as '{hostname[:3]}***' (hw_id: {hw_id[:8]}...)")
-    print(f"Device ID: {device_id[:8]}...")
+    print(f"Device ID: {str(device_id)[:8]}...")
     print()
     print("Next steps:")
     print("  1. Start the service:  systemctl start agrikd")
