@@ -142,6 +142,20 @@ GRANT EXECUTE ON FUNCTION public.device_ack_config(UUID, JSONB) TO anon, authent
 GRANT EXECUTE ON FUNCTION public.device_heartbeat(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.device_push_predictions(UUID, JSONB) TO anon, authenticated;
 
+-- 5. Storage policy: allow Jetson devices (anon role) to upload prediction images
+--    Validates that the folder name (user_id) matches an assigned device.
+DROP POLICY IF EXISTS "Devices upload prediction images" ON storage.objects;
+CREATE POLICY "Devices upload prediction images"
+    ON storage.objects FOR INSERT
+    WITH CHECK (
+        bucket_id = 'prediction-images'
+        AND EXISTS (
+            SELECT 1 FROM public.devices
+            WHERE user_id::text = (storage.foldername(name))[1]
+              AND status IN ('online', 'offline')
+        )
+    );
+
 -- 5. Enable Realtime for devices table (dashboard auto-refresh)
 DO $$
 BEGIN
