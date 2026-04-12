@@ -145,6 +145,16 @@ else
 fi
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+
+# Fix: Docker container runs as a different UID than host's agrikd user.
+# Ensure mounted volumes have correct permissions for any user inside the container.
+# Read-only mounts (config, models): world-readable
+chmod 755 "$INSTALL_DIR/config" "$INSTALL_DIR/models"
+find "$INSTALL_DIR/config" "$INSTALL_DIR/models" -type f -exec chmod 644 {} + 2>/dev/null || true
+# Read-write mounts (data, logs): world-writable
+chmod 777 "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
+find "$INSTALL_DIR/data" -type d -exec chmod 777 {} + 2>/dev/null || true
+
 echo "  [OK] Files copied. Ownership set to $SERVICE_USER."
 echo ""
 
@@ -217,6 +227,7 @@ if [ ! -f "$CFG" ]; then
 }
 MINCFG
     chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
+    chmod 644 "$CFG"
 fi
 
 # Write a temp Python script (avoids heredoc + env var issues entirely)
@@ -305,6 +316,7 @@ rm -f "$INJECT_SCRIPT"
 
 # Fix ownership after writing (script runs as root via sudo)
 chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
+chmod 644 "$CFG" 2>/dev/null || true
 
 if [ $INJECT_RESULT -eq 0 ]; then
     echo ""
@@ -333,6 +345,7 @@ with open(sys.argv[1], 'w') as f:
 " "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
                 echo "  [OK] Credentials saved."
                 chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
+                chmod 644 "$CFG" 2>/dev/null || true
             else
                 echo "  [WARN] Incomplete — skipping."
             fi
@@ -410,6 +423,7 @@ else
                 # Sanity check: engine should be at least 100KB
                 if [ "$ENGINE_SIZE" -gt 102400 ]; then
                     chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+                    chmod 644 "$engine_file"
                     echo "  [OK] Downloaded pre-built engine for $leaf_type (${ENGINE_SIZE} bytes)"
                     echo "       Built on: $DEVICE_TAG — no conversion needed!"
                     continue
@@ -524,6 +538,7 @@ else
         fi
 
         chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+        chmod 644 "$engine_file"
 
         # Inject SHA-256 into config.json
         HASH=$(sha256sum "$engine_file" | awk '{print $1}')
