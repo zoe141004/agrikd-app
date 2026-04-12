@@ -279,8 +279,16 @@ def load_leaf_config(config_path):
     if num_classes is None or not isinstance(num_classes, int) or num_classes < 2 or num_classes > 1000:
         raise ValueError(f"num_classes must be int in [2, 1000], got: {num_classes}")
     input_size = config.get("input_size")
-    if input_size is None or not isinstance(input_size, int) or input_size < 32 or input_size > 1024:
-        raise ValueError(f"input_size must be int in [32, 1024], got: {input_size}")
+    # Accept both int (square) and [H, W] list/tuple
+    if isinstance(input_size, (list, tuple)):
+        if len(input_size) != 2 or not all(isinstance(v, int) and 32 <= v <= 1024 for v in input_size):
+            raise ValueError(f"input_size list must be [H, W] with ints in [32, 1024], got: {input_size}")
+    elif isinstance(input_size, int):
+        if input_size < 32 or input_size > 1024:
+            raise ValueError(f"input_size must be in [32, 1024], got: {input_size}")
+        config["input_size"] = [input_size, input_size]
+    else:
+        raise ValueError(f"input_size must be int or [H, W] list, got: {input_size}")
     if not config.get("leaf_type") or not isinstance(config["leaf_type"], str):
         raise ValueError(f"leaf_type must be a non-empty string, got: {config.get('leaf_type')}")
 
