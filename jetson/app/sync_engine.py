@@ -469,6 +469,9 @@ class SyncEngine:
         url = f"{self.supabase_url}/rest/v1/rpc/device_push_predictions"
         token = self._device_state["device_token"] if self._device_state else None
 
+        # Track which predictions had successful image uploads
+        uploaded_pred_ids = set()
+
         payload_list = []
         for pred in unsynced:
             leaf_type = pred["leaf_type"]
@@ -481,8 +484,10 @@ class SyncEngine:
             if not image_url and local_path and os.path.isfile(local_path):
                 image_url = self._upload_image(local_path, user_id, pred["id"])
                 if image_url:
-                    # Persist URL so retries don't re-upload
                     self.db.set_uploaded_image_url(pred["id"], image_url)
+
+            if image_url:
+                uploaded_pred_ids.add(pred["id"])
 
             payload = {
                 "leaf_type": leaf_type,
@@ -514,15 +519,15 @@ class SyncEngine:
             if resp.status_code in (200, 201):
                 for pred in unsynced:
                     self.db.mark_synced(pred["id"])
-                # Delete ALL local images after successful sync
-                # (covers both fresh uploads and retry-path images)
+                # Only delete local images that were successfully uploaded
                 for pred in unsynced:
-                    local_path = pred.get("image_path")
-                    if local_path:
-                        try:
-                            os.unlink(local_path)
-                        except OSError:
-                            pass
+                    if pred["id"] in uploaded_pred_ids:
+                        local_path = pred.get("image_path")
+                        if local_path:
+                            try:
+                                os.unlink(local_path)
+                            except OSError:
+                                pass
             elif resp.status_code == 401:
                 logger.warning("Auth expired, re-authenticating...")
                 self._access_token = ""
