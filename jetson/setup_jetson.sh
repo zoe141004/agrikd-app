@@ -187,12 +187,12 @@ echo "[7/13] Installing GUI Python dependencies (system pip)..."
 pip3 install --break-system-packages \
     requests==2.31.0 \
     flask==3.0.3 \
-    waitress==2.1.3 \
+    waitress==2.1.2 \
     2>/dev/null \
 || pip3 install \
     requests==2.31.0 \
     flask==3.0.3 \
-    waitress==2.1.3
+    waitress==2.1.2
 echo "  [OK] GUI dependencies installed."
 echo ""
 
