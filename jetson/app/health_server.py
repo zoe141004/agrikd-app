@@ -29,6 +29,7 @@ _pool = None          # InferenceWorkerPool (replaces old _engines dict)
 _start_time = None
 _api_key = ""
 _device_id = None     # Fix 2.8: trace API predictions to device
+_sync_engine = None   # SyncEngine ref for reading active config
 _prediction_count = 0
 
 
@@ -162,7 +163,14 @@ def predict():
             "error": "Invalid file type. Allowed: jpg, jpeg, png, bmp, tiff",
         }), 400
 
-    leaf_type = request.form.get("leaf_type", available[0])
+    # Determine default leaf_type from remote config or first available model
+    default_leaf = available[0]
+    if _sync_engine:
+        active_cfg = _sync_engine.get_active_config()
+        if active_cfg and active_cfg.get("default_leaf_type") in available:
+            default_leaf = active_cfg["default_leaf_type"]
+
+    leaf_type = request.form.get("leaf_type", default_leaf)
     if leaf_type not in available:
         return jsonify({
             "error": f"Unknown leaf type: {leaf_type}",
@@ -225,17 +233,19 @@ def stats():
     return jsonify(_db.get_stats() if _db else {})
 
 
-def start_health_server(host, port, db, pool, api_key="", device_id=None):
+def start_health_server(host, port, db, pool, api_key="", device_id=None, sync_engine=None):
     """Start the Flask health/API server.
 
     Args:
         pool: InferenceWorkerPool instance (thread-safe).
+        sync_engine: SyncEngine instance for reading active config.
     """
-    global _db, _pool, _start_time, _api_key, _device_id
+    global _db, _pool, _start_time, _api_key, _device_id, _sync_engine
     _db = db
     _pool = pool
     _start_time = time.time()
     _device_id = device_id
+    _sync_engine = sync_engine
 
     # Fix 1.5: If no api_key configured, auto-generate an ephemeral one.
     # Stored in-memory only — never written to config.json.

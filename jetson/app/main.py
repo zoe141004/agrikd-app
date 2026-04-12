@@ -249,6 +249,7 @@ def main():
         kwargs={
             "api_key": server_cfg.get("api_key", ""),
             "device_id": device_id,
+            "sync_engine": sync,
         },
         daemon=True,
     )
