@@ -155,9 +155,9 @@ def check_ready(config):
         if not os.path.isfile(engine_path):
             errors.append(f"Engine file missing for {leaf_type}: {engine_path}")
 
-    # Check camera source exists (for device paths)
+    # Check camera source exists (for device paths like "/dev/video0")
     cam_source = config.get("camera", {}).get("source", "")
-    if cam_source.startswith("/dev/") and not os.path.exists(cam_source):
+    if isinstance(cam_source, str) and cam_source.startswith("/dev/") and not os.path.exists(cam_source):
         errors.append(f"Camera device not found: {cam_source}")
 
     # Check database directory is writable
