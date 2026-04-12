@@ -138,7 +138,6 @@ if not exist ".env" (
     if exist ".env.development" (
         echo   Copying .env.development -^> .env ^(public keys for dev^)...
         copy .env.development .env >nul
-        python sync_env.py
     ) else if exist ".env.example" (
         echo   .env not found. Creating from .env.example...
         copy .env.example .env >nul
@@ -149,10 +148,9 @@ if not exist ".env" (
         echo   ************************************************************
         echo.
     )
-) else (
-    echo   .env found. Syncing to sub-projects...
-    python sync_env.py
 )
+echo   Syncing environment to sub-projects...
+python sync_env.py
 echo.
 
 REM ── 7. Verify setup ──────────────────────────────────────

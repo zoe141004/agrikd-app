@@ -60,11 +60,23 @@ def sync_admin_dashboard(env):
 
 
 def sync_jetson_config(env):
-    """Inject Supabase credentials into jetson/config/config.json."""
-    cfg_path = os.path.join(ROOT, "jetson", "config", "config.json")
+    """Inject Supabase credentials into jetson/config/config.json.
+
+    If config.json doesn't exist (fresh clone — it's .gitignored),
+    create it from config.example.json first, then inject credentials.
+    """
+    cfg_dir = os.path.join(ROOT, "jetson", "config")
+    cfg_path = os.path.join(cfg_dir, "config.json")
+    example_path = os.path.join(cfg_dir, "config.example.json")
+
     if not os.path.exists(cfg_path):
-        print(f"  [SKIP] {cfg_path} not found")
-        return
+        if os.path.exists(example_path):
+            import shutil
+            shutil.copy2(example_path, cfg_path)
+            print(f"  [INIT] Created config.json from config.example.json")
+        else:
+            print(f"  [SKIP] {cfg_path} and config.example.json not found")
+            return
 
     with open(cfg_path, "r", encoding="utf-8") as f:
         config = json.load(f)

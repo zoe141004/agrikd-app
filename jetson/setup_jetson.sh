@@ -12,6 +12,21 @@
 #    2. GUI Desktop App — runs on host with system Python + PyQt5
 #       (needs display + camera access, so runs outside Docker)
 #
+#  Steps (13 total):
+#     1. Verify platform (ARM64)       8.  Configure Supabase credentials
+#     2. Create service user           9.  Download ONNX models
+#     3. Create directory structure     10. Convert ONNX → TensorRT
+#     4. Copy application files         11. Install systemd services
+#     5. Build Docker image             12. Create desktop shortcut
+#     6. Install system packages        13. Camera permissions
+#     7. Install pip packages
+#
+#  Supabase credentials (step 8) can be provided via:
+#    a) Provisioning token from Admin Dashboard (recommended)
+#    b) Manual URL + anon key entry
+#    c) Environment variables: SUPABASE_URL, SUPABASE_ANON_KEY
+#    d) Pre-populated config.json (from sync_env.py on dev machine)
+#
 #  Prerequisites:
 #    - JetPack 5.x+ (includes CUDA, cuDNN, TensorRT, Docker)
 #    - nvidia-container-runtime (usually included with JetPack)
@@ -22,6 +37,9 @@
 #    cd <repo-root>/jetson
 #    chmod +x setup_jetson.sh
 #    sudo ./setup_jetson.sh
+#
+#    # Or with env vars (for scripted installs / CI):
+#    sudo SUPABASE_URL=https://... SUPABASE_ANON_KEY=sb_... ./setup_jetson.sh
 #
 #  All files are installed to /opt/agrikd/ on the Jetson device.
 #  The repo clone is only needed during setup; it is not modified.
@@ -177,15 +195,98 @@ pip3 install --break-system-packages \
 echo "  [OK] GUI dependencies installed."
 echo ""
 
-# ── 8. Download ONNX models from Supabase ───────────────────
-echo "[8/13] Downloading ONNX models from Supabase..."
+# ── 8. Configure Supabase credentials ────────────────────────
+echo "[8/13] Configuring Supabase credentials..."
+echo ""
 CFG="$INSTALL_DIR/config/config.json"
+
+# Check if credentials already present (e.g., sync_env.py ran or config.json was pre-populated)
+EXISTING_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
+EXISTING_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))" 2>/dev/null || echo "")
+
+if [ -n "$EXISTING_URL" ] && [ -n "$EXISTING_KEY" ]; then
+    echo "  [OK] Supabase credentials already configured in config.json."
+    echo "  URL: ${EXISTING_URL:0:40}..."
+elif [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
+    # Accept from environment variables (for CI/CD or scripted installs)
+    echo "  [OK] Using credentials from environment variables."
+    python3 -c "
+import json, sys
+cfg_path = sys.argv[1]
+with open(cfg_path) as f:
+    c = json.load(f)
+c.setdefault('sync', {})
+c['sync']['supabase_url'] = sys.argv[2]
+c['sync']['supabase_key'] = sys.argv[3]
+with open(cfg_path, 'w') as f:
+    json.dump(c, f, indent=4)
+" "$CFG" "$SUPABASE_URL" "$SUPABASE_ANON_KEY"
+else
+    # Offer provisioning token (recommended) or manual entry
+    echo "  Supabase credentials are needed to download models and sync data."
+    echo ""
+    echo "  Options:"
+    echo "    1) Paste a provisioning token from Admin Dashboard (recommended)"
+    echo "       Dashboard → Devices → Provisioning Tokens → Generate Token"
+    echo "    2) Enter Supabase URL and anon key manually"
+    echo "    3) Skip — configure later (models must be placed manually)"
+    echo ""
+    read -rp "  Choice [1/2/3]: " CRED_CHOICE
+
+    case "$CRED_CHOICE" in
+        1)
+            read -rp "  Paste provisioning token (or path to .token file): " PROVISION_INPUT
+            if [ -n "$PROVISION_INPUT" ]; then
+                cd "$INSTALL_DIR"
+                if [ -f "$PROVISION_INPUT" ]; then
+                    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
+                else
+                    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
+                fi
+                cd "$SCRIPT_DIR"
+                echo "  [OK] Device provisioned. Credentials injected into config.json."
+            else
+                echo "  [SKIP] Empty input — skipping provisioning."
+            fi
+            ;;
+        2)
+            read -rp "  Supabase URL: " MANUAL_URL
+            read -rp "  Supabase Anon Key: " MANUAL_KEY
+            if [ -n "$MANUAL_URL" ] && [ -n "$MANUAL_KEY" ]; then
+                python3 -c "
+import json, sys
+cfg_path = sys.argv[1]
+with open(cfg_path) as f:
+    c = json.load(f)
+c.setdefault('sync', {})
+c['sync']['supabase_url'] = sys.argv[2]
+c['sync']['supabase_key'] = sys.argv[3]
+with open(cfg_path, 'w') as f:
+    json.dump(c, f, indent=4)
+" "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
+                echo "  [OK] Credentials saved to config.json."
+            else
+                echo "  [WARN] Incomplete credentials — skipping."
+            fi
+            ;;
+        *)
+            echo "  Skipped credential configuration."
+            echo "  To configure later, edit: $CFG"
+            echo "  Or run: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+            ;;
+    esac
+fi
+echo ""
+
+# ── 9. Download ONNX models from Supabase ───────────────────
+echo "[9/13] Downloading ONNX models from Supabase..."
 if [ ! -f "$CFG" ]; then
     echo "  [ERROR] Config not found: $CFG"
     echo "  Copy config.example.json → config.json and set Supabase credentials."
     exit 1
 fi
 
+# Re-read credentials (may have been updated by provisioning in step 8)
 SUPABASE_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))")
 SUPABASE_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))")
 
@@ -230,8 +331,8 @@ else
 fi
 echo ""
 
-# ── 9. Convert ONNX → TensorRT engines ──────────────────────
-echo "[9/13] Converting ONNX models to TensorRT FP16 engines..."
+# ── 10. Convert ONNX → TensorRT engines ─────────────────────
+echo "[10/13] Converting ONNX models to TensorRT FP16 engines..."
 for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
     [ -f "$onnx_file" ] || { echo "  No ONNX files to convert."; break; }
     leaf_type=$(basename "$onnx_file" | sed 's/_student\.onnx$//')
@@ -277,8 +378,8 @@ except Exception as e:
 done
 echo ""
 
-# ── 10. Install systemd services ────────────────────────────
-echo "[10/13] Installing systemd services..."
+# ── 11. Install systemd services ────────────────────────────
+echo "[11/13] Installing systemd services..."
 
 # Headless service: Docker container with GPU access
 cat > /etc/systemd/system/agrikd.service << SYSTEMD
@@ -333,8 +434,8 @@ echo "  [OK] agrikd.service (Docker headless) — enabled, starts on boot."
 echo "  [OK] agrikd-gui.service (Host GUI) — available, manual start."
 echo ""
 
-# ── 11. Create desktop shortcut (GUI) ───────────────────────
-echo "[11/13] Creating GUI desktop shortcut..."
+# ── 12. Create desktop shortcut (GUI) ────────────────────────
+echo "[12/13] Creating GUI desktop shortcut..."
 cat > /usr/share/applications/agrikd-gui.desktop << DESKTOP
 [Desktop Entry]
 Name=AgriKD Plant Disease Detection
@@ -349,8 +450,8 @@ chmod 644 /usr/share/applications/agrikd-gui.desktop
 echo "  [OK] Desktop shortcut created."
 echo ""
 
-# ── 12. Camera permissions ───────────────────────────────────
-echo "[12/13] Verifying camera permissions..."
+# ── 13. Camera permissions ────────────────────────────────────
+echo "[13/13] Verifying camera permissions..."
 if getent group video | grep -q "$SERVICE_USER"; then
     echo "  [OK] User $SERVICE_USER is in 'video' group."
 else
@@ -364,29 +465,6 @@ if command -v v4l2-ctl &>/dev/null; then
     v4l2-ctl --list-devices 2>/dev/null | sed 's/^/    /' || echo "    (none detected)"
 fi
 echo ""
-
-# ── 13. Zero-Touch Provisioning ─────────────────────────────
-echo "[13/13] Zero-Touch Provisioning..."
-echo ""
-echo "  Get a provisioning token from Admin Dashboard:"
-echo "    Dashboard → Devices → Provisioning Tokens → Generate Token"
-echo ""
-read -rp "  Paste provisioning token (or path to .token file, or 'skip'): " PROVISION_INPUT
-
-if [ "$PROVISION_INPUT" = "skip" ] || [ -z "$PROVISION_INPUT" ]; then
-    echo "  Skipped provisioning. Device will run in local-only mode."
-    echo "  To provision later:"
-    echo "    cd $INSTALL_DIR"
-    echo "    python3 scripts/provision.py <token>"
-elif [ -f "$PROVISION_INPUT" ]; then
-    cd "$INSTALL_DIR"
-    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
-    cd "$SCRIPT_DIR"
-else
-    cd "$INSTALL_DIR"
-    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
-    cd "$SCRIPT_DIR"
-fi
 
 echo ""
 echo "========================================================"
@@ -416,7 +494,7 @@ echo "── Camera Check ──────────────────
 echo "  v4l2-ctl --list-devices"
 echo "  ls /dev/video*"
 echo ""
-echo "── Provisioning (if skipped) ────────────────────────────"
+echo "── Re-provision / Credential Update ─────────────────────"
 echo "  cd $INSTALL_DIR"
 echo "  python3 scripts/provision.py <token>"
 echo ""

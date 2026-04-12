@@ -193,11 +193,30 @@ Installs minimal pip packages that are not available via apt. The GUI app
 needs `requests` for Supabase sync; `flask` and `waitress` are needed if
 running `main.py` outside Docker for testing.
 
-### Step 8 -- Download ONNX Models
+### Step 8 -- Configure Supabase Credentials
 
-ONNX models are downloaded from Supabase Storage using the credentials in
-`config.json`. If no credentials are configured, this step is skipped and
-you can place ONNX files manually:
+Supabase credentials are needed for model download (step 9) and runtime data sync.
+The script checks for credentials in this order:
+
+1. **Already in config.json** — if `sync_env.py` was run on a dev machine and the
+   config was copied, credentials are already present.
+2. **Environment variables** — pass `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the
+   script for CI/CD or scripted installs:
+   ```bash
+   sudo SUPABASE_URL=https://... SUPABASE_ANON_KEY=sb_... ./setup_jetson.sh
+   ```
+3. **Interactive prompt** — the script offers three options:
+   - **(1) Provisioning token** (recommended) — paste a token from the Admin
+     Dashboard (Devices → Provisioning Tokens → Generate Token). This registers
+     the device AND injects credentials.
+   - **(2) Manual entry** — enter Supabase URL and anon key directly.
+   - **(3) Skip** — configure later; models must be placed manually.
+
+### Step 9 -- Download ONNX Models
+
+ONNX models are downloaded from Supabase Storage using the credentials configured
+in step 8. If no credentials are configured, this step is skipped and you can
+place ONNX files manually:
 
 ```bash
 # Manual placement
@@ -205,7 +224,7 @@ cp tomato_student.onnx /opt/agrikd/models/
 cp burmese_grape_leaf_student.onnx /opt/agrikd/models/
 ```
 
-### Step 9 -- Convert ONNX → TensorRT Engines
+### Step 10 -- Convert ONNX → TensorRT Engines
 
 ```bash
 trtexec \
@@ -221,7 +240,7 @@ ONNX files are deleted after successful conversion.
 
 Engines are hardware-specific and must be built on the target Jetson device.
 
-### Step 10 -- Install systemd Services
+### Step 11 -- Install systemd Services
 
 Two unit files are installed to `/etc/systemd/system/`:
 
@@ -245,30 +264,16 @@ ExecStart=/usr/bin/python3 /opt/agrikd/app/gui_app.py \
 The headless service is enabled by default (starts on boot). The GUI service
 is available but not enabled by default.
 
-### Step 11 -- Create Desktop Shortcut
+### Step 12 -- Create Desktop Shortcut
 
 A `.desktop` file is installed to `/usr/share/applications/` so the GUI
 application appears in the desktop environment's application menu as
 **"AgriKD Plant Disease Detection"**.
 
-### Step 12 -- Camera Permissions
+### Step 13 -- Camera Permissions
 
 Verifies the `agrikd` user is in the `video` group for `/dev/video*` access.
 Lists connected cameras using `v4l2-ctl` if available.
-
-### Step 13 -- Zero-Touch Provisioning
-
-The script prompts the operator to paste a provisioning token, provide a path
-to a `.token` file, or type `skip` to defer provisioning:
-
-```
-Paste provisioning token (or path to .token file, or 'skip'):
-```
-
-- **Paste token:** Runs `provision.py agrikd://...` to register the device.
-- **File path:** Runs `provision.py --file <path>` to read the token from a file.
-- **Skip:** Skips provisioning; the device will run in local-only mode until
-  provisioned manually later.
 
 Supabase sync is optional; the system operates fully offline without it.
 
@@ -281,7 +286,7 @@ Supabase sync is optional; the system operates fully offline without it.
 - Token format: `agrikd://<base64url encoded JSON>` (contains Supabase URL, anon key, token ID, expiry)
 
 ### Provisioning Flow
-1. Run `setup_jetson.sh` -- it prompts for token at step 11
+1. Run `setup_jetson.sh` -- it prompts for token at step 8
 2. Or manually: `python3 /opt/agrikd/scripts/provision.py agrikd://...`
 3. Script validates token -> detects hardware -> registers device -> writes `config/config.json` and `data/device_state.json`
 4. Device starts in `unassigned` status, running Local-First (capture + inference + SQLite)
