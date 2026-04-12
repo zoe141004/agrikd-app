@@ -209,7 +209,7 @@ def supabase_patch(url, key, path, body, params=None, extra_headers=None):
 # ---------------------------------------------------------------------------
 
 def provision(token_data, force=False):
-    """Execute the provisioning flow."""
+    """Execute the provisioning flow via atomic server-side RPC."""
     url = token_data["url"]
     key = token_data["key"]
     tid = token_data["tid"]
@@ -217,20 +217,8 @@ def provision(token_data, force=False):
     print("AgriKD Zero-Touch Provisioning")
     print("=" * 40)
 
-    # 1. Validate token on server
-    print("[1/6] Validating provisioning token...")
-    resp = supabase_get(url, key, "provisioning_tokens", {
-        "id": f"eq.{tid}",
-        "used_at": "is.null",
-        "select": "id,expires_at",
-    })
-    if resp.status_code != 200 or not resp.json():
-        print("ERROR: Invalid or already-used provisioning token.")
-        sys.exit(1)
-    print("  Token valid.")
-
-    # 2. Detect hardware
-    print("[2/6] Detecting hardware...")
+    # 1. Detect hardware
+    print("[1/4] Detecting hardware...")
     hw_id, hostname, hw_info = get_hardware_info()
     # Mask hardware fingerprint in output (CodeQL: private data)
     hw_id_masked = hw_id[:8] + "..." + hw_id[-4:]
@@ -238,66 +226,38 @@ def provision(token_data, force=False):
     print(f"  HW ID:    {hw_id_masked}")
     print(f"  Platform: {hw_info['platform']}")
 
-    # 3. Check existing device
-    print("[3/6] Checking device registration...")
-    resp = supabase_get(url, key, "devices", {
-        "hw_id": f"eq.{hw_id}",
-        "select": "id,status,device_token",
+    # 2. Provision device via atomic server RPC
+    #    Single call: validates token → registers/re-registers device → claims token
+    print("[2/4] Registering device and claiming token...")
+    resp = supabase_post(url, key, "rpc/provision_device", {
+        "p_token_id": tid,
+        "p_hw_id": hw_id,
+        "p_hostname": hostname,
+        "p_hw_info": hw_info,
+        "p_force": force,
     })
-    existing = resp.json() if resp.status_code == 200 else []
 
-    device_id = None
-    device_token = None
-
-    if existing:
-        device = existing[0]
-        status = device["status"]
-        if status in ("online", "offline", "assigned") and not force:
-            print(f"ERROR: Device already registered with status '{status}'.")
+    if resp.status_code != 200:
+        body = resp.text[:300]
+        if "INVALID_TOKEN" in body:
+            print("ERROR: Invalid or already-used provisioning token.")
+            print("  The token may be expired, revoked, or already claimed.")
+            print("  Generate a new token: Admin Dashboard → Devices → Provisioning Tokens")
+        elif "DEVICE_ACTIVE" in body:
+            # Extract status from "DEVICE_ACTIVE:<status>" exception message
+            status = "active"
+            if "DEVICE_ACTIVE:" in body:
+                status = body.split("DEVICE_ACTIVE:")[-1].split('"')[0].strip()
+            print(f"ERROR: Device already registered (status: {status}).")
             print("  Use --force to re-register, or ask Admin to 'Decommission' first.")
-            sys.exit(1)
+        else:
+            print(f"ERROR: Provisioning failed (HTTP {resp.status_code})")
+            print(f"  {body}")
+        sys.exit(1)
 
-        # Re-register: update existing record
-        print(f"  Existing device (status={status}), re-registering...")
-        # patch_body defined inline below — anon key + existing token header
-        resp = supabase_patch(url, key, "devices", {
-            "hostname": hostname,
-            "hw_info": hw_info,
-            "status": "unassigned",
-            "user_id": None,
-            "reported_config": None,
-            "config_version": 0,
-        }, params={"hw_id": f"eq.{hw_id}"}, extra_headers={
-            "X-Device-Token": device["device_token"],
-        })
-
-        if resp.status_code not in (200, 201):
-            print(f"ERROR: Failed to re-register: HTTP {resp.status_code}")
-            print(f"  {resp.text[:200]}")
-            sys.exit(1)
-
-        updated = resp.json()
-        if updated:
-            device_id = updated[0]["id"]
-            device_token = updated[0]["device_token"]
-    else:
-        # New device: INSERT
-        print("  New device, registering...")
-        resp = supabase_post(url, key, "devices", {
-            "hw_id": hw_id,
-            "hostname": hostname,
-            "status": "unassigned",
-            "hw_info": hw_info,
-        })
-        if resp.status_code not in (200, 201):
-            print(f"ERROR: Failed to register: HTTP {resp.status_code}")
-            print(f"  {resp.text[:200]}")
-            sys.exit(1)
-
-        created = resp.json()
-        if created:
-            device_id = created[0]["id"]
-            device_token = created[0]["device_token"]
+    result = resp.json()
+    device_id = result.get("device_id")
+    device_token = result.get("device_token")
 
     if not device_id or not device_token:
         print("ERROR: Could not obtain device ID or token from server.")
@@ -305,20 +265,8 @@ def provision(token_data, force=False):
 
     print(f"  Registered as device #{device_id}")
 
-    # 4. Claim provisioning token
-    print("[4/6] Claiming provisioning token...")
-    from datetime import datetime, timezone
-    resp = supabase_patch(url, key, "provisioning_tokens", {
-        "used_at": datetime.now(timezone.utc).isoformat(),
-        "used_by_hw_id": hw_id,
-        "device_id": device_id,
-    }, params={"id": f"eq.{tid}"})
-
-    if resp.status_code not in (200, 204):
-        print(f"WARNING: Could not claim token (HTTP {resp.status_code}). Continuing anyway.")
-
-    # 5. Generate config.json
-    print("[5/6] Generating config.json...")
+    # 3. Generate config.json
+    print("[3/4] Generating config.json...")
     config_path = os.path.join("config", "config.json")
     template_path = os.path.join("config", "config.example.json")
 
@@ -326,12 +274,14 @@ def provision(token_data, force=False):
         # Merge: only update sync section, keep existing config
         with open(config_path, "r") as f:
             config = json.load(f)
+        config.setdefault("sync", {})
         config["sync"]["supabase_url"] = url
         config["sync"]["supabase_key"] = key
         print("  Updated existing config.json (sync section only)")
     elif os.path.exists(template_path):
         with open(template_path, "r") as f:
             config = json.load(f)
+        config.setdefault("sync", {})
         config["sync"]["supabase_url"] = url
         config["sync"]["supabase_key"] = key
         print("  Created config.json from template")
@@ -351,14 +301,15 @@ def provision(token_data, force=False):
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
-    # Fix 2.7: Protect config.json (contains Supabase anon key)
+    # Protect config.json (contains Supabase anon key)
     try:
         os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
     except OSError:
         pass  # Windows or permission issue
 
-    # 6. Write device_state.json
-    print("[6/6] Writing device state...")
+    # 4. Write device_state.json
+    print("[4/4] Writing device state...")
+    from datetime import datetime, timezone
     state_path = os.path.join("data", "device_state.json")
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
