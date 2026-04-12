@@ -233,28 +233,40 @@ else
     # These files contain public keys (safe to read) and are committed in the repo.
     AUTO_URL=""
     AUTO_KEY=""
+    echo "  Looking for .env files in: $REPO_ROOT"
     for env_file in "$REPO_ROOT/.env" "$REPO_ROOT/.env.development"; do
         if [ -f "$env_file" ] && [ -z "$AUTO_URL" ]; then
-            AUTO_URL=$(grep -E '^SUPABASE_URL=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)
-            AUTO_KEY=$(grep -E '^SUPABASE_ANON_KEY=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)
+            echo "  Found: $env_file"
+            # Strip \r (Windows CRLF) to avoid hidden carriage returns
+            AUTO_URL=$(grep -E '^SUPABASE_URL=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r')
+            AUTO_KEY=$(grep -E '^SUPABASE_ANON_KEY=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r')
         fi
     done
 
     if [ -n "$AUTO_URL" ] && [ -n "$AUTO_KEY" ]; then
         # Auto-fill from repo .env files
         echo "  [AUTO] Found credentials in repo .env files — injecting into config.json."
+        echo "  URL: ${AUTO_URL:0:50}..."
+        echo "  KEY: ${AUTO_KEY:0:20}..."
         python3 -c "
 import json, sys
 cfg_path = sys.argv[1]
 with open(cfg_path) as f:
     c = json.load(f)
 c.setdefault('sync', {})
-c['sync']['supabase_url'] = sys.argv[2]
-c['sync']['supabase_key'] = sys.argv[3]
+c['sync']['supabase_url'] = sys.argv[2].strip()
+c['sync']['supabase_key'] = sys.argv[3].strip()
 with open(cfg_path, 'w') as f:
     json.dump(c, f, indent=4)
+print('  [OK] Credentials written to', cfg_path)
 " "$CFG" "$AUTO_URL" "$AUTO_KEY"
-        echo "  URL: ${AUTO_URL:0:40}..."
+        # Verify the write succeeded
+        VERIFY_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
+        if [ -n "$VERIFY_URL" ]; then
+            echo "  [VERIFIED] config.json now has Supabase credentials."
+        else
+            echo "  [ERROR] Failed to write credentials to config.json!"
+        fi
     elif [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
         # Accept from environment variables (for CI/CD or scripted installs)
         echo "  [OK] Using credentials from environment variables."
