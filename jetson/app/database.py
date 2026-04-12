@@ -133,6 +133,20 @@ class JetsonDatabase:
             )
             self.conn.commit()
 
+    def get_pending_image_uploads(self, limit=20):
+        """Get synced predictions that still have local images to upload."""
+        with self._lock:
+            cursor = self.conn.execute(
+                """SELECT * FROM predictions
+                   WHERE is_synced = 1
+                     AND image_path IS NOT NULL
+                     AND uploaded_image_url IS NULL
+                   ORDER BY id LIMIT ?""",
+                (limit,),
+            )
+            columns = [d[0] for d in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
     def get_stats(self):
         """Get basic statistics."""
         with self._lock:

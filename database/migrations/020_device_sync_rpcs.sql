@@ -142,6 +142,35 @@ GRANT EXECUTE ON FUNCTION public.device_ack_config(UUID, JSONB) TO anon, authent
 GRANT EXECUTE ON FUNCTION public.device_heartbeat(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.device_push_predictions(UUID, JSONB) TO anon, authenticated;
 
+-- 4b. Update image_url for a previously synced prediction
+--     Used when image upload was retried after initial sync
+CREATE OR REPLACE FUNCTION public.device_update_prediction_image(
+    p_device_token UUID,
+    p_local_id INTEGER,
+    p_image_url TEXT
+)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+DECLARE
+    v_device_id BIGINT;
+    v_user_id UUID;
+BEGIN
+    SELECT id, user_id INTO v_device_id, v_user_id
+    FROM public.devices
+    WHERE device_token = p_device_token;
+
+    IF NOT FOUND OR v_user_id IS NULL THEN RETURN; END IF;
+
+    UPDATE public.predictions
+    SET image_url = p_image_url
+    WHERE device_id = v_device_id
+      AND local_id = p_local_id
+      AND user_id = v_user_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.device_update_prediction_image(UUID, INTEGER, TEXT) TO anon, authenticated;
+
 -- 5. Storage policy: allow Jetson devices (anon role) to upload prediction images
 --    Uses SECURITY DEFINER helper to bypass devices table RLS.
 CREATE OR REPLACE FUNCTION public.is_device_assigned_user(p_user_id TEXT)

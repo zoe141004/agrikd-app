@@ -556,6 +556,58 @@ class SyncEngine:
             stats["unsynced"],
         )
 
+    def _retry_image_uploads(self):
+        """Retry uploading images for predictions that synced without image_url.
+
+        This handles the case where image upload failed (e.g. RLS policy error)
+        but the prediction metadata was successfully pushed.
+        """
+        user_id = None
+        if self._device_state:
+            user_id = self._device_state.get("user_id")
+        if not user_id:
+            return
+
+        pending = self.db.get_pending_image_uploads(limit=10)
+        if not pending:
+            return
+
+        logger.info("Retrying image upload for %d predictions...", len(pending))
+
+        headers = self._get_headers()
+        token = self._device_state["device_token"] if self._device_state else None
+
+        for pred in pending:
+            local_path = pred.get("image_path")
+            if not local_path or not os.path.isfile(local_path):
+                # File gone — mark as handled so we don't retry forever
+                self.db.set_uploaded_image_url(pred["id"], "")
+                continue
+
+            image_url = self._upload_image(local_path, user_id, pred["id"])
+            if image_url:
+                self.db.set_uploaded_image_url(pred["id"], image_url)
+                # Update Supabase prediction with image_url via RPC
+                try:
+                    self._session.post(
+                        f"{self.supabase_url}/rest/v1/rpc/device_update_prediction_image",
+                        headers=headers,
+                        json={
+                            "p_device_token": token,
+                            "p_local_id": pred["id"],
+                            "p_image_url": image_url,
+                        },
+                        timeout=10, verify=True,
+                    )
+                except requests.RequestException:
+                    pass  # Best-effort
+                # Delete local image
+                try:
+                    os.unlink(local_path)
+                except OSError:
+                    pass
+                logger.debug("Retry upload OK: pred %d", pred["id"])
+
     # ── Main loop ─────────────────────────────────────────────────────
 
     def run(self):
@@ -580,6 +632,9 @@ class SyncEngine:
 
                     # Push predictions (skip POST if no user_id, data stays local)
                     self._sync_batch()
+
+                    # Retry image uploads for previously synced predictions
+                    self._retry_image_uploads()
 
                     # Heartbeat (skip if not registered)
                     self._update_last_seen()
