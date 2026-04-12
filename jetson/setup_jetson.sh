@@ -302,6 +302,9 @@ INJECT_RESULT=$?
 set -e
 rm -f "$INJECT_SCRIPT"
 
+# Fix ownership after writing (script runs as root via sudo)
+chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
+
 if [ $INJECT_RESULT -eq 0 ]; then
     echo ""
 elif [ $INJECT_RESULT -eq 2 ]; then
@@ -328,6 +331,7 @@ with open(sys.argv[1], 'w') as f:
     json.dump(c, f, indent=4)
 " "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
                 echo "  [OK] Credentials saved."
+                chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
             else
                 echo "  [WARN] Incomplete — skipping."
             fi
@@ -340,6 +344,26 @@ else
     echo "  [ERROR] Credential injection failed (exit=$INJECT_RESULT)."
     echo "  Edit manually: $CFG"
 fi
+
+# Final verification: show config.json credential status
+echo "  ── Config.json credential status ──"
+set +e
+python3 -c "
+import json
+with open('$CFG') as f:
+    c = json.load(f)
+url = c.get('sync',{}).get('supabase_url','')
+key = c.get('sync',{}).get('supabase_key','')
+if url and key:
+    print(f'  supabase_url: {url[:50]}...')
+    print(f'  supabase_key: {key[:25]}...')
+    print('  Status: CONFIGURED')
+else:
+    print('  supabase_url:', repr(url))
+    print('  supabase_key:', repr(key))
+    print('  Status: NOT CONFIGURED — steps 9-10 will be skipped')
+"
+set -e
 echo ""
 
 # ── 9. Download ONNX models from Supabase ───────────────────
