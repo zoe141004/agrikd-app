@@ -52,6 +52,11 @@ class SyncEngine:
         self._models_config = models_config or {}
         self._shutdown_event = shutdown_event or threading.Event()
         self._session = requests.Session()
+        # Retry adapter: handles transient connection/TLS failures
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        retry = Retry(total=2, backoff_factor=1, status_forcelist=[502, 503, 504])
+        self._session.mount("https://", HTTPAdapter(max_retries=retry))
 
         # JWT auth (legacy)
         self._access_token = ""
@@ -230,7 +235,7 @@ class SyncEngine:
                 url,
                 headers=self._get_headers(),
                 json={"p_device_token": token},
-                timeout=15,
+                timeout=(10, 30),
                 verify=True,
             )
         except requests.RequestException as e:
