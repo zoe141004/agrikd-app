@@ -173,7 +173,8 @@ apt-get install -y --no-install-recommends \
     python3-opencv \
     v4l-utils \
     libgl1-mesa-glx \
-    libglib2.0-0
+    libglib2.0-0 \
+    curl
 echo "  [OK] System packages installed (PyQt5, OpenCV, v4l-utils)."
 echo ""
 
@@ -201,6 +202,25 @@ echo ""
 CFG="$INSTALL_DIR/config/config.json"
 
 # Check if credentials already present (e.g., sync_env.py ran or config.json was pre-populated)
+if [ ! -f "$CFG" ]; then
+    echo "  [WARN] config.json not found at $CFG — creating minimal config."
+    python3 -c "
+import json
+cfg = {
+    'camera': {'source': 0, 'width': 640, 'height': 480, 'mode': 'manual'},
+    'inference': {'input_size': 224, 'imagenet_mean': [0.485, 0.456, 0.406], 'imagenet_std': [0.229, 0.224, 0.225]},
+    'models': {},
+    'sync': {'supabase_url': '', 'supabase_key': '', 'batch_size': 50, 'interval_seconds': 300},
+    'server': {'host': '0.0.0.0', 'port': 8080, 'api_key': ''},
+    'database': {'path': 'data/agrikd_jetson.db'},
+    'logging': {'level': 'INFO', 'file': 'logs/agrikd.log', 'max_bytes': 104857600, 'backup_count': 5}
+}
+with open('$CFG', 'w') as f:
+    json.dump(cfg, f, indent=4)
+"
+    chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
+fi
+
 EXISTING_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
 EXISTING_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))" 2>/dev/null || echo "")
 
@@ -238,13 +258,21 @@ else
             read -rp "  Paste provisioning token (or path to .token file): " PROVISION_INPUT
             if [ -n "$PROVISION_INPUT" ]; then
                 cd "$INSTALL_DIR"
+                set +e  # Provisioning failure should not abort setup
                 if [ -f "$PROVISION_INPUT" ]; then
                     sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
                 else
                     sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
                 fi
+                PROV_EXIT=$?
+                set -e
                 cd "$SCRIPT_DIR"
-                echo "  [OK] Device provisioned. Credentials injected into config.json."
+                if [ $PROV_EXIT -eq 0 ]; then
+                    echo "  [OK] Device provisioned. Credentials injected into config.json."
+                else
+                    echo "  [WARN] Provisioning failed (exit $PROV_EXIT). Setup continues."
+                    echo "  You can re-provision later: cd $INSTALL_DIR && python3 scripts/provision.py <token>"
+                fi
             else
                 echo "  [SKIP] Empty input — skipping provisioning."
             fi
@@ -281,79 +309,94 @@ echo ""
 # ── 9. Download ONNX models from Supabase ───────────────────
 echo "[9/13] Downloading ONNX models from Supabase..."
 if [ ! -f "$CFG" ]; then
-    echo "  [ERROR] Config not found: $CFG"
-    echo "  Copy config.example.json → config.json and set Supabase credentials."
-    exit 1
-fi
-
-# Re-read credentials (may have been updated by provisioning in step 8)
-SUPABASE_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))")
-SUPABASE_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))")
-
-if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-    echo "  [WARN] Supabase credentials not found in config.json."
-    echo "  Skipping ONNX download. Place ONNX files manually at:"
-    echo "    $INSTALL_DIR/models/<leaf_type>_student.onnx"
+    echo "  [WARN] Config not found: $CFG — skipping model download."
+    echo "  Place .onnx files manually at: $INSTALL_DIR/models/"
 else
-    for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
-        engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
-        onnx_file="$INSTALL_DIR/models/${leaf_type}_student.onnx"
+    # Re-read credentials (may have been updated by provisioning in step 8)
+    CFG_SUPA_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
+    CFG_SUPA_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))" 2>/dev/null || echo "")
 
-        if [ -f "$engine_file" ]; then
-            echo "  Engine already exists: $leaf_type — skipping download"
-            continue
-        fi
+    if [ -z "$CFG_SUPA_URL" ] || [ -z "$CFG_SUPA_KEY" ]; then
+        echo "  [WARN] Supabase credentials not found in config.json."
+        echo "  Skipping ONNX download. Place ONNX files manually at:"
+        echo "    $INSTALL_DIR/models/<leaf_type>_student.onnx"
+    else
+        for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
+            engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
+            onnx_file="$INSTALL_DIR/models/${leaf_type}_student.onnx"
 
-        echo "  Fetching ONNX URL for $leaf_type..."
-        ONNX_RESP=$(curl -sf \
-            "${SUPABASE_URL}/rest/v1/rpc/get_latest_onnx_url" \
-            -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
+            if [ -f "$engine_file" ]; then
+                echo "  Engine already exists: $leaf_type — skipping download"
+                continue
+            fi
 
-        ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
+            echo "  Fetching ONNX URL for $leaf_type..."
+            ONNX_RESP=$(curl -sf \
+                "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
+                -H "apikey: $CFG_SUPA_KEY" \
+                -H "Authorization: Bearer $CFG_SUPA_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
 
-        if [ -z "$ONNX_URL" ]; then
-            echo "  [WARN] No ONNX URL found for $leaf_type — skipping"
-            continue
-        fi
+            ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
 
-        echo "  Downloading ONNX: $leaf_type..."
-        HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$onnx_file" "$ONNX_URL")
-        if [ "$HTTP_CODE" = "200" ]; then
-            echo "  [OK] Downloaded ONNX for $leaf_type ($(stat --format=%s "$onnx_file") bytes)"
-        else
-            echo "  [WARN] Download failed (HTTP $HTTP_CODE) for $leaf_type"
-            rm -f "$onnx_file"
-        fi
-    done
+            if [ -z "$ONNX_URL" ]; then
+                echo "  [WARN] No ONNX URL found for $leaf_type — skipping"
+                continue
+            fi
+
+            echo "  Downloading ONNX: $leaf_type..."
+            HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+                echo "  [OK] Downloaded ONNX for $leaf_type ($(stat --format=%s "$onnx_file" 2>/dev/null || echo '?') bytes)"
+            else
+                echo "  [WARN] Download failed (HTTP $HTTP_CODE) for $leaf_type"
+                rm -f "$onnx_file"
+            fi
+        done
+    fi
 fi
 echo ""
 
 # ── 10. Convert ONNX → TensorRT engines ─────────────────────
 echo "[10/13] Converting ONNX models to TensorRT FP16 engines..."
-for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
-    [ -f "$onnx_file" ] || { echo "  No ONNX files to convert."; break; }
-    leaf_type=$(basename "$onnx_file" | sed 's/_student\.onnx$//')
-    engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
+if ! command -v trtexec &>/dev/null; then
+    echo "  [WARN] trtexec not found — cannot convert ONNX to TensorRT."
+    echo "  JetPack 5.x+ should include trtexec. Install TensorRT if missing."
+    echo "  Skipping conversion. Pre-built .engine files can be placed at:"
+    echo "    $INSTALL_DIR/models/<leaf_type>_student.engine"
+else
+    for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
+        [ -f "$onnx_file" ] || { echo "  No ONNX files to convert."; break; }
+        leaf_type=$(basename "$onnx_file" | sed 's/_student\.onnx$//')
+        engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
 
-    if [ -f "$engine_file" ]; then
-        echo "  Engine already exists: $leaf_type — skipping"
-        continue
-    fi
+        if [ -f "$engine_file" ]; then
+            echo "  Engine already exists: $leaf_type — skipping"
+            continue
+        fi
 
-    echo "  Converting: $leaf_type (this may take several minutes)..."
-    trtexec \
-        --onnx="$onnx_file" \
-        --saveEngine="$engine_file" \
-        --fp16 \
-        --workspace=1024
-    chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+        echo "  Converting: $leaf_type (this may take several minutes)..."
+        set +e  # trtexec failure should not abort setup
+        trtexec \
+            --onnx="$onnx_file" \
+            --saveEngine="$engine_file" \
+            --fp16 \
+            --workspace=1024
+        TRT_EXIT=$?
+        set -e
 
-    # Inject SHA-256 into config.json
-    HASH=$(sha256sum "$engine_file" | awk '{print $1}')
-    python3 -c "
+        if [ $TRT_EXIT -ne 0 ]; then
+            echo "  [WARN] trtexec failed for $leaf_type (exit $TRT_EXIT) — skipping"
+            rm -f "$engine_file"
+            continue
+        fi
+
+        chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+
+        # Inject SHA-256 into config.json
+        HASH=$(sha256sum "$engine_file" | awk '{print $1}')
+        python3 -c "
 import json, sys
 try:
     cfg_path, leaf, sha = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -370,12 +413,13 @@ try:
 except Exception as e:
     print(f'[WARNING] Failed to inject SHA-256 into config: {e}', file=sys.stderr)
 " "$CFG" "$leaf_type" "$HASH"
-    echo "  SHA-256: ${HASH:0:16}... → config.json"
+        echo "  SHA-256: ${HASH:0:16}... → config.json"
 
-    # Clean up ONNX after successful conversion
-    rm -f "$onnx_file"
-    echo "  [OK] Converted + removed ONNX: $leaf_type"
-done
+        # Clean up ONNX after successful conversion
+        rm -f "$onnx_file"
+        echo "  [OK] Converted + removed ONNX: $leaf_type"
+    done
+fi
 echo ""
 
 # ── 11. Install systemd services ────────────────────────────
@@ -436,7 +480,8 @@ echo ""
 
 # ── 12. Create desktop shortcut (GUI) ────────────────────────
 echo "[12/13] Creating GUI desktop shortcut..."
-cat > /usr/share/applications/agrikd-gui.desktop << DESKTOP
+if [ -d "/usr/share/applications" ]; then
+    cat > /usr/share/applications/agrikd-gui.desktop << DESKTOP
 [Desktop Entry]
 Name=AgriKD Plant Disease Detection
 Comment=Detect plant leaf diseases with AI on NVIDIA Jetson
@@ -446,8 +491,11 @@ Terminal=false
 Type=Application
 Categories=Science;Education;
 DESKTOP
-chmod 644 /usr/share/applications/agrikd-gui.desktop
-echo "  [OK] Desktop shortcut created."
+    chmod 644 /usr/share/applications/agrikd-gui.desktop
+    echo "  [OK] Desktop shortcut created."
+else
+    echo "  [SKIP] /usr/share/applications not found (headless system — no desktop)."
+fi
 echo ""
 
 # ── 13. Camera permissions ────────────────────────────────────
