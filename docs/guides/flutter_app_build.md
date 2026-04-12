@@ -81,12 +81,13 @@ flutter test --exclude-tags=widget
 flutter test
 ```
 
-Current test count: **89 tests** across 14 test files:
-- `test/unit/` — Prediction model, image preprocessor, model constants, model integrity, app strings, app constants
-- `test/provider/` — History provider, settings provider
-- `test/dao/` — PredictionDao, PreferenceDao, ModelDao, SyncQueue
-- `test/integration/` — OTA model version rotation, model integrity, sync queue, full OTA flow
-- `test/widget_test.dart` — Home screen rendering, navigation, scan button, leaf types
+Current test count: **140 tests** across 14 test files:
+- `test/unit/` — Prediction model, image preprocessor, model constants, model integrity, app strings, app constants (36 tests)
+- `test/provider/` — History provider, settings provider (20 tests)
+- `test/dao/` — PredictionDao, PreferenceDao, ModelDao, SyncQueue, PredictionDao filters (31 tests)
+- `test/sync_queue_test.dart` — Sync queue enqueue, dequeue, cleanup, stress (18 tests)
+- `test/integration/` — OTA model version rotation, model integrity, sync queue, full OTA flow, migration schema integrity, cross-leaf isolation, ModelDao edge cases, PredictionDao advanced (35 tests)
+- `test/widget_test.dart` — Home screen rendering, navigation, scan button, leaf types (4 tests)
 
 ### Key implementation notes
 

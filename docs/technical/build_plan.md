@@ -1,7 +1,7 @@
 # AgriKD Flutter App — Build Plan Chi Tiết
 
 **Ngày tạo:** 2026-03-21
-**Trạng thái hiện tại:** App production-ready (13 screens, 89 tests, `flutter analyze` clean, release APK 31.3 MB arm64)
+**Trạng thái hiện tại:** App production-ready (13 screens, 140 tests, `flutter analyze` clean, release APK 31.3 MB arm64)
 **Mục tiêu:** ~~Hoàn thiện app từ skeleton → production-ready MVP~~ ✅ DONE
 
 ---
@@ -488,7 +488,7 @@ sqflite_common_ffi_web: ^1.1.1  # Web SQLite support
 
 ### Step 2: Comprehensive Tests — ✅ HOÀN THÀNH (2026-03-23)
 
-**89 tests across 11 test files — ALL PASS**
+**140 tests across 14 test files — ALL PASS**
 
 **Test infrastructure:**
 - Dev dependency: `sqflite_common_ffi: ^2.3.4+4` (desktop SQLite for testing)
@@ -549,7 +549,7 @@ sqflite_common_ffi_web: ^1.1.1  # Web SQLite support
 | Stage | Job | Điều kiện | Chi tiết |
 |-------|-----|-----------|----------|
 | 1. Lint | `lint` | Luôn chạy | `dart format --set-exit-if-changed` + `flutter analyze` |
-| 2. Test | `test` | Sau lint | `flutter test` (89 tests), cài `libsqlite3-dev` cho sqflite_common_ffi |
+| 2. Test | `test` | Sau lint | `flutter test` (140 tests), cài `libsqlite3-dev` cho sqflite_common_ffi |
 | 3. Model Conversion | `model-conversion` | Khi commit message chứa `[model]` hoặc thay đổi `mlops_pipeline/` | `run_pipeline.py` cho cả Tomato và Burmese, upload artifacts 30 ngày |
 | 4. Model Validation | `model-validation` | Sau stage 3 | `validate_models.py` + `evaluate_models.py` cross-format comparison |
 | 5. Build APK | `build` | Sau test | `flutter build apk --release` với `--dart-define` cho Supabase secrets, upload APK artifact |
@@ -870,8 +870,8 @@ Implement 7 Business Requirements for model version management, hide confidence 
 
 **Verification:**
 - `flutter analyze` — 0 issues
-- `flutter test` — 89/89 passed
-- Admin Dashboard tests — 30/30 passed
+- `flutter test` — 140/140 passed
+- Admin Dashboard tests — 113/113 passed
 - No secrets committed, no SQL injection, no debug artifacts
 
 ---
@@ -888,10 +888,10 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | Sync | ✅ | Auto-sync + manual + exponential backoff + OTA model update |
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
 | CI/CD | ✅ | GitHub Actions: lint, test, model conversion, build, release |
-| Admin Dashboard | ✅ | React + Vite + Supabase JS (11 pages, 30 tests: 3 smoke + 22 integration + 5 data management) |
+| Admin Dashboard | ✅ | React + Vite + Supabase JS (11 pages, 113 tests: 6 test files covering helpers, DataContext, page integration) |
 | Jetson Edge | ✅ | Docker + TensorRT FP16 + REST API + systemd service |
 | i18n | ✅ | EN + VI (~300 keys each) |
-| Tests | ✅ | 89 tests (unit, DAO, provider, widget, integration) |
+| Tests | ✅ | 140 Flutter tests + 113 Dashboard tests (unit, DAO, provider, widget, integration) |
 | Code quality | ✅ | `flutter analyze` 0 issues |
 | Optimization | ✅ | Startup 1-3s faster, compute() isolate, IndexedStack |
 

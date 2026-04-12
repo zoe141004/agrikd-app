@@ -85,7 +85,7 @@ Dependency Audit → Lint & Format → Flutter Tests → Build APK
 | **Build APK** | Release APK with obfuscation + `--dart-define` secrets |
 | **Model Conversion** | Only runs if commit contains `[model]` or `mlops_pipeline/` files changed |
 | **Model Validation** | Validates + evaluates converted models |
-| **Dashboard Tests** | `vitest run` — admin dashboard unit/integration tests |
+| **Dashboard Tests** | `vitest run` — admin dashboard unit/integration tests (113 tests: helpers, DataContext, page integration) |
 | **Jetson Python Lint** | `ruff check` on Jetson Python code |
 
 **Flutter version:** 3.41.4

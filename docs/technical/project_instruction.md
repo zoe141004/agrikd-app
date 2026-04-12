@@ -234,11 +234,12 @@ app/
 |   |-- deploy.yml                    # Trigger Vercel deployment
 |   |-- export-data.yml               # Export predictions from Supabase
 |
-|-- mobile_app/test/                  # Flutter tests (89 tests)
+|-- mobile_app/test/                  # Flutter tests (140 tests)
 |   |-- unit/                         # 6 files, 36 tests
-|   |-- dao/                          # 1 file, 21 tests
-|   |-- provider/                     # 2 files, 13 tests
-|   |-- integration/                  # 1 file, 15 tests (OTA flow)
+|   |-- dao/                          # 2 files, 31 tests
+|   |-- provider/                     # 2 files, 20 tests
+|   |-- integration/                  # 2 files, 35 tests (OTA flow, migration, cache)
+|   |-- sync_queue_test.dart          # 18 tests (sync queue stress)
 |   |-- widget_test.dart              # 4 widget tests
 |   |-- test_helper.dart              # Test infrastructure
 |
@@ -1000,10 +1001,11 @@ curl http://localhost:8080/health
 | Stage | Job | Mo ta |
 |-------|-----|-------|
 | 1. Lint | `lint` | `dart format --set-exit-if-changed` + `flutter analyze` |
-| 2. Test | `test` | `flutter test` (89 tests), can `libsqlite3-dev` |
-| 3. Model Conversion | `model-conversion` | `run_pipeline.py` cho Tomato + Burmese, upload artifacts |
-| 4. Model Validation | `model-validation` | `validate_models.py` + `evaluate_models.py` |
-| 5. Build APK | `build` | `flutter build apk --release` voi `--dart-define` Supabase secrets |
+| 2. Test | `test` | `flutter test` (140 tests), can `libsqlite3-dev` |
+| 3. Dashboard Tests | `dashboard-test` | `npx vitest run` (113 tests) |
+| 4. Jetson Lint | `jetson-lint` | `flake8` + `pylint` Python checks |
+| 5. Dependency Audit | `dependency-audit` | `npm audit`, `pip-audit` |
+| 6. Build APK | `build` | `flutter build apk --release` voi `--dart-define` Supabase secrets |
 
 **File: `.github/workflows/release.yml`** — Stage 6:
 
@@ -1208,7 +1210,7 @@ cp models/tomato/tomato_student.tflite assets/models/tomato/
 flutter run --dart-define-from-file=.env
 
 # 4. Run tests
-flutter test    # 89 tests across 11 files
+flutter test    # 140 tests across 14 files
 
 # 5. Build release APK
 flutter build apk --release --dart-define-from-file=.env
@@ -1249,13 +1251,16 @@ flutter build apk --release --dart-define-from-file=.env
 | 4 | `test/unit/model_constants_test.dart` | 11 | Leaf types, model info, class labels (alphabetical order), helpers |
 | 5 | `test/unit/model_integrity_test.dart` | 4 | SHA-256 correctness, consistency, uniqueness |
 | 6 | `test/unit/prediction_test.dart` | 4 | fromMap/toMap, round-trip, null optional fields |
-| 7 | `test/dao/dao_test.dart` | 17 | PredictionDao (8), PreferenceDao (5), ModelDao (4), SyncQueue (4) |
-| 8 | `test/provider/settings_provider_test.dart` | 4 | loadAll, setValue, themeModeProvider system/dark |
-| 9 | `test/provider/history_provider_test.dart` | 9 | State management, filters, copyWith, clearConfidenceFilter |
-| 10 | `test/widget_test.dart` | 4 | HomeScreen renders title, scan button, bottom navigation, all leaf types |
-| 11 | `test/integration/ota_model_test.dart` | 15 | OTA version rotation (5), model integrity (4), sync queue (4), full OTA flow (2) |
+| 7 | `test/dao/dao_test.dart` | 21 | PredictionDao (8), PreferenceDao (5), ModelDao (4), SyncQueue (4) |
+| 8 | `test/dao/prediction_dao_filters_test.dart` | 10 | Filter by leaf type, date range, confidence, combined, sort order |
+| 9 | `test/provider/settings_provider_test.dart` | 4 | loadAll, setValue, themeModeProvider system/dark |
+| 10 | `test/provider/history_provider_test.dart` | 16 | State management, filters, copyWith, clearConfidenceFilter, pagination |
+| 11 | `test/sync_queue_test.dart` | 18 | Enqueue, dequeue, markSynced, cleanup, stress (100+ items) |
+| 12 | `test/widget_test.dart` | 4 | HomeScreen renders title, scan button, bottom navigation, all leaf types |
+| 13 | `test/integration/ota_model_test.dart` | 15 | OTA version rotation (5), model integrity (4), sync queue (4), full OTA flow (2) |
+| 14 | `test/integration/migration_and_cache_test.dart` | 20 | Schema integrity (7), cross-leaf isolation (2), ModelDao edge cases (4), sync queue stress (3), PredictionDao advanced (4) |
 
-**Tong: 89 tests, tat ca PASS**
+**Tong: 140 tests (14 files), tat ca PASS**
 
 ### 17.3 Luu y ky thuat
 - Widget tests dung `_TestableHomeBody` lightweight widget thay vi full `HomeScreen` vi IndexedStack render HistoryScreen + SettingsScreen co heavy async operations
@@ -1264,8 +1269,8 @@ flutter build apk --release --dart-define-from-file=.env
 
 ---
 
-*Last updated: 2026-04-02*
+*Last updated: 2026-04-12*
 *Pipeline verified: Tomato (87.2% Top-1) + Burmese Grape Leaf (87.3% Top-1)*
-*Test suite: 89/89 tests passing, flutter analyze 0 issues*
+*Test suite: 140/140 Flutter tests + 113 Dashboard tests passing, flutter analyze 0 issues*
 *All 10 implementation steps completed*
 *Release APK: 84.2 MB (fat) / 31.3 MB (arm64-v8a)*
