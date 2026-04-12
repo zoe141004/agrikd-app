@@ -54,18 +54,37 @@ apt-get install -y --no-install-recommends \
 echo "  [OK] System packages installed."
 
 # 5. Create Python venv with system site-packages (for TensorRT/PyCUDA)
-echo "[5/12] Creating Python virtual environment..."
+# Prefer python3.10; fall back to python3 if it is 3.10.x
+JETSON_PYTHON=""
+if command -v python3.10 &>/dev/null; then
+    JETSON_PYTHON="python3.10"
+elif command -v python3 &>/dev/null; then
+    PY_VER=$(python3 -c 'import sys; print(sys.version_info.minor)')
+    if [ "$PY_VER" = "10" ]; then
+        JETSON_PYTHON="python3"
+    fi
+fi
+if [ -z "$JETSON_PYTHON" ]; then
+    echo "  [ERROR] Python 3.10 not found. JetPack 5.x ships with Python 3.8."
+    echo "  Install: sudo apt install python3.10 python3.10-venv"
+    exit 1
+fi
+echo "  Using $($JETSON_PYTHON --version)"
+
+echo "[5/12] Creating Python 3.10 virtual environment..."
 if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv --system-site-packages "$VENV_DIR"
+    $JETSON_PYTHON -m venv --system-site-packages "$VENV_DIR"
     echo "  [OK] venv created at $VENV_DIR"
 else
     echo "  [OK] venv already exists at $VENV_DIR"
 fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
+echo "  Active Python: $(python --version) ($(which python))"
 
 # 6. Install Python dependencies in venv
 echo "[6/12] Installing Python dependencies in venv..."
+pip install --upgrade pip -q
 pip install --no-cache-dir -r "$INSTALL_DIR/requirements.txt"
 echo "  [OK] Python dependencies installed."
 deactivate
