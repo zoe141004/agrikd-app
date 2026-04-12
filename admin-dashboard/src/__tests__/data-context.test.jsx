@@ -8,11 +8,13 @@ import { render, screen, act, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
 
-// ── Mock supabase with full chain support ──────────────────────────────────
-let _rpcResult = { data: [], error: null }
-let _registryResult = { data: [], error: null }
-let _dvcOpsLeafResult = { data: [], error: null }
-let _dvcOpsDatasetResult = { data: [], error: null }
+// ── Use vi.hoisted so mock variables survive vi.mock hoisting ──────────────
+const mockState = vi.hoisted(() => ({
+  rpcResult: { data: [], error: null },
+  registryResult: { data: [], error: null },
+  dvcOpsLeafResult: { data: [], error: null },
+  dvcOpsDatasetResult: { data: [], error: null },
+}))
 
 function buildChain(resolveWith) {
   const chain = {
@@ -26,43 +28,36 @@ function buildChain(resolveWith) {
     limit: vi.fn(() => Promise.resolve(resolveWith)),
     single: vi.fn(() => Promise.resolve(resolveWith)),
   }
-  // Make each method return chain for further chaining
   for (const m of ['select', 'eq', 'neq', 'in', 'not', 'is', 'order']) {
     chain[m].mockReturnValue(chain)
   }
   return chain
 }
 
-// Track which table/rpc is being called to return the right mock data
-const mockSupabase = {
-  rpc: vi.fn((fnName) => {
-    if (fnName === 'get_leaf_type_options') return Promise.resolve(_rpcResult)
-    return Promise.resolve({ data: null, error: null })
-  }),
-  from: vi.fn((table) => {
-    if (table === 'model_registry') return buildChain(_registryResult)
-    if (table === 'dvc_operations') {
-      // DataContext calls dvc_operations twice:
-      // 1. refreshLeafTypes: select('leaf_type').in('status',...).not(...).neq(...).limit(200)
-      // 2. refreshDvcDatasets: select('leaf_type, metadata, completed_at').in('operation',...).eq('status','completed').not(...).order(...).limit(50)
-      // We differentiate by what select() is called with, but since mocks are stateless,
-      // return a chain that can resolve to either result based on which .limit() is called
-      const chain = buildChain(_dvcOpsLeafResult)
-      // Override limit to check the value — refreshLeafTypes uses limit(200), refreshDvcDatasets uses limit(50)
-      chain.limit = vi.fn((n) => {
-        return Promise.resolve(n >= 200 ? _dvcOpsLeafResult : _dvcOpsDatasetResult)
-      })
-      return chain
-    }
-    return buildChain({ data: [], error: null })
-  }),
-  auth: {
-    getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
-    onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    rpc: vi.fn((fnName) => {
+      if (fnName === 'get_leaf_type_options') return Promise.resolve(mockState.rpcResult)
+      return Promise.resolve({ data: null, error: null })
+    }),
+    from: vi.fn((table) => {
+      if (table === 'model_registry') return buildChain(mockState.registryResult)
+      if (table === 'dvc_operations') {
+        const chain = buildChain(mockState.dvcOpsLeafResult)
+        chain.limit = vi.fn((n) => {
+          return Promise.resolve(n >= 200 ? mockState.dvcOpsLeafResult : mockState.dvcOpsDatasetResult)
+        })
+        return chain
+      }
+      return buildChain({ data: [], error: null })
+    }),
+    auth: {
+      getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
+      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+    },
   },
-}
+}))
 
-vi.mock('../lib/supabase', () => ({ supabase: mockSupabase }))
 vi.mock('../lib/helpers', async (importOriginal) => {
   const original = await importOriginal()
   return {
@@ -71,8 +66,7 @@ vi.mock('../lib/helpers', async (importOriginal) => {
   }
 })
 
-// Now import the component under test (must be after vi.mock)
-const { DataProvider, useData } = await import('../lib/DataContext')
+import { DataProvider, useData } from '../lib/DataContext'
 
 // ── Helper consumer component ──────────────────────────────────────────────
 function ContextReader({ onValue }) {
@@ -103,10 +97,10 @@ function renderWithProvider(onValue = vi.fn()) {
 
 describe('DataContext', () => {
   beforeEach(() => {
-    _rpcResult = { data: [], error: null }
-    _registryResult = { data: [], error: null }
-    _dvcOpsLeafResult = { data: [], error: null }
-    _dvcOpsDatasetResult = { data: [], error: null }
+    mockState.rpcResult = { data: [], error: null }
+    mockState.registryResult = { data: [], error: null }
+    mockState.dvcOpsLeafResult = { data: [], error: null }
+    mockState.dvcOpsDatasetResult = { data: [], error: null }
     vi.clearAllMocks()
   })
 
@@ -133,9 +127,9 @@ describe('DataContext', () => {
   })
 
   it('merges leaf types from RPC, model_registry, and dvc_operations', async () => {
-    _rpcResult = { data: [{ leaf_type: 'tomato' }, { leaf_type: 'burmese_grape_leaf' }], error: null }
-    _registryResult = { data: [{ leaf_type: 'tomato' }, { leaf_type: 'potato' }], error: null }
-    _dvcOpsLeafResult = { data: [{ leaf_type: 'cassava' }], error: null }
+    mockState.rpcResult = { data: [{ leaf_type: 'tomato' }, { leaf_type: 'burmese_grape_leaf' }], error: null }
+    mockState.registryResult = { data: [{ leaf_type: 'tomato' }, { leaf_type: 'potato' }], error: null }
+    mockState.dvcOpsLeafResult = { data: [{ leaf_type: 'cassava' }], error: null }
 
     const onValue = vi.fn()
     renderWithProvider(onValue)
@@ -151,9 +145,9 @@ describe('DataContext', () => {
   })
 
   it('deduplicates leaf types from overlapping sources', async () => {
-    _rpcResult = { data: [{ leaf_type: 'tomato' }], error: null }
-    _registryResult = { data: [{ leaf_type: 'tomato' }], error: null }
-    _dvcOpsLeafResult = { data: [{ leaf_type: 'tomato' }], error: null }
+    mockState.rpcResult = { data: [{ leaf_type: 'tomato' }], error: null }
+    mockState.registryResult = { data: [{ leaf_type: 'tomato' }], error: null }
+    mockState.dvcOpsLeafResult = { data: [{ leaf_type: 'tomato' }], error: null }
 
     const onValue = vi.fn()
     renderWithProvider(onValue)
@@ -165,10 +159,9 @@ describe('DataContext', () => {
   })
 
   it('tolerates partial source failures in refreshLeafTypes', async () => {
-    // RPC fails, but registry and dvc succeed
-    _rpcResult = Promise.reject(new Error('RPC timeout'))
-    _registryResult = { data: [{ leaf_type: 'potato' }], error: null }
-    _dvcOpsLeafResult = { data: [{ leaf_type: 'tomato' }], error: null }
+    mockState.rpcResult = Promise.reject(new Error('RPC timeout'))
+    mockState.registryResult = { data: [{ leaf_type: 'potato' }], error: null }
+    mockState.dvcOpsLeafResult = { data: [{ leaf_type: 'tomato' }], error: null }
 
     const onValue = vi.fn()
     renderWithProvider(onValue)
@@ -182,7 +175,7 @@ describe('DataContext', () => {
   })
 
   it('parses DVC datasets from operation metadata', async () => {
-    _dvcOpsDatasetResult = {
+    mockState.dvcOpsDatasetResult = {
       data: [{
         leaf_type: 'all',
         metadata: {
@@ -213,7 +206,7 @@ describe('DataContext', () => {
   })
 
   it('prevents duplicate datasets via normalized key', async () => {
-    _dvcOpsDatasetResult = {
+    mockState.dvcOpsDatasetResult = {
       data: [
         {
           leaf_type: 'all',
@@ -269,7 +262,7 @@ describe('DataContext', () => {
   })
 
   it('sets dvcDatasetsSource to db when DB returns results', async () => {
-    _dvcOpsDatasetResult = {
+    mockState.dvcOpsDatasetResult = {
       data: [{
         leaf_type: 'tomato',
         metadata: { file_count: 100, total_size: '50M' },
@@ -288,8 +281,7 @@ describe('DataContext', () => {
   })
 
   it('auto-adds dvcDataset names to leafTypeOptions', async () => {
-    // No leaf types from RPC/registry, but dvcDatasets has entries
-    _dvcOpsDatasetResult = {
+    mockState.dvcOpsDatasetResult = {
       data: [{
         leaf_type: 'all',
         metadata: {
@@ -312,7 +304,7 @@ describe('DataContext', () => {
   })
 
   it('skips leaf_type "all" in dvcDatasets single-dataset fallback', async () => {
-    _dvcOpsDatasetResult = {
+    mockState.dvcOpsDatasetResult = {
       data: [{
         leaf_type: 'all',
         metadata: { file_count: 500, total_size: '1G' },
