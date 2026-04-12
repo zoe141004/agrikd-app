@@ -91,10 +91,15 @@ def _get_serial():
 
 
 def get_hardware_info():
-    """Collect hardware fingerprint and info."""
+    """Collect hardware fingerprint and info.
+
+    Returns:
+        hw_id: SHA-256 hash of MAC:serial (not reversible)
+        hostname: device hostname
+        hw_info: dict with hardware details (sent to server for registration)
+    """
     mac = _get_mac_address()
     serial = _get_serial()
-    hw_id = hashlib.sha256(f"{mac}:{serial}".encode()).hexdigest()[:32]
     hostname = socket.gethostname()
 
     jetpack = _read_file("/etc/nv_tegra_release")
@@ -111,7 +116,12 @@ def get_hardware_info():
     if jetpack:
         hw_info["jetpack"] = jetpack
 
-    return hw_id, hostname, hw_info
+    return mac, serial, hostname, hw_info
+
+
+def compute_hw_id(mac, serial):
+    """Compute hardware fingerprint as SHA-256 hash (one-way, not PII)."""
+    return hashlib.sha256(f"{mac}:{serial}".encode()).hexdigest()[:32]
 
 
 # ---------------------------------------------------------------------------
@@ -219,12 +229,12 @@ def provision(token_data, force=False):
 
     # 1. Detect hardware
     print("[1/4] Detecting hardware...")
-    hw_id, hostname, hw_info = get_hardware_info()
-    # Mask hardware fingerprint in output (CodeQL: private data)
-    hw_id_masked = hw_id[:8] + "..." + hw_id[-4:]
+    mac, serial, hostname, hw_info = get_hardware_info()
+    hw_id = compute_hw_id(mac, serial)
+    # Display only non-sensitive info (hw_id is a SHA-256 hash, further masked)
     print(f"  Hostname: {hostname}")
-    print(f"  HW ID:    {hw_id_masked}")
-    print(f"  Platform: {hw_info['platform']}")
+    print(f"  HW ID:    {hw_id[:8]}...{hw_id[-4:]}")
+    print(f"  Platform: {platform.machine()}")
 
     # 2. Provision device via atomic server RPC
     #    Single call: validates token → registers/re-registers device → claims token
@@ -334,7 +344,7 @@ def provision(token_data, force=False):
 
     print()
     print("=" * 40)
-    print(f"Provisioned as '{hostname}' (hw_id: {hw_id_masked})")
+    print(f"Provisioned as '{hostname}' (hw_id: {hw_id[:8]}...{hw_id[-4:]})")
     print(f"Device ID: {device_id}")
     print()
     print("Next steps:")
