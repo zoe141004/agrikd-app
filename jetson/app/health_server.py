@@ -6,6 +6,7 @@ import logging
 import os
 import secrets
 import time
+import uuid
 from collections import defaultdict
 from threading import Lock, Thread
 
@@ -22,6 +23,20 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 # Allowed image extensions
 _ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "bmp", "tiff"}
+
+# Local image storage directory
+_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "images")
+
+
+def _save_prediction_image(frame):
+    """Save a prediction frame as compressed JPEG, return local path."""
+    os.makedirs(_IMAGES_DIR, exist_ok=True)
+    ts = int(time.time() * 1000)
+    uid = uuid.uuid4().hex[:8]
+    filename = f"pred_{ts}_{uid}.jpg"
+    path = os.path.join(_IMAGES_DIR, filename)
+    cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return path
 
 # These are set when the server starts
 _db = None
@@ -207,8 +222,11 @@ def predict():
         # Fix 1.1: Submit to InferenceWorkerPool (thread-safe, CUDA-owner)
         result = _pool.submit(leaf_type, frame).result(timeout=30)
 
+        # Save image AFTER successful inference (avoids orphaned files)
+        image_path = _save_prediction_image(frame)
+
         # Fix 2.8: Pass device_id so API predictions are traceable
-        _db.save_prediction(leaf_type, result, device_id=_device_id)
+        _db.save_prediction(leaf_type, result, image_path=image_path, device_id=_device_id)
 
         # Throttle cleanup to every 100 predictions, run in background (H7)
         _prediction_count += 1

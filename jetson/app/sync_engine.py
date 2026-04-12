@@ -359,17 +359,91 @@ class SyncEngine:
         except requests.RequestException:
             pass  # Heartbeat is best-effort
 
+    # ── Image upload ──────────────────────────────────────────────────
+
+    def _upload_image(self, local_path, user_id, local_id):
+        """Upload a prediction image to Supabase Storage.
+
+        Mirrors mobile app flow:
+          - Bucket: prediction-images
+          - Path: {user_id}/{timestamp}_{local_id}.jpg
+          - Returns signed URL (365 days) or None on failure.
+        """
+        try:
+            ts = int(time.time() * 1000)
+            storage_path = f"{user_id}/{ts}_{local_id}.jpg"
+
+            with open(local_path, "rb") as f:
+                image_data = f.read()
+
+            # Upload to Supabase Storage
+            upload_url = (
+                f"{self.supabase_url}/storage/v1/object/prediction-images/{storage_path}"
+            )
+            upload_headers = {
+                "apikey": self.supabase_key,
+                "Authorization": f"Bearer {self.supabase_key}",
+                "Content-Type": "image/jpeg",
+            }
+            resp = self._session.post(
+                upload_url, headers=upload_headers, data=image_data,
+                timeout=(10, 30), verify=True,
+            )
+            if resp.status_code not in (200, 201):
+                logger.warning(
+                    "Image upload failed: HTTP %d %s",
+                    resp.status_code, resp.text[:100],
+                )
+                return None
+
+            # Create signed URL (365 days)
+            sign_url = f"{self.supabase_url}/storage/v1/object/sign/prediction-images/{storage_path}"
+            sign_headers = {
+                "apikey": self.supabase_key,
+                "Authorization": f"Bearer {self.supabase_key}",
+                "Content-Type": "application/json",
+            }
+            sign_resp = self._session.post(
+                sign_url, headers=sign_headers,
+                json={"expiresIn": 365 * 24 * 3600},
+                timeout=10, verify=True,
+            )
+            if sign_resp.status_code == 200:
+                signed_data = sign_resp.json()
+                # Supabase v1: signedURL, v2+: signedUrl
+                signed_path = (
+                    signed_data.get("signedURL")
+                    or signed_data.get("signedUrl")
+                    or ""
+                )
+                if signed_path:
+                    # signedURL already includes /object/sign/ prefix
+                    full_url = f"{self.supabase_url}/storage/v1{signed_path}"
+                    logger.debug("Image uploaded: %s", storage_path)
+                    return full_url
+
+            logger.warning("Signed URL creation failed: HTTP %d", sign_resp.status_code)
+            return None
+        except (requests.RequestException, OSError) as e:
+            logger.warning("Image upload error: %s", e)
+            return None
+
     # ── Sync batch (LOCAL-FIRST) ──────────────────────────────────────
 
     def _sync_batch(self):
         """Sync unsynced predictions to Supabase.
 
-        LOCAL-FIRST guarantee (Correction A):
-          - If no user_id assigned: return early (skip POST only).
-            Data stays safely in SQLite. The run() loop continues to
-            poll for assignment on the next cycle.
-          - When user_id becomes available: push ALL backlog including
-            predictions recorded before assignment.
+        Flow per prediction:
+          1. Upload image to Supabase Storage (if image_path exists)
+          2. Get signed URL (365 days)
+          3. Push prediction metadata + image_url via RPC
+          4. Mark synced locally
+          5. Delete local image file
+
+        LOCAL-FIRST guarantee:
+          - No user_id → skip POST, data stays in SQLite.
+          - Image upload failure → prediction still syncs (without image).
+          - RPC failure → retry next cycle, local image preserved.
         """
         unsynced = self.db.get_unsynced(self.batch_size)
         if not unsynced:
@@ -387,7 +461,7 @@ class SyncEngine:
                 "No user assigned — %d predictions queued locally",
                 len(unsynced),
             )
-            return  # Skip POST; run() loop continues for poll + heartbeat
+            return
 
         logger.info("Syncing %d predictions...", len(unsynced))
 
@@ -401,6 +475,15 @@ class SyncEngine:
             model_cfg = self._models_config.get(leaf_type, {})
             model_version = model_cfg.get("version", "1.0.0")
 
+            # Upload image to Supabase Storage (skip if already uploaded)
+            image_url = pred.get("uploaded_image_url")
+            local_path = pred.get("image_path")
+            if not image_url and local_path and os.path.isfile(local_path):
+                image_url = self._upload_image(local_path, user_id, pred["id"])
+                if image_url:
+                    # Persist URL so retries don't re-upload
+                    self.db.set_uploaded_image_url(pred["id"], image_url)
+
             payload = {
                 "leaf_type": leaf_type,
                 "predicted_class_index": pred["class_index"],
@@ -413,6 +496,7 @@ class SyncEngine:
                 "model_version": model_version,
                 "created_at": pred["created_at"],
                 "local_id": pred["id"],
+                "image_url": image_url,
             }
             payload_list.append(payload)
 
@@ -430,6 +514,15 @@ class SyncEngine:
             if resp.status_code in (200, 201):
                 for pred in unsynced:
                     self.db.mark_synced(pred["id"])
+                # Delete ALL local images after successful sync
+                # (covers both fresh uploads and retry-path images)
+                for pred in unsynced:
+                    local_path = pred.get("image_path")
+                    if local_path:
+                        try:
+                            os.unlink(local_path)
+                        except OSError:
+                            pass
             elif resp.status_code == 401:
                 logger.warning("Auth expired, re-authenticating...")
                 self._access_token = ""

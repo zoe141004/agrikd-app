@@ -495,22 +495,27 @@ After each inference, the right panel updates with:
 - **Analyzed image thumbnail** -- a small preview of the image that was analyzed,
   displayed below the table.
 
-### 5.8 Active Learning
+### 5.8 Image Capture & Cloud Sync
 
-Every image analyzed through the GUI is automatically saved for future model
-retraining:
+Every image analyzed through both the API and periodic capture is saved locally
+and uploaded to Supabase Storage during the sync cycle:
 
-- **Storage path**: `data/images/<leaf_type>/` (e.g., `data/images/tomato/`,
-  `data/images/burmese_grape_leaf/`).
-- **Filename format**: `YYYYMMDD_HHMMSS_ffffff.jpg` (microsecond precision to
-  avoid filename collisions during rapid capture).
-- **Image quality**: JPEG at 95% quality.
-- **Directory structure**: Images are organized into subdirectories by leaf type,
-  forming an ImageFolder-compatible layout that can be directly consumed by
-  PyTorch's `torchvision.datasets.ImageFolder` for retraining.
+- **Local storage**: `data/images/` — flat directory.
+- **Filename format**: `pred_{unix_ms}_{uuid8}.jpg` (millisecond timestamp +
+  8-char UUID to avoid collisions under concurrent requests).
+- **Image quality**: JPEG at 85% quality (optimized for upload bandwidth).
+- **Cloud sync**: During each sync cycle, the sync engine uploads images to the
+  `prediction-images` Supabase Storage bucket at `{user_id}/{ts}_{local_id}.jpg`,
+  creates a 365-day signed URL, and stores it in the `image_url` field of the
+  `predictions` table. After successful sync the local file is deleted.
+- **Retry safety**: If the RPC push fails after image upload, the signed URL is
+  persisted in local SQLite (`uploaded_image_url` column) so the next sync cycle
+  reuses it instead of re-uploading.
 - **Database linkage**: Each prediction record in the SQLite database includes
   an `image_path` column referencing the saved image file, enabling full
   traceability from prediction to source image.
+- **Cleanup**: `cleanup_old_records()` deletes orphaned image files for
+  predictions older than the retention window.
 
 Over time, this data collection builds a site-specific dataset that captures
 real-world conditions (lighting, leaf orientation, camera angle) not present in
@@ -922,6 +927,13 @@ Each sync cycle (every `interval_seconds`, default 300s) performs:
 2. **Prediction push** — calls `device_push_predictions(device_token, predictions)`
    RPC with up to `batch_size` (default: 50) unsynced records from local SQLite.
    Skipped if no user is assigned.
+   - **Image upload**: For each prediction with a local `image_path`, the engine
+     uploads the JPEG to the `prediction-images` Supabase Storage bucket at
+     `{user_id}/{timestamp}_{local_id}.jpg`, creates a 365-day signed URL, and
+     includes `image_url` in the prediction payload. After successful sync the
+     local file is deleted. If the RPC fails, the uploaded URL is persisted in
+     SQLite so retries reuse it (no duplicate uploads). Image upload failure does
+     NOT block prediction sync — the prediction is pushed without an image.
 3. **Heartbeat** — calls `device_heartbeat(device_token)` RPC to update
    `last_seen_at` and set `status=online` (if a user is assigned).
 4. **Config ACK** — when a new config version is detected, applies it locally

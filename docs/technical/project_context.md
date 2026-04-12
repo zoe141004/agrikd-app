@@ -345,6 +345,13 @@ prediction records. When network connectivity is detected, the queue is flushed 
 Supabase via its REST API. Conflict resolution uses a last-write-wins strategy with
 server-side timestamps.
 
+The Jetson sync engine also uploads prediction images to the `prediction-images`
+Supabase Storage bucket during each sync cycle. Image upload uses signed URLs
+(365-day expiry) and the URL is stored in the `image_url` column of the
+`predictions` table. If the RPC push fails after upload, the signed URL is cached
+in local SQLite (`uploaded_image_url`) so retries reuse it. After successful sync,
+local image files are deleted to conserve disk space.
+
 ### 5.6 Environment Variable Distribution
 
 The root `.env` file is the single source of truth. Running `python sync_env.py`

@@ -25,6 +25,9 @@ import socket
 import sys
 import threading
 import time
+import uuid
+
+import cv2
 
 from camera import CameraCapture
 from database import JetsonDatabase
@@ -313,7 +316,17 @@ def main():
                     if frame is not None:
                         # Fix 1.1: Submit to pool (thread-safe, CUDA-owner)
                         result = pool.submit(default_leaf, frame).result(timeout=30)
-                        db.save_prediction(default_leaf, result, device_id=device_id)
+
+                        # Save image AFTER successful inference (avoids orphaned files)
+                        _app_dir = os.path.dirname(os.path.abspath(__file__))
+                        img_dir = os.path.join(_app_dir, "..", "data", "images")
+                        os.makedirs(img_dir, exist_ok=True)
+                        ts_ms = int(time.time() * 1000)
+                        uid = uuid.uuid4().hex[:8]
+                        img_path = os.path.join(img_dir, f"pred_{ts_ms}_{uid}.jpg")
+                        cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+                        db.save_prediction(default_leaf, result, image_path=img_path, device_id=device_id)
                         logger.info(
                             "Prediction: %s (%.1f%%)",
                             result["class_name"],

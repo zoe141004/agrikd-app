@@ -62,6 +62,15 @@ class JetsonDatabase:
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
+            # Add uploaded_image_url column (stores Supabase URL after upload)
+            try:
+                self.conn.execute(
+                    "ALTER TABLE predictions ADD COLUMN uploaded_image_url TEXT"
+                )
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
     def save_prediction(self, leaf_type, result, image_path=None, device_id=None):
         """Save a prediction result to the database.
 
@@ -112,6 +121,15 @@ class JetsonDatabase:
             self.conn.execute(
                 "UPDATE predictions SET is_synced = 1, synced_at = datetime('now') WHERE id = ?",
                 (pred_id,),
+            )
+            self.conn.commit()
+
+    def set_uploaded_image_url(self, pred_id, url):
+        """Store the Supabase image URL so retries reuse it."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE predictions SET uploaded_image_url = ? WHERE id = ?",
+                (url, pred_id),
             )
             self.conn.commit()
 

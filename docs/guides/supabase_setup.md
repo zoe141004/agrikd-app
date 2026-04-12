@@ -75,7 +75,7 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 - `device_poll_config(token)` — returns desired_config, config_version, status, user_id
 - `device_ack_config(token, config)` — ACK applied config (sets reported_config)
 - `device_heartbeat(token)` — update last_seen_at + status
-- `device_push_predictions(token, predictions)` — batch insert predictions with device ownership validation
+- `device_push_predictions(token, predictions)` — batch insert predictions with device ownership validation, supports `image_url` field for Supabase Storage signed URLs
 - File: `database/migrations/020_device_sync_rpcs.sql`
 
 ### Migration 017: Dataset Delete

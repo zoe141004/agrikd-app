@@ -113,7 +113,7 @@ BEGIN
         INSERT INTO public.predictions (
             user_id, leaf_type, predicted_class_index, predicted_class_name,
             confidence, all_confidences, inference_time_ms, model_version,
-            created_at, device_id, local_id
+            created_at, device_id, local_id, image_url
         ) VALUES (
             v_user_id,
             v_pred->>'leaf_type',
@@ -125,7 +125,8 @@ BEGIN
             v_pred->>'model_version',
             COALESCE((v_pred->>'created_at')::TIMESTAMPTZ, now()),
             v_device_id,
-            (v_pred->>'local_id')::INTEGER
+            (v_pred->>'local_id')::INTEGER,
+            v_pred->>'image_url'
         )
         ON CONFLICT DO NOTHING;
         v_count := v_count + 1;
