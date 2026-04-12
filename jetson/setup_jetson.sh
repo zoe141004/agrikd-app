@@ -420,9 +420,48 @@ echo ""
 
 # ── 10. Convert ONNX → TensorRT engines ─────────────────────
 echo "[10/13] Converting ONNX models to TensorRT FP16 engines..."
-if ! command -v trtexec &>/dev/null; then
-    echo "  [WARN] trtexec not found — cannot convert ONNX to TensorRT."
-    echo "  JetPack 5.x+ should include trtexec. Install TensorRT if missing."
+
+# Locate trtexec — may not be in PATH on JetPack installs
+TRTEXEC=""
+if command -v trtexec &>/dev/null; then
+    TRTEXEC="trtexec"
+else
+    # Common JetPack locations for trtexec
+    for candidate in \
+        /usr/src/tensorrt/bin/trtexec \
+        /usr/local/cuda/bin/trtexec \
+        /usr/lib/tensorrt/bin/trtexec \
+        /opt/tensorrt/bin/trtexec; do
+        if [ -x "$candidate" ]; then
+            TRTEXEC="$candidate"
+            echo "  Found trtexec at: $TRTEXEC"
+            break
+        fi
+    done
+fi
+
+if [ -z "$TRTEXEC" ]; then
+    echo "  [WARN] trtexec not found in PATH or common JetPack locations."
+    echo "  Attempting to install TensorRT tools..."
+    set +e
+    apt-get install -y tensorrt libnvinfer-bin 2>/dev/null
+    set -e
+    # Re-check after install
+    for candidate in \
+        /usr/src/tensorrt/bin/trtexec \
+        /usr/local/cuda/bin/trtexec; do
+        if [ -x "$candidate" ]; then
+            TRTEXEC="$candidate"
+            echo "  [OK] trtexec installed at: $TRTEXEC"
+            break
+        fi
+    done
+    command -v trtexec &>/dev/null && TRTEXEC="trtexec"
+fi
+
+if [ -z "$TRTEXEC" ]; then
+    echo "  [WARN] trtexec still not available — cannot convert ONNX to TensorRT."
+    echo "  Install TensorRT manually:  sudo apt-get install tensorrt"
     echo "  Skipping conversion. Pre-built .engine files can be placed at:"
     echo "    $INSTALL_DIR/models/<leaf_type>_student.engine"
 else
@@ -438,7 +477,7 @@ else
 
         echo "  Converting: $leaf_type (this may take several minutes)..."
         set +e  # trtexec failure should not abort setup
-        trtexec \
+        "$TRTEXEC" \
             --onnx="$onnx_file" \
             --saveEngine="$engine_file" \
             --fp16 \
