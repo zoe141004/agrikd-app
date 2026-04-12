@@ -513,6 +513,82 @@ except Exception as e:
 " "$CFG" "$leaf_type" "$HASH"
         echo "  SHA-256: ${HASH:0:16}... → config.json"
 
+        # Upload .engine to Supabase Storage for backup
+        # NOTE: .engine files are device-specific (GPU arch + TensorRT version).
+        #       They only work on the SAME hardware they were built on.
+        python3 -c "
+import json, sys, os, urllib.request, subprocess
+
+cfg_path   = sys.argv[1]
+leaf_type  = sys.argv[2]
+engine_file = sys.argv[3]
+sha256     = sys.argv[4]
+
+# Read Supabase credentials from config
+try:
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+    url = cfg.get('sync', {}).get('supabase_url', '')
+    key = cfg.get('sync', {}).get('supabase_key', '')
+    if not url or not key:
+        print('  [SKIP] No Supabase credentials — engine not uploaded.')
+        sys.exit(0)
+except Exception as e:
+    print(f'  [SKIP] Cannot read config: {e}')
+    sys.exit(0)
+
+# Detect device hardware for storage path annotation
+hw_model = 'unknown'
+trt_ver  = 'unknown'
+try:
+    with open('/proc/device-tree/model', 'r') as f:
+        hw_model = f.read().strip().rstrip(chr(0))
+    # Shorten: 'NVIDIA Jetson Orin Nano Developer Kit' -> 'jetson-orin-nano'
+    hw_model = hw_model.lower().replace('nvidia ', '').replace(' developer kit', '')
+    hw_model = hw_model.replace(' ', '-')
+except FileNotFoundError:
+    pass
+try:
+    r = subprocess.run(['dpkg', '-l', 'tensorrt'], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        if line.startswith('ii'):
+            trt_ver = line.split()[2].split('-')[0]
+            break
+except Exception:
+    pass
+
+# Storage path: engines/{hw_model}/{leaf_type}_student.engine
+storage_tag = f'{hw_model}_trt{trt_ver}'
+storage_path = f'engines/{storage_tag}/{leaf_type}_student.engine'
+
+print(f'  Uploading .engine to storage: {storage_path}')
+print(f'    Device: {hw_model}, TensorRT: {trt_ver}')
+
+with open(engine_file, 'rb') as f:
+    data = f.read()
+
+upload_url = f'{url}/storage/v1/object/models/{storage_path}'
+headers = {
+    'apikey': key,
+    'Authorization': f'Bearer {key}',
+    'Content-Type': 'application/octet-stream',
+    'x-upsert': 'true',
+}
+req = urllib.request.Request(upload_url, data=data, headers=headers, method='POST')
+try:
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        size_mb = len(data) / (1024*1024)
+        print(f'  [OK] Uploaded .engine ({size_mb:.1f} MB)')
+        print(f'    Path: models/{storage_path}')
+        print(f'    SHA-256: {sha256[:16]}...')
+        print(f'    NOTE: This engine ONLY works on {hw_model} + TRT {trt_ver}')
+except urllib.error.HTTPError as e:
+    body = e.read().decode('utf-8', errors='replace')[:200]
+    print(f'  [WARN] Upload failed ({e.code}): {body}')
+except Exception as e:
+    print(f'  [WARN] Upload failed: {e}')
+" "$CFG" "$leaf_type" "$engine_file" "$HASH"
+
         # Clean up ONNX after successful conversion
         rm -f "$onnx_file"
         echo "  [OK] Converted + removed ONNX: $leaf_type"
