@@ -195,6 +195,15 @@ CREATE POLICY "Devices upload prediction images"
         AND public.is_device_assigned_user((storage.foldername(name))[1])
     );
 
+-- Devices also need SELECT to create signed URLs after upload
+DROP POLICY IF EXISTS "Devices read prediction images" ON storage.objects;
+CREATE POLICY "Devices read prediction images"
+    ON storage.objects FOR SELECT
+    USING (
+        bucket_id = 'prediction-images'
+        AND public.is_device_assigned_user((storage.foldername(name))[1])
+    );
+
 -- 5. Enable Realtime for devices table (dashboard auto-refresh)
 DO $$
 BEGIN

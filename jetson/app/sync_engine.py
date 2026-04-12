@@ -422,7 +422,8 @@ class SyncEngine:
                     logger.debug("Image uploaded: %s", storage_path)
                     return full_url
 
-            logger.warning("Signed URL creation failed: HTTP %d", sign_resp.status_code)
+            logger.warning("Signed URL creation failed: HTTP %d %s",
+                          sign_resp.status_code, sign_resp.text[:200])
             return None
         except (requests.RequestException, OSError) as e:
             logger.warning("Image upload error: %s", e)
