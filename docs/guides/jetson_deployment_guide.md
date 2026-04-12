@@ -45,10 +45,15 @@ Supported models:
 
 ### 2.2 Software
 
-- **JetPack SDK 5.x or 6.x** installed on the Jetson (includes CUDA, cuDNN, and TensorRT).
+- **JetPack SDK 5.x or 6.x** installed on the Jetson (includes CUDA, cuDNN, TensorRT, and Docker).
 - **Ubuntu 20.04 or 22.04** (L4T base image shipped with JetPack).
-- **Python 3.8+** (pre-installed with JetPack).
+- **Docker** with `nvidia-container-runtime` (included with JetPack 5.x+).
+- **Python 3** (pre-installed with JetPack; used for GUI mode only).
 - **Git** for cloning the repository.
+
+> **NOTE:** You do NOT need to run `setup_dev.sh` or set up a Python venv on Jetson.
+> The Jetson setup is fully self-contained. Headless mode runs in Docker;
+> GUI mode uses system Python with apt-installed packages.
 
 ### 2.3 ONNX Model Files
 
@@ -57,7 +62,8 @@ ONNX models are produced by the AgriKD MLOps pipeline and stored on
 automatically downloads them and converts to TensorRT engines on-device.
 
 If no Supabase credentials are configured, you can place ONNX files
-manually at `/opt/agrikd/models/<leaf_type>_student.onnx`.
+manually at `$INSTALL_DIR/models/<leaf_type>_student.onnx`
+(default: `/opt/agrikd/models/`).
 
 ---
 
@@ -72,17 +78,18 @@ cd agrikd-app/jetson
 cp config/config.example.json config/config.json
 # Edit config/config.json to fill in Supabase credentials if desired
 
-# Run the automated setup (requires root)
+# Run the automated setup (requires root for Docker + systemd)
+chmod +x setup_jetson.sh
 sudo ./setup_jetson.sh
 ```
 
 After setup completes, choose a deployment mode:
 
 ```bash
-# Headless REST API
+# Headless REST API (runs in Docker container with GPU)
 sudo systemctl start agrikd
 
-# GUI Desktop Application
+# GUI Desktop Application (runs on host with system Python)
 python3 /opt/agrikd/app/gui_app.py
 ```
 
@@ -90,70 +97,115 @@ python3 /opt/agrikd/app/gui_app.py
 
 ## 4. Setup Script Explained
 
-The `setup_jetson.sh` script performs eleven sequential steps. Each step is logged
-to the console with a numbered prefix (`[1/11]` through `[11/11]`).
+The `setup_jetson.sh` script performs thirteen sequential steps. Each step is
+logged to the console with a numbered prefix (`[1/13]` through `[13/13]`).
 
-### Step 1 -- Create Service User
+Run from the repo's `jetson/` directory:
+
+```bash
+cd <repo-root>/jetson
+sudo ./setup_jetson.sh
+```
+
+### Architecture
+
+| Mode | Runtime | Python | Isolation |
+|------|---------|--------|-----------|
+| **Headless REST API** | Docker container (`agrikd-edge:latest`) | Container Python (L4T base) | Full Docker isolation, GPU via `--runtime=nvidia` |
+| **GUI Desktop App** | Host (system Python) | `/usr/bin/python3` + apt packages | System packages (`python3-pyqt5`, `python3-opencv`) |
+
+### Step 1 -- Check Platform
+
+Verifies the device is ARM64 (`aarch64`) and that Docker with
+`nvidia-container-runtime` is available.
+
+### Step 2 -- Create Service User
 
 ```bash
 useradd -m -s /bin/bash agrikd
+usermod -aG video,docker agrikd
 ```
 
-A dedicated `agrikd` system user is created to run both the headless service and
-the GUI application. If the user already exists, the step is skipped.
+A dedicated `agrikd` user is created with `video` (camera access) and `docker`
+group membership. If the user already exists, only group membership is ensured.
 
-### Step 2 -- Create Directories
+### Step 3 -- Create Directories
 
 ```bash
-mkdir -p /opt/agrikd/{app,config,models,data/images,logs}
+mkdir -p /opt/agrikd/{app,config,models,data/images,logs,scripts}
 ```
 
 | Directory | Purpose |
 |-----------|---------|
-| `app/` | Python application modules (`gui_app.py`, `health_server.py`, `inference.py`, etc.) |
-| `config/` | `config.json` runtime configuration (created from `config.example.json`) |
+| `app/` | Python application modules (from `jetson/app/` in repo) |
+| `config/` | `config.json` runtime configuration |
 | `models/` | TensorRT `.engine` files (built on-device from ONNX) |
 | `data/images/` | Active Learning image storage, organized by leaf type |
 | `logs/` | Rotating log files for both headless and GUI modes |
+| `scripts/` | Provisioning + engine builder utilities |
 
-### Step 3 -- Copy Application Files
+### Step 4 -- Copy Application Files
 
-All files from the repository's `app/` and `config/` directories are copied into
-`/opt/agrikd/`. Ownership is set to the `agrikd` user and group.
+All files from the repository's `jetson/app/`, `jetson/scripts/`, and
+`jetson/config/` directories are copied into `/opt/agrikd/`. The `Dockerfile`
+and `requirements.txt` are also copied for Docker builds. Ownership is set to
+the `agrikd` user.
 
-### Step 4 -- Install Python Dependencies
-
-The setup script creates a Python virtual environment at `/opt/agrikd/venv`
-with `--system-site-packages` to access JetPack's TensorRT and PyCUDA.
+### Step 5 -- Build Docker Image
 
 ```bash
-python3 -m venv --system-site-packages /opt/agrikd/venv
-source /opt/agrikd/venv/bin/activate
-pip install -r requirements.txt
+docker build -t agrikd-edge:latest -f /opt/agrikd/Dockerfile /opt/agrikd/
 ```
 
-OpenCV is installed with GUI support (`opencv-python`, not
-`opencv-python-headless`) so that the GUI application can render camera frames.
-`waitress` is the production WSGI server used by the headless REST API.
+Builds the headless inference Docker image from the NVIDIA L4T TensorRT base.
+The image includes Python, OpenCV (headless), Flask, Waitress, and all
+dependencies from `requirements.txt`. Config, models, data, and logs are NOT
+baked in — they are mounted as volumes at runtime.
 
-### Step 5 -- Install GUI Dependencies
+### Step 6 -- Install System Packages for GUI
 
 ```bash
 apt-get install -y --no-install-recommends \
-    python3-pyqt5 \
-    v4l-utils \
-    libgl1-mesa-glx \
-    libglib2.0-0
+    python3-pyqt5 python3-pip python3-numpy python3-opencv \
+    v4l-utils libgl1-mesa-glx libglib2.0-0
 ```
 
 | Package | Purpose |
 |---------|---------|
 | `python3-pyqt5` | PyQt5 widget toolkit for the desktop GUI |
-| `v4l-utils` | Video4Linux utilities for camera enumeration and diagnostics (`v4l2-ctl`) |
-| `libgl1-mesa-glx` | OpenGL runtime required by OpenCV and PyQt5 rendering |
+| `python3-numpy` | NumPy for image processing (system package) |
+| `python3-opencv` | OpenCV with GUI support for camera frames |
+| `v4l-utils` | Camera enumeration and diagnostics (`v4l2-ctl`) |
+| `libgl1-mesa-glx` | OpenGL runtime for PyQt5 rendering |
 | `libglib2.0-0` | GLib library required by OpenCV |
 
-### Step 6 -- Convert ONNX to TensorRT Engines
+> **Why no venv?** PyQt5 on ARM64 has no pip wheel — it must be installed via
+> `apt`. Using system Python ensures PyQt5, TensorRT, and PyCUDA all coexist
+> without conflicts. Docker handles isolation for the headless service.
+
+### Step 7 -- Install GUI Python Dependencies
+
+```bash
+pip3 install requests flask waitress
+```
+
+Installs minimal pip packages that are not available via apt. The GUI app
+needs `requests` for Supabase sync; `flask` and `waitress` are needed if
+running `main.py` outside Docker for testing.
+
+### Step 8 -- Download ONNX Models
+
+ONNX models are downloaded from Supabase Storage using the credentials in
+`config.json`. If no credentials are configured, this step is skipped and
+you can place ONNX files manually:
+
+```bash
+# Manual placement
+cp tomato_student.onnx /opt/agrikd/models/
+cp burmese_grape_leaf_student.onnx /opt/agrikd/models/
+```
+
+### Step 9 -- Convert ONNX → TensorRT Engines
 
 ```bash
 trtexec \
@@ -163,47 +215,48 @@ trtexec \
     --workspace=1024
 ```
 
-The script iterates over all ONNX files found in `models/*/` and converts each
-one to a TensorRT FP16 engine. The `--workspace=1024` flag allocates 1024 MB of
-GPU workspace memory for layer optimization. Engines are hardware-specific and
-must be built on the target Jetson device.
+Iterates over all `*_student.onnx` files in `/opt/agrikd/models/` and converts
+each to a TensorRT FP16 engine. The SHA-256 hash is injected into `config.json`.
+ONNX files are deleted after successful conversion.
 
-### Step 7 -- Install systemd Services
+Engines are hardware-specific and must be built on the target Jetson device.
 
-Two unit files are copied to `/etc/systemd/system/`:
+### Step 10 -- Install systemd Services
 
-- `agrikd.service` -- headless REST API (enabled by default, starts on boot).
-- `agrikd-gui.service` -- GUI application (available but not enabled by default).
+Two unit files are installed to `/etc/systemd/system/`:
 
-Both services are configured with `Restart=always` and resource limits
-(`MemoryMax=512M`, `CPUQuota=80%`) to prevent the inference process from
-starving other system services. See Section 11.4 for details.
-
-### Step 8 -- Camera Permissions
-
-```bash
-usermod -aG video agrikd
+**`agrikd.service` (Headless — Docker):**
+```ini
+ExecStart=/usr/bin/docker run --rm --name agrikd-headless \
+    --runtime=nvidia --network=host \
+    -v /opt/agrikd/config:/app/config:ro \
+    -v /opt/agrikd/models:/app/models:ro \
+    -v /opt/agrikd/data:/app/data \
+    -v /opt/agrikd/logs:/app/logs \
+    agrikd-edge:latest
 ```
 
-The `agrikd` user is added to the `video` group so it can access `/dev/video*`
-devices without root privileges.
+**`agrikd-gui.service` (GUI — Host Python):**
+```ini
+ExecStart=/usr/bin/python3 /opt/agrikd/app/gui_app.py \
+    --config /opt/agrikd/config/config.json
+```
 
-### Step 9 -- Create Desktop Shortcut
+The headless service is enabled by default (starts on boot). The GUI service
+is available but not enabled by default.
+
+### Step 11 -- Create Desktop Shortcut
 
 A `.desktop` file is installed to `/usr/share/applications/` so the GUI
 application appears in the desktop environment's application menu as
 **"AgriKD Plant Disease Detection"**.
 
-### Step 10 -- Copy Provisioning Scripts
+### Step 12 -- Camera Permissions
 
-```bash
-cp -r scripts/* "$INSTALL_DIR/scripts/"
-```
+Verifies the `agrikd` user is in the `video` group for `/dev/video*` access.
+Lists connected cameras using `v4l2-ctl` if available.
 
-The Zero-Touch Provisioning script (`provision.py`) and any helper scripts are
-copied to `/opt/agrikd/scripts/` with ownership set to the `agrikd` user.
-
-### Step 11 -- Zero-Touch Provisioning
+### Step 13 -- Zero-Touch Provisioning
 
 The script prompts the operator to paste a provisioning token, provide a path
 to a `.token` file, or type `skip` to defer provisioning:

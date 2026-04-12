@@ -1,6 +1,6 @@
 # Ruff linter config for Jetson edge Python modules
 line-length = 120
-target-version = "py38"
+target-version = "py310"
 
 [lint]
 select = ["E", "F", "W"]

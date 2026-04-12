@@ -918,8 +918,10 @@ Files:
 - `app/sync_engine.py`: HTTP sync to Supabase REST API (batch 50)
 - `app/health_server.py`: Flask REST API
 - `config/config.json`: All settings (camera, models, sync, logging)
-- `agrikd.service`: Systemd unit file (auto-start, restart, resource limits)
-- `setup_jetson.sh`: One-click deployment script
+- `Dockerfile`: Headless Docker image (L4T TensorRT base)
+- `agrikd.service`: Systemd unit for Docker headless (auto-start)
+- `agrikd-gui.service`: Systemd unit for host GUI (manual start)
+- `setup_jetson.sh`: Self-contained deployment script (13 steps)
 
 ### 11.2 Inference Flow
 ```
@@ -952,13 +954,28 @@ Background thread (daemon):
 - **REST API**: `/predict` (POST image), `/stats` (GET), `/health` (GET)
 
 ### 11.6 Setup
+
+Jetson setup is **self-contained** — no `setup_dev.sh` needed.
+
 ```bash
-cd jetson
-sudo chmod +x setup_jetson.sh
-sudo ./setup_jetson.sh    # Creates user, installs deps, converts models, installs service
+# On Jetson device (from repo clone)
+cd agrikd-app/jetson
+cp config/config.example.json config/config.json
+# Edit config.json with Supabase credentials (optional)
+chmod +x setup_jetson.sh
+sudo ./setup_jetson.sh    # 13 steps: Docker build, system packages, model conversion, services
+
+# Headless (Docker container with GPU)
 sudo systemctl start agrikd
 curl http://localhost:8080/health
+
+# GUI (host system Python)
+python3 /opt/agrikd/app/gui_app.py
 ```
+
+**Deployment architecture:**
+- **Headless**: Runs in NVIDIA L4T Docker container (`agrikd-edge:latest`) with `--runtime=nvidia` GPU passthrough
+- **GUI**: Runs on host with system Python + `python3-pyqt5` (apt) — no venv needed
 
 ---
 
@@ -1181,16 +1198,20 @@ Cac benchmark duoc thuc hien tren test split:
 
 ### MLOps Pipeline
 ```bash
-# 1. Setup venv
-python -m venv venv_mlops
-source venv_mlops/bin/activate  # Windows: venv_mlops\Scripts\activate
+# 1. Create and activate venv FIRST (Python 3.10 required)
+python3.10 -m venv venv_mlops
+source venv_mlops/bin/activate  # Windows: venv_mlops\Scripts\activate.bat
 pip install -r mlops_pipeline/requirements.txt
 
-# 2. Chay pipeline cho 1 loai la
+# 2. Or use the setup script (venv must be active):
+#    Linux/macOS: ./setup_dev.sh
+#    Windows:     setup_windows_dev.bat
+
+# 3. Run pipeline cho 1 loai la
 cd mlops_pipeline/scripts
 python run_pipeline.py --config ../configs/tomato.json
 
-# 3. Ket qua tai models/tomato/
+# 4. Ket qua tai models/tomato/
 #    - tomato_student.onnx
 #    - tomato_student.tflite
 #    - benchmark_report.md

@@ -2,8 +2,17 @@
 REM ============================================================
 REM  AgriKD Windows Development Environment Setup
 REM ============================================================
-REM  Prerequisites: Git, Python 3.10+, Flutter SDK, Node.js 18+
-REM  Run this script from the project root directory.
+REM  Prerequisites: Git, Python 3.10, Flutter SDK, Node.js 18+
+REM
+REM  IMPORTANT: Create and activate venv BEFORE running this script!
+REM
+REM  Usage (from project root — the directory containing this file):
+REM    python -m venv venv_mlops
+REM    venv_mlops\Scripts\activate.bat
+REM    setup_windows_dev.bat
+REM
+REM  The script detects the active venv and installs all Python
+REM  packages into it. If no venv is active, it will abort.
 REM ============================================================
 
 setlocal enabledelayedexpansion
@@ -13,8 +22,36 @@ echo   AgriKD Windows Development Setup
 echo ========================================================
 echo.
 
-REM ── 1. Check prerequisites ────────────────────────────────
-echo [1/7] Checking prerequisites...
+REM ── 1. Check venv is active ────────────────────────────────
+echo [1/7] Checking Python virtual environment...
+echo.
+
+if "%VIRTUAL_ENV%"=="" (
+    echo   [ERROR] No Python virtual environment is active.
+    echo.
+    echo   Please create and activate a venv first:
+    echo     cd %~dp0
+    echo     python -m venv venv_mlops
+    echo     venv_mlops\Scripts\activate.bat
+    echo     setup_windows_dev.bat
+    exit /b 1
+)
+
+echo   [OK] venv active: %VIRTUAL_ENV%
+
+REM Verify Python 3.10
+for /f "tokens=*" %%i in ('python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"') do set PY_VER=%%i
+if not "%PY_VER%"=="3.10" (
+    echo   [ERROR] Python %PY_VER% detected. Python 3.10 is required.
+    echo   Recreate venv with Python 3.10:
+    echo     py -3.10 -m venv venv_mlops
+    exit /b 1
+)
+for /f "tokens=*" %%i in ('python --version 2^>^&1') do echo   [OK] %%i
+echo.
+
+REM ── 2. Check other prerequisites ──────────────────────────
+echo [2/7] Checking prerequisites...
 echo.
 
 where flutter >nul 2>&1
@@ -24,14 +61,6 @@ if errorlevel 1 (
     exit /b 1
 )
 for /f "tokens=*" %%i in ('flutter --version 2^>^&1 ^| findstr "Flutter"') do echo   %%i
-
-where python >nul 2>&1
-if errorlevel 1 (
-    echo   [ERROR] Python not found in PATH.
-    echo   Install Python 3.10+ from: https://www.python.org/downloads/
-    exit /b 1
-)
-for /f "tokens=*" %%i in ('python --version 2^>^&1') do echo   %%i
 
 where node >nul 2>&1
 if errorlevel 1 (
@@ -45,8 +74,8 @@ echo.
 echo   All prerequisites found.
 echo.
 
-REM ── 2. Flutter dependencies ────────────────────────────────
-echo [2/7] Installing Flutter dependencies...
+REM ── 3. Flutter dependencies ────────────────────────────────
+echo [3/7] Installing Flutter dependencies...
 echo   Accepting Android SDK licenses (if prompted, type 'y')...
 call flutter doctor --android-licenses >nul 2>&1
 cd mobile_app
@@ -59,16 +88,15 @@ cd ..
 echo   [OK] Flutter dependencies installed.
 echo.
 
-REM ── 3. Python virtual environment ─────────────────────────
-echo [3/7] Setting up Python virtual environment...
-if not exist "venv_mlops" (
-    echo   Creating venv_mlops...
-    python -m venv venv_mlops
-)
-call venv_mlops\Scripts\activate.bat
+REM ── 4. Python packages (into active venv) ──────────────────
+echo [4/7] Installing Python packages into venv...
+echo   pip location:
+where pip
+echo.
 
-echo   Installing Python dependencies (convert + evaluate)...
 pip install --upgrade pip >nul 2>&1
+
+echo   Installing MLOps convert + evaluate dependencies...
 pip install -r mlops_pipeline\requirements-convert.txt
 if errorlevel 1 (
     echo   [WARN] Some convert dependencies failed to install.
@@ -84,18 +112,13 @@ if errorlevel 1 (
     echo   [WARN] PyTorch installation failed. MLOps pipeline may not work.
 )
 
-echo.
-echo   NOTE: Skipping ARM64-only packages (pycuda, tensorrt).
-echo         These are Jetson-specific and only work on ARM64 Linux.
-echo   [OK] Python environment ready.
-echo.
-
-REM ── 4. DVC setup ──────────────────────────────────────────
-echo [4/7] Setting up DVC...
+echo   Installing DVC (Data Version Control)...
 pip install dvc dvc-gs
-echo   [OK] DVC installed.
-echo   NOTE: DVC pull/push requires GOOGLE_APPLICATION_CREDENTIALS_DATA in .env
-echo         See docs/guides/cicd_setup.md for how to generate credentials.
+
+echo.
+echo   NOTE: ARM64-only packages (pycuda, tensorrt) are Jetson-specific.
+echo         They are NOT installed here. See jetson\setup_jetson.sh.
+echo   [OK] All Python packages installed into venv.
 echo.
 
 REM ── 5. Admin Dashboard dependencies ───────────────────────
@@ -144,14 +167,23 @@ echo ========================================================
 echo   Setup Complete!
 echo ========================================================
 echo.
-echo   Next steps:
-echo     1. Edit .env with your Supabase + Google credentials
-echo     2. Run: python sync_env.py
-echo     3. Run: cd mobile_app ^& flutter run
-echo     4. Admin: cd admin-dashboard ^& npm run dev
-echo     5. MLOps: cd mlops_pipeline\scripts ^& python run_pipeline.py --config ..\configs\tomato.json
+echo   Your venv is still active: %VIRTUAL_ENV%
 echo.
-echo   For Jetson deployment, use setup_jetson.sh on the Jetson device.
+echo   Quick start commands (run from project root: %~dp0):
+echo.
+echo     # Flutter mobile app
+echo     cd mobile_app ^& flutter run
+echo.
+echo     # Admin Dashboard (React)
+echo     cd admin-dashboard ^& npm run dev
+echo.
+echo     # MLOps pipeline (make sure venv is active)
+echo     venv_mlops\Scripts\activate.bat
+echo     cd mlops_pipeline\scripts
+echo     python run_pipeline.py --config ..\configs\tomato.json
+echo.
+echo   For Jetson deployment (separate setup, no dev setup needed):
+echo     See jetson\setup_jetson.sh and docs\guides\jetson_deployment_guide.md
 echo ========================================================
 
 endlocal

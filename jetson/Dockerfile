@@ -1,5 +1,17 @@
-# AgriKD Jetson Edge Inference
-# Base: NVIDIA L4T TensorRT (official JetPack image)
+# AgriKD Jetson Edge Inference (Headless REST API)
+# Base: NVIDIA L4T TensorRT (official JetPack image with CUDA + TensorRT)
+#
+# Build:  docker build -t agrikd-edge:latest .
+# Run:    docker run --rm --runtime=nvidia --network=host \
+#           -v /opt/agrikd/config:/app/config:ro \
+#           -v /opt/agrikd/models:/app/models:ro \
+#           -v /opt/agrikd/data:/app/data \
+#           -v /opt/agrikd/logs:/app/logs \
+#           agrikd-edge:latest
+#
+# NOTE: This image is headless only (no GUI/PyQt5).
+#       GUI mode runs on the host with system Python.
+
 FROM nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -14,13 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
-    numpy>=1.24 \
-    opencv-python-headless>=4.8 \
-    requests>=2.31 \
-    flask>=3.0 \
-    waitress>=3.0
+# Install Python dependencies (pinned versions from requirements.txt)
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Create non-root user
 RUN useradd -m -s /bin/bash agrikd && \
@@ -29,7 +37,6 @@ RUN useradd -m -s /bin/bash agrikd && \
 
 WORKDIR /app
 COPY --chown=agrikd:agrikd app/ /app/
-COPY --chown=agrikd:agrikd config/ /app/config/
 
 USER agrikd
 

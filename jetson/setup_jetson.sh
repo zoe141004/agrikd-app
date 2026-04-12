@@ -1,110 +1,198 @@
 #!/bin/bash
-# AgriKD Jetson Setup Script
-# Run this on your Jetson device to deploy the edge inference service + GUI.
+# ============================================================
+#  AgriKD — Jetson Edge Deployment Setup
+# ============================================================
+#  This script sets up the AgriKD edge inference service on an
+#  NVIDIA Jetson device. It is SELF-CONTAINED — you do NOT need
+#  to run setup_dev.sh first.
 #
-# Prerequisites:
-#   - JetPack SDK installed (includes TensorRT, CUDA, cuDNN, Python 3)
-#   - Internet connection (to download model from Supabase)
-#   - Display connected (for GUI mode, optional)
+#  Two deployment modes:
+#    1. Headless REST API — runs inside a Docker container
+#       (nvidia L4T TensorRT base image, fully isolated)
+#    2. GUI Desktop App — runs on host with system Python + PyQt5
+#       (needs display + camera access, so runs outside Docker)
 #
-# Usage:
-#   chmod +x setup_jetson.sh
-#   sudo ./setup_jetson.sh
+#  Prerequisites:
+#    - JetPack 5.x+ (includes CUDA, cuDNN, TensorRT, Docker)
+#    - nvidia-container-runtime (usually included with JetPack)
+#    - Internet connection (to pull Docker image + download models)
+#    - Display + camera (GUI mode only)
+#
+#  Usage:
+#    cd <repo-root>/jetson
+#    chmod +x setup_jetson.sh
+#    sudo ./setup_jetson.sh
+#
+#  All files are installed to /opt/agrikd/ on the Jetson device.
+#  The repo clone is only needed during setup; it is not modified.
+# ============================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="/opt/agrikd"
 SERVICE_USER="agrikd"
-VENV_DIR="$INSTALL_DIR/venv"
+DOCKER_IMAGE="agrikd-edge"
+DOCKER_TAG="latest"
 
-echo "========================================"
+echo "========================================================"
 echo "  AgriKD Jetson Edge Deployment Setup"
-echo "========================================"
+echo "========================================================"
+echo ""
+echo "  Repo source:    $SCRIPT_DIR"
+echo "  Install target: $INSTALL_DIR"
+echo ""
 
-# 1. Create user
-if ! id "$SERVICE_USER" &>/dev/null; then
-    echo "[1/12] Creating service user: $SERVICE_USER"
-    useradd -m -s /bin/bash "$SERVICE_USER"
-else
-    echo "[1/12] User $SERVICE_USER already exists"
+# ── 1. Verify we're on Jetson / ARM64 ───────────────────────
+echo "[1/13] Checking platform..."
+ARCH=$(uname -m)
+if [ "$ARCH" != "aarch64" ]; then
+    echo "  [WARN] Architecture is $ARCH (expected aarch64 for Jetson)."
+    echo "  This script is designed for NVIDIA Jetson devices."
+    read -rp "  Continue anyway? (y/N): " CONTINUE
+    if [ "$CONTINUE" != "y" ] && [ "$CONTINUE" != "Y" ]; then
+        echo "  Aborted."
+        exit 1
+    fi
 fi
 
-# 2. Create directories
-echo "[2/12] Creating directories..."
-mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,logs,scripts}
+# Check Docker is available
+if ! command -v docker &>/dev/null; then
+    echo "  [ERROR] Docker not found."
+    echo "  JetPack 5.x+ should include Docker. Install:"
+    echo "    sudo apt-get install -y docker.io nvidia-container-runtime"
+    exit 1
+fi
+echo "  [OK] Docker found: $(docker --version | head -1)"
 
-# 3. Copy files
-echo "[3/12] Copying application files..."
+# Check nvidia-container-runtime
+if ! docker info 2>/dev/null | grep -q "nvidia"; then
+    echo "  [WARN] nvidia-container-runtime may not be configured."
+    echo "  GPU acceleration in Docker requires nvidia runtime."
+    echo "  Install: sudo apt-get install -y nvidia-container-runtime"
+    echo "  Then add to /etc/docker/daemon.json:"
+    echo '    { "runtimes": { "nvidia": { "path": "nvidia-container-runtime" } }, "default-runtime": "nvidia" }'
+fi
+
+echo "  [OK] Platform: $ARCH"
+echo ""
+
+# ── 2. Create service user ──────────────────────────────────
+if ! id "$SERVICE_USER" &>/dev/null; then
+    echo "[2/13] Creating service user: $SERVICE_USER"
+    useradd -m -s /bin/bash "$SERVICE_USER"
+    usermod -aG video "$SERVICE_USER"
+    usermod -aG docker "$SERVICE_USER"
+else
+    echo "[2/13] User $SERVICE_USER already exists"
+    # Ensure groups
+    usermod -aG video "$SERVICE_USER" 2>/dev/null || true
+    usermod -aG docker "$SERVICE_USER" 2>/dev/null || true
+fi
+echo ""
+
+# ── 3. Create directory structure ────────────────────────────
+echo "[3/13] Creating directories at $INSTALL_DIR ..."
+mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,logs,scripts}
+echo "  $INSTALL_DIR/"
+echo "  ├── app/        # Python application modules"
+echo "  ├── config/     # config.json (runtime settings)"
+echo "  ├── models/     # TensorRT .engine files"
+echo "  ├── data/images/ # Active learning image storage"
+echo "  ├── logs/       # Rotating log files"
+echo "  └── scripts/    # Provisioning + engine builder"
+echo ""
+
+# ── 4. Copy application files from repo ─────────────────────
+echo "[4/13] Copying files from $SCRIPT_DIR → $INSTALL_DIR ..."
 cp -r "$SCRIPT_DIR/app/"* "$INSTALL_DIR/app/"
-cp -r "$SCRIPT_DIR/config/"* "$INSTALL_DIR/config/"
 cp -r "$SCRIPT_DIR/scripts/"* "$INSTALL_DIR/scripts/" 2>/dev/null || true
 cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+cp "$SCRIPT_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile"
+cp "$SCRIPT_DIR/.dockerignore" "$INSTALL_DIR/.dockerignore" 2>/dev/null || true
+cp "$SCRIPT_DIR/ruff.toml" "$INSTALL_DIR/ruff.toml" 2>/dev/null || true
 
-# 4. Install system packages (GUI + camera tools)
-echo "[4/12] Installing system packages..."
+# Config: copy example if config.json doesn't exist yet
+if [ ! -f "$INSTALL_DIR/config/config.json" ]; then
+    if [ -f "$SCRIPT_DIR/config/config.json" ]; then
+        cp "$SCRIPT_DIR/config/config.json" "$INSTALL_DIR/config/config.json"
+    elif [ -f "$SCRIPT_DIR/config/config.example.json" ]; then
+        cp "$SCRIPT_DIR/config/config.example.json" "$INSTALL_DIR/config/config.json"
+        echo "  [INFO] Created config.json from config.example.json."
+        echo "  Edit $INSTALL_DIR/config/config.json to set Supabase credentials."
+    fi
+else
+    echo "  [OK] config.json already exists — not overwriting."
+fi
+
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+echo "  [OK] Files copied. Ownership set to $SERVICE_USER."
+echo ""
+
+# ── 5. Build Docker image (for headless REST API) ───────────
+echo "[5/13] Building Docker image: $DOCKER_IMAGE:$DOCKER_TAG ..."
+echo "  Dockerfile: $INSTALL_DIR/Dockerfile"
+echo "  Context:    $INSTALL_DIR/"
+echo ""
+
+cd "$INSTALL_DIR"
+docker build -t "$DOCKER_IMAGE:$DOCKER_TAG" \
+    -f "$INSTALL_DIR/Dockerfile" \
+    "$INSTALL_DIR/"
+cd "$SCRIPT_DIR"
+
+echo "  [OK] Docker image built: $DOCKER_IMAGE:$DOCKER_TAG"
+echo ""
+
+# ── 6. Install system packages for GUI mode ─────────────────
+echo "[6/13] Installing system packages for GUI mode..."
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-    python3-venv \
     python3-pyqt5 \
+    python3-pip \
+    python3-numpy \
+    python3-opencv \
     v4l-utils \
     libgl1-mesa-glx \
     libglib2.0-0
-echo "  [OK] System packages installed."
+echo "  [OK] System packages installed (PyQt5, OpenCV, v4l-utils)."
+echo ""
 
-# 5. Create Python venv with system site-packages (for TensorRT/PyCUDA)
-# Prefer python3.10; fall back to python3 if it is 3.10.x
-JETSON_PYTHON=""
-if command -v python3.10 &>/dev/null; then
-    JETSON_PYTHON="python3.10"
-elif command -v python3 &>/dev/null; then
-    PY_VER=$(python3 -c 'import sys; print(sys.version_info.minor)')
-    if [ "$PY_VER" = "10" ]; then
-        JETSON_PYTHON="python3"
-    fi
-fi
-if [ -z "$JETSON_PYTHON" ]; then
-    echo "  [ERROR] Python 3.10 not found. JetPack 5.x ships with Python 3.8."
-    echo "  Install: sudo apt install python3.10 python3.10-venv"
-    exit 1
-fi
-echo "  Using $($JETSON_PYTHON --version)"
+# ── 7. Install GUI Python dependencies (system pip) ─────────
+echo "[7/13] Installing GUI Python dependencies (system pip)..."
+# Only install packages not already available via apt
+# numpy and opencv come from apt (python3-numpy, python3-opencv)
+# PyQt5 comes from apt (python3-pyqt5)
+# flask + waitress are for headless (Docker only), but requests is needed for sync
+pip3 install --break-system-packages \
+    requests==2.33.0 \
+    flask==3.1.3 \
+    waitress==3.0.1 \
+    2>/dev/null \
+|| pip3 install \
+    requests==2.33.0 \
+    flask==3.1.3 \
+    waitress==3.0.1
+echo "  [OK] GUI dependencies installed."
+echo ""
 
-echo "[5/12] Creating Python 3.10 virtual environment..."
-if [ ! -d "$VENV_DIR" ]; then
-    $JETSON_PYTHON -m venv --system-site-packages "$VENV_DIR"
-    echo "  [OK] venv created at $VENV_DIR"
-else
-    echo "  [OK] venv already exists at $VENV_DIR"
-fi
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-echo "  Active Python: $(python --version) ($(which python))"
-
-# 6. Install Python dependencies in venv
-echo "[6/12] Installing Python dependencies in venv..."
-pip install --upgrade pip -q
-pip install --no-cache-dir -r "$INSTALL_DIR/requirements.txt"
-echo "  [OK] Python dependencies installed."
-deactivate
-
-# 7. Download ONNX models from Supabase
-echo "[7/12] Downloading ONNX models from Supabase..."
+# ── 8. Download ONNX models from Supabase ───────────────────
+echo "[8/13] Downloading ONNX models from Supabase..."
 CFG="$INSTALL_DIR/config/config.json"
 if [ ! -f "$CFG" ]; then
     echo "  [ERROR] Config not found: $CFG"
-    echo "  Copy config.example.json → config/config.json and fill in Supabase credentials first."
+    echo "  Copy config.example.json → config.json and set Supabase credentials."
     exit 1
 fi
 
-# Extract Supabase URL and key from config.json
 SUPABASE_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))")
 SUPABASE_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))")
 
 if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-    echo "  [WARN] Supabase credentials not found in config.json"
-    echo "  Skipping ONNX download. You can convert models manually later."
+    echo "  [WARN] Supabase credentials not found in config.json."
+    echo "  Skipping ONNX download. Place ONNX files manually at:"
+    echo "    $INSTALL_DIR/models/<leaf_type>_student.onnx"
 else
     for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
         engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
@@ -140,20 +228,21 @@ else
         fi
     done
 fi
+echo ""
 
-# 8. Convert ONNX models to TensorRT
-echo "[8/12] Converting models to TensorRT..."
+# ── 9. Convert ONNX → TensorRT engines ──────────────────────
+echo "[9/13] Converting ONNX models to TensorRT FP16 engines..."
 for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
-    [ -f "$onnx_file" ] || continue
+    [ -f "$onnx_file" ] || { echo "  No ONNX files to convert."; break; }
     leaf_type=$(basename "$onnx_file" | sed 's/_student\.onnx$//')
     engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
 
     if [ -f "$engine_file" ]; then
-        echo "  Engine already exists: $leaf_type"
+        echo "  Engine already exists: $leaf_type — skipping"
         continue
     fi
 
-    echo "  Converting: $leaf_type"
+    echo "  Converting: $leaf_type (this may take several minutes)..."
     trtexec \
         --onnx="$onnx_file" \
         --saveEngine="$engine_file" \
@@ -161,7 +250,7 @@ for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
         --workspace=1024
     chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
 
-    # Compute SHA-256 and inject into config.json
+    # Inject SHA-256 into config.json
     HASH=$(sha256sum "$engine_file" | awk '{print $1}')
     python3 -c "
 import json, sys
@@ -184,22 +273,34 @@ except Exception as e:
 
     # Clean up ONNX after successful conversion
     rm -f "$onnx_file"
-    echo "  [OK] Removed ONNX after conversion: $leaf_type"
+    echo "  [OK] Converted + removed ONNX: $leaf_type"
 done
+echo ""
 
-# 9. Install systemd services (headless + GUI)
-echo "[9/12] Installing systemd services..."
-# Update ExecStart to use venv python
+# ── 10. Install systemd services ────────────────────────────
+echo "[10/13] Installing systemd services..."
+
+# Headless service: Docker container with GPU access
 cat > /etc/systemd/system/agrikd.service << SYSTEMD
 [Unit]
-Description=AgriKD Edge Inference Service
-After=network.target
+Description=AgriKD Edge Inference Service (Docker)
+After=network.target docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
-User=$SERVICE_USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/app/main.py
+User=root
+ExecStartPre=-/usr/bin/docker stop agrikd-headless
+ExecStartPre=-/usr/bin/docker rm agrikd-headless
+ExecStart=/usr/bin/docker run --rm --name agrikd-headless \\
+    --runtime=nvidia \\
+    --network=host \\
+    -v $INSTALL_DIR/config:/app/config:ro \\
+    -v $INSTALL_DIR/models:/app/models:ro \\
+    -v $INSTALL_DIR/data:/app/data \\
+    -v $INSTALL_DIR/logs:/app/logs \\
+    $DOCKER_IMAGE:$DOCKER_TAG
+ExecStop=/usr/bin/docker stop agrikd-headless
 Restart=always
 RestartSec=10
 
@@ -207,9 +308,10 @@ RestartSec=10
 WantedBy=multi-user.target
 SYSTEMD
 
+# GUI service: runs on host (needs display + camera)
 cat > /etc/systemd/system/agrikd-gui.service << SYSTEMD
 [Unit]
-Description=AgriKD GUI Application
+Description=AgriKD GUI Application (Host)
 After=graphical.target
 
 [Service]
@@ -217,8 +319,9 @@ Type=simple
 User=$SERVICE_USER
 Environment=DISPLAY=:0
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/app/gui_app.py
+ExecStart=/usr/bin/python3 $INSTALL_DIR/app/gui_app.py --config $INSTALL_DIR/config/config.json
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=graphical.target
@@ -226,20 +329,17 @@ SYSTEMD
 
 systemctl daemon-reload
 systemctl enable agrikd.service
-echo "  [OK] Headless service enabled. GUI service available (manual start)."
+echo "  [OK] agrikd.service (Docker headless) — enabled, starts on boot."
+echo "  [OK] agrikd-gui.service (Host GUI) — available, manual start."
+echo ""
 
-# 10. Camera permissions
-echo "[10/12] Setting up camera permissions..."
-usermod -aG video "$SERVICE_USER"
-echo "  [OK] User $SERVICE_USER added to 'video' group."
-
-# 11. Create desktop shortcut for GUI
-echo "[11/12] Creating GUI desktop shortcut..."
+# ── 11. Create desktop shortcut (GUI) ───────────────────────
+echo "[11/13] Creating GUI desktop shortcut..."
 cat > /usr/share/applications/agrikd-gui.desktop << DESKTOP
 [Desktop Entry]
 Name=AgriKD Plant Disease Detection
 Comment=Detect plant leaf diseases with AI on NVIDIA Jetson
-Exec=$VENV_DIR/bin/python $INSTALL_DIR/app/gui_app.py
+Exec=/usr/bin/python3 $INSTALL_DIR/app/gui_app.py --config $INSTALL_DIR/config/config.json
 Icon=application-x-executable
 Terminal=false
 Type=Application
@@ -247,52 +347,81 @@ Categories=Science;Education;
 DESKTOP
 chmod 644 /usr/share/applications/agrikd-gui.desktop
 echo "  [OK] Desktop shortcut created."
+echo ""
 
-# 12. Zero-Touch Provisioning
-echo "[12/12] Zero-Touch Provisioning..."
+# ── 12. Camera permissions ───────────────────────────────────
+echo "[12/13] Verifying camera permissions..."
+if getent group video | grep -q "$SERVICE_USER"; then
+    echo "  [OK] User $SERVICE_USER is in 'video' group."
+else
+    usermod -aG video "$SERVICE_USER"
+    echo "  [OK] Added $SERVICE_USER to 'video' group."
+fi
+
+# List cameras if v4l2-ctl is available
+if command -v v4l2-ctl &>/dev/null; then
+    echo "  Connected cameras:"
+    v4l2-ctl --list-devices 2>/dev/null | sed 's/^/    /' || echo "    (none detected)"
+fi
+echo ""
+
+# ── 13. Zero-Touch Provisioning ─────────────────────────────
+echo "[13/13] Zero-Touch Provisioning..."
 echo ""
 echo "  Get a provisioning token from Admin Dashboard:"
-echo "    Dashboard -> Devices -> Provisioning Tokens -> Generate Token"
+echo "    Dashboard → Devices → Provisioning Tokens → Generate Token"
 echo ""
 read -rp "  Paste provisioning token (or path to .token file, or 'skip'): " PROVISION_INPUT
 
 if [ "$PROVISION_INPUT" = "skip" ] || [ -z "$PROVISION_INPUT" ]; then
     echo "  Skipped provisioning. Device will run in local-only mode."
-    echo "  To provision later:  cd $INSTALL_DIR && $VENV_DIR/bin/python scripts/provision.py <token>"
+    echo "  To provision later:"
+    echo "    cd $INSTALL_DIR"
+    echo "    python3 scripts/provision.py <token>"
 elif [ -f "$PROVISION_INPUT" ]; then
     cd "$INSTALL_DIR"
-    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" scripts/provision.py --file "$PROVISION_INPUT"
-    cd - > /dev/null
+    sudo -u "$SERVICE_USER" python3 scripts/provision.py --file "$PROVISION_INPUT"
+    cd "$SCRIPT_DIR"
 else
     cd "$INSTALL_DIR"
-    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python" scripts/provision.py "$PROVISION_INPUT"
-    cd - > /dev/null
+    sudo -u "$SERVICE_USER" python3 scripts/provision.py "$PROVISION_INPUT"
+    cd "$SCRIPT_DIR"
 fi
 
 echo ""
-echo "========================================"
+echo "========================================================"
 echo "  Setup Complete!"
-echo "========================================"
+echo "========================================================"
 echo ""
-echo "── Headless Mode (REST API) ──"
-echo "  sudo systemctl start agrikd       # Start headless service"
-echo "  sudo systemctl status agrikd      # Check status"
-echo "  sudo journalctl -u agrikd -f      # View logs"
-echo "  curl http://localhost:8080/health  # Health check"
+echo "  Install location: $INSTALL_DIR"
+echo "  Docker image:     $DOCKER_IMAGE:$DOCKER_TAG"
 echo ""
-echo "── GUI Mode (Desktop Application) ──"
-echo "  $VENV_DIR/bin/python $INSTALL_DIR/app/gui_app.py"
-echo "  # Or click 'AgriKD Plant Disease Detection' in desktop menu"
+echo "── Headless Mode (Docker REST API) ──────────────────────"
+echo "  sudo systemctl start agrikd        # Start container"
+echo "  sudo systemctl status agrikd       # Check status"
+echo "  sudo journalctl -u agrikd -f       # View logs"
+echo "  curl http://localhost:8080/health   # Health check"
 echo ""
-echo "── API Inference ──"
+echo "── GUI Mode (Host Desktop Application) ──────────────────"
+echo "  python3 $INSTALL_DIR/app/gui_app.py"
+echo "  # Or: sudo systemctl start agrikd-gui"
+echo "  # Or: click 'AgriKD Plant Disease Detection' in desktop menu"
+echo ""
+echo "── API Inference ────────────────────────────────────────"
 echo '  curl -X POST http://localhost:8080/predict \'
 echo '    -F "image=@leaf_photo.jpg" \'
 echo '    -F "leaf_type=tomato"'
 echo ""
-echo "── Camera Check ──"
-echo "  v4l2-ctl --list-devices            # List available cameras"
-echo "  ls /dev/video*                      # Check video device nodes"
+echo "── Camera Check ─────────────────────────────────────────"
+echo "  v4l2-ctl --list-devices"
+echo "  ls /dev/video*"
 echo ""
-echo "── Provisioning (if skipped) ──"
-echo "  cd $INSTALL_DIR && $VENV_DIR/bin/python scripts/provision.py <token>"
+echo "── Provisioning (if skipped) ────────────────────────────"
+echo "  cd $INSTALL_DIR"
+echo "  python3 scripts/provision.py <token>"
 echo ""
+echo "── Docker Management ────────────────────────────────────"
+echo "  docker images | grep agrikd        # List images"
+echo "  docker ps | grep agrikd            # Running containers"
+echo "  docker logs agrikd-headless -f     # Container logs"
+echo "========================================================"

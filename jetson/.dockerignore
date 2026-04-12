@@ -1,0 +1,19 @@
+# Exclude large/runtime files from Docker build context
+# Only app/ and requirements.txt are needed by the Dockerfile
+models/
+data/
+logs/
+config/
+scripts/
+*.engine
+*.onnx
+*.tflite
+*.pth
+.ruff_cache/
+__pycache__/
+*.pyc
+.dockerignore
+setup_jetson.sh
+ruff.toml
+agrikd.service
+agrikd-gui.service
