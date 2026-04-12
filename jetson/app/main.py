@@ -174,6 +174,17 @@ def check_ready(config):
 
 
 def main():
+    # Resolve working directory to install root so relative paths
+    # in config (models/, config/, data/) resolve correctly.
+    # Docker layout: /app/main.py + /app/config/ → use script dir
+    # Host layout:   /opt/agrikd/app/main.py + /opt/agrikd/config/ → use parent
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.isdir(os.path.join(script_dir, "config")):
+        install_root = script_dir
+    else:
+        install_root = os.path.dirname(script_dir)
+    os.chdir(install_root)
+
     config = load_config()
     setup_logging(config)
     logger = logging.getLogger("main")

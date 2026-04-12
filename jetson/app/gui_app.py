@@ -533,6 +533,17 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # Resolve working directory to install root so relative paths
+    # in config (models/, config/, data/) resolve correctly.
+    # Docker layout: /app/gui_app.py + /app/config/ → use script dir
+    # Host layout:   /opt/agrikd/app/gui_app.py + /opt/agrikd/config/ → use parent
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.isdir(os.path.join(script_dir, "config")):
+        install_root = script_dir
+    else:
+        install_root = os.path.dirname(script_dir)
+    os.chdir(install_root)
+
     parser = argparse.ArgumentParser(description="AgriKD Jetson GUI")
     parser.add_argument(
         "--config",
@@ -550,7 +561,9 @@ def main():
     with open(config_path, "r") as f:
         config = json.load(f)
 
-    logger.info("Starting AgriKD GUI with config: %s", config_path)
+    print(f"Starting AgriKD GUI with config: {config_path}")
+    print(f"Working directory: {os.getcwd()}")
+    logger.info("Starting AgriKD GUI with config: %s (cwd: %s)", config_path, os.getcwd())
 
     app = QApplication(sys.argv)
     app.setApplicationName("AgriKD")
