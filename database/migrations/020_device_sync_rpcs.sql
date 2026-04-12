@@ -143,17 +143,27 @@ GRANT EXECUTE ON FUNCTION public.device_heartbeat(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.device_push_predictions(UUID, JSONB) TO anon, authenticated;
 
 -- 5. Storage policy: allow Jetson devices (anon role) to upload prediction images
---    Validates that the folder name (user_id) matches an assigned device.
+--    Uses SECURITY DEFINER helper to bypass devices table RLS.
+CREATE OR REPLACE FUNCTION public.is_device_assigned_user(p_user_id TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.devices
+        WHERE user_id::text = p_user_id
+          AND status IN ('online', 'offline')
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_device_assigned_user(TEXT) TO anon, authenticated;
+
 DROP POLICY IF EXISTS "Devices upload prediction images" ON storage.objects;
 CREATE POLICY "Devices upload prediction images"
     ON storage.objects FOR INSERT
     WITH CHECK (
         bucket_id = 'prediction-images'
-        AND EXISTS (
-            SELECT 1 FROM public.devices
-            WHERE user_id::text = (storage.foldername(name))[1]
-              AND status IN ('online', 'offline')
-        )
+        AND public.is_device_assigned_user((storage.foldername(name))[1])
     );
 
 -- 5. Enable Realtime for devices table (dashboard auto-refresh)
