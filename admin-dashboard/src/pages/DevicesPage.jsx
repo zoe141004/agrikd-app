@@ -28,6 +28,7 @@ export default function DevicesPage() {
   const [confirmAction, setConfirmAction] = useState(null)
   const [tokenLabel, setTokenLabel] = useState('')
   const [generatedToken, setGeneratedToken] = useState('')
+  const [successMsg, setSuccessMsg] = useState(null)
 
   const mountedRef = useRef(true)
 
@@ -36,6 +37,12 @@ export default function DevicesPage() {
     loadData()
     return () => { mountedRef.current = false }
   }, [refreshKey])
+
+  useEffect(() => {
+    if (!successMsg) return
+    const t = setTimeout(() => setSuccessMsg(null), 4000)
+    return () => clearTimeout(t)
+  }, [successMsg])
 
   const loadData = async () => {
     setLoading(true)
@@ -88,6 +95,7 @@ export default function DevicesPage() {
     if (!err) {
       logAudit(supabase, 'device_updated', 'device', editDevice.id, { device_name: form.device_name, user_id: form.user_id })
       setEditDevice(null); setFormError(null)
+      setSuccessMsg(`Device "${form.device_name || editDevice.hostname}" updated`)
       loadData(); triggerRefresh()
     } else {
       setFormError(err.message)
@@ -107,6 +115,7 @@ export default function DevicesPage() {
           .eq('id', d.id)
         if (!err) {
           logAudit(supabase, 'device_decommissioned', 'device', d.id, { hostname: d.hostname })
+          setSuccessMsg(`Device "${d.device_name || d.hostname}" decommissioned`)
           loadData(); triggerRefresh()
         } else setError(err.message)
       }
@@ -152,8 +161,10 @@ export default function DevicesPage() {
       onConfirm: async () => {
         setConfirmAction(null)
         const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', t.id)
-        if (!err) { loadData(); triggerRefresh() }
-        else setError(err.message)
+        if (!err) {
+          setSuccessMsg(`Token "${t.label || t.id.slice(0, 8)}" revoked`)
+          loadData(); triggerRefresh()
+        } else setError(err.message)
       }
     })
   }
@@ -186,7 +197,16 @@ export default function DevicesPage() {
       {error && (
         <div className="alert alert-error" style={{ marginBottom: 16 }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
-          <div>{error}</div>
+          <div style={{ flex: 1 }}>{error}</div>
+          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>×</button>
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="alert alert-success" style={{ marginBottom: 16 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <div style={{ flex: 1 }}>{successMsg}</div>
+          <button onClick={() => setSuccessMsg(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>×</button>
         </div>
       )}
 
@@ -253,7 +273,15 @@ export default function DevicesPage() {
                   {filteredDevices.map(d => {
                     const sc = STATUS_COLORS[d.status] || STATUS_COLORS.unassigned
                     const owner = users.find(u => u.id === d.user_id)
-                    const synced = d.reported_config && JSON.stringify(d.desired_config) === JSON.stringify(d.reported_config)
+                    const synced = d.desired_config && d.reported_config && JSON.stringify(d.desired_config) === JSON.stringify(d.reported_config)
+                    const hasDesired = !!d.desired_config
+                    const configLabel = !hasDesired ? 'N/A' : synced ? 'Synced' : 'Pending'
+                    const configColor = !hasDesired ? '#94a3b8' : synced ? '#16a34a' : '#d97706'
+                    const configTitle = !hasDesired
+                      ? 'No configuration set for this device'
+                      : synced
+                        ? 'Device has acknowledged the current configuration'
+                        : 'Device has not yet applied the latest configuration changes'
                     return (
                       <tr key={d.id}>
                         <td style={{ fontWeight: 500 }}>{d.device_name || '—'}</td>
@@ -266,9 +294,7 @@ export default function DevicesPage() {
                           {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : '—'}
                         </td>
                         <td>
-                          {synced
-                            ? <span style={{ color: '#16a34a', fontSize: 12 }}>Synced</span>
-                            : <span style={{ color: '#d97706', fontSize: 12 }}>Pending</span>}
+                          <span title={configTitle} style={{ color: configColor, fontSize: 12, cursor: 'help' }}>{configLabel}</span>
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 4 }}>
@@ -470,16 +496,7 @@ export default function DevicesPage() {
         </div>
       )}
 
-      {confirmAction && (
-        <ConfirmDialog
-          title={confirmAction.title}
-          message={confirmAction.message}
-          confirmLabel={confirmAction.confirmLabel}
-          danger={confirmAction.danger}
-          onConfirm={confirmAction.onConfirm}
-          onCancel={() => setConfirmAction(null)}
-        />
-      )}
+      <ConfirmDialog open={!!confirmAction} {...(confirmAction || {})} onCancel={() => setConfirmAction(null)} />
     </>
   )
 }
