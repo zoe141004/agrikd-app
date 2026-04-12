@@ -197,7 +197,7 @@ app/
 |   |   |-- lib/supabase.js           # Supabase client
 |
 |-- jetson/                           # Jetson Edge Deployment
-|   |-- Dockerfile                    # L4T TensorRT container
+|   |-- Dockerfile                    # DEPRECATED — L4T TensorRT container (JetPack 5 only)
 |   |-- app/                          # main.py, inference.py, camera.py, database.py, sync_engine.py
 |   |-- config/config.json            # Camera, models, sync settings
 |   |-- agrikd.service                # Systemd unit file
@@ -902,15 +902,15 @@ File: `lib/data/sync/supabase_sync_service.dart` — method `downloadModelUpdate
 
 Directory: `jetson/`
 
-### 11.1 Docker Container
-```dockerfile
-# Base: NVIDIA L4T TensorRT (official)
-FROM nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime
-# Non-root user (agrikd), Python deps, HEALTHCHECK
-```
+### 11.1 Host-Native Deployment
+
+Both headless and GUI modes run directly on the host using system Python 3.10
+with JetPack-provided TensorRT and PyCUDA. Docker was removed because NVIDIA
+does not provide a JetPack 6 Docker base image with TRT 10.x + Python 3.10.
+Security is maintained via systemd sandboxing (`NoNewPrivileges`,
+`ProtectSystem=strict`, `PrivateTmp`).
 
 Files:
-- `Dockerfile`: Production container
 - `app/main.py`: Main loop (manual/periodic modes, signal handling)
 - `app/inference.py`: TensorRT FP16 inference (PyCUDA, ImageNet norm)
 - `app/camera.py`: USB/CSI camera capture (OpenCV)
@@ -918,8 +918,8 @@ Files:
 - `app/sync_engine.py`: HTTP sync to Supabase REST API (batch 50)
 - `app/health_server.py`: Flask REST API
 - `config/config.json`: All settings (camera, models, sync, logging)
-- `Dockerfile`: Headless Docker image (L4T TensorRT base)
-- `agrikd.service`: Systemd unit for Docker headless (auto-start)
+- `Dockerfile`: DEPRECATED (JetPack 5 only, kept for reference)
+- `agrikd.service`: Systemd unit for headless REST API (auto-start)
 - `agrikd-gui.service`: Systemd unit for host GUI (manual start)
 - `setup_jetson.sh`: Self-contained deployment script (13 steps)
 
@@ -963,9 +963,9 @@ cd agrikd-app/jetson
 cp config/config.example.json config/config.json
 # Edit config.json with Supabase credentials (optional)
 chmod +x setup_jetson.sh
-sudo ./setup_jetson.sh    # 13 steps: Docker build, system packages, model conversion, services
+sudo ./setup_jetson.sh    # 13 steps: dep check, system packages, model conversion, services
 
-# Headless (Docker container with GPU)
+# Headless (systemd service with system Python)
 sudo systemctl start agrikd
 curl http://localhost:8080/health
 
@@ -974,8 +974,9 @@ python3 /opt/agrikd/app/gui_app.py
 ```
 
 **Deployment architecture:**
-- **Headless**: Runs in NVIDIA L4T Docker container (`agrikd-edge:latest`) with `--runtime=nvidia` GPU passthrough
+- **Headless**: Runs as systemd service with system Python 3.10 + TensorRT + PyCUDA (JetPack-provided)
 - **GUI**: Runs on host with system Python + `python3-pyqt5` (apt) — no venv needed
+- **Security**: systemd sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`)
 
 ---
 

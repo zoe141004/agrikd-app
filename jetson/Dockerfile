@@ -1,24 +1,17 @@
-# AgriKD Jetson Edge Inference (Headless REST API)
-# Base: NVIDIA L4T TensorRT (official JetPack image with CUDA + TensorRT)
+# ================================================================
+# AgriKD Jetson Edge Inference — Dockerfile (DEPRECATED)
+# ================================================================
+# This Dockerfile is DEPRECATED and NOT used by setup_jetson.sh.
 #
-# Build:  docker build -t agrikd-edge:latest .
-# Run:    docker run --rm --runtime=nvidia --network=host \
-#           -v /opt/agrikd/config:/app/config:ro \
-#           -v /opt/agrikd/models:/app/models:ro \
-#           -v /opt/agrikd/data:/app/data \
-#           -v /opt/agrikd/logs:/app/logs \
-#           agrikd-edge:latest
+# Reason: NVIDIA does not provide an official JetPack 6 Docker
+# base image with TRT 10.x + Python 3.10. The base image below
+# uses JetPack 5 (TRT 8.5, Python 3.8, CUDA 11.4) which is
+# incompatible with JetPack 6 hardware (TRT 10.x, Python 3.10,
+# CUDA 12.x). TensorRT engines are NOT portable across versions.
 #
-# NOTE: This image is headless only (no GUI/PyQt5).
-#       GUI mode runs on the host with system Python.
-#
-# PYTHON VERSION: This container uses Python 3.8 from the L4T base image.
-#   - The rest of the project (dev, CI, Jetson host) uses Python 3.10.
-#   - Docker is fully isolated so this does NOT affect the host environment.
-#   - We CANNOT upgrade to 3.10 inside this container because:
-#     (a) deadsnakes PPA does not support ARM64 (aarch64)
-#     (b) TensorRT Python bindings are pre-compiled for Python 3.8
-#   - All requirements.txt versions are pinned to be compatible with BOTH 3.8 and 3.10.
+# Current deployment: host-native via systemd (see agrikd.service).
+# This file is kept for reference only.
+# ================================================================
 
 FROM nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime
 

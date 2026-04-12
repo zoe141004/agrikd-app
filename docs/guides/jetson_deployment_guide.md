@@ -45,15 +45,14 @@ Supported models:
 
 ### 2.2 Software
 
-- **JetPack SDK 5.x or 6.x** installed on the Jetson (includes CUDA, cuDNN, TensorRT, and Docker).
-- **Ubuntu 20.04 or 22.04** (L4T base image shipped with JetPack).
-- **Docker** with `nvidia-container-runtime` (included with JetPack 5.x+).
-- **Python 3** (pre-installed with JetPack; used for GUI mode only).
+- **JetPack SDK 6.x** installed on the Jetson (includes CUDA, cuDNN, TensorRT, Python 3.10).
+- **Ubuntu 22.04** (L4T base image shipped with JetPack 6).
+- **Python 3.10** with TensorRT and PyCUDA bindings (pre-installed by JetPack).
 - **Git** for cloning the repository.
 
 > **NOTE:** You do NOT need to run `setup_dev.sh` or set up a Python venv on Jetson.
-> The Jetson setup is fully self-contained. Headless mode runs in Docker;
-> GUI mode uses system Python with apt-installed packages.
+> The Jetson setup is fully self-contained. Both headless and GUI modes run
+> directly on the host using system Python with JetPack-provided packages.
 
 ### 2.3 ONNX Model Files
 
@@ -78,7 +77,7 @@ cd agrikd-app/jetson
 cp config/config.example.json config/config.json
 # Edit config/config.json to fill in Supabase credentials if desired
 
-# Run the automated setup (requires root for Docker + systemd)
+# Run the automated setup (requires root for systemd)
 chmod +x setup_jetson.sh
 sudo ./setup_jetson.sh
 ```
@@ -86,10 +85,10 @@ sudo ./setup_jetson.sh
 After setup completes, choose a deployment mode:
 
 ```bash
-# Headless REST API (runs in Docker container with GPU)
+# Headless REST API (runs as systemd service with system Python)
 sudo systemctl start agrikd
 
-# GUI Desktop Application (runs on host with system Python)
+# GUI Desktop Application (runs on host with system Python + PyQt5)
 python3 /opt/agrikd/app/gui_app.py
 ```
 
@@ -109,30 +108,30 @@ sudo ./setup_jetson.sh
 
 ### Architecture
 
-| Mode | Runtime | Python | Isolation |
-|------|---------|--------|-----------|
-| **Headless REST API** | Docker container (`agrikd-edge:latest`) | Python 3.8 (L4T base image) | Full Docker isolation, GPU via `--runtime=nvidia` |
-| **GUI Desktop App** | Host (system Python 3.10) | `/usr/bin/python3` + apt packages | System packages (`python3-pyqt5`, `python3-opencv`) |
+| Mode | Runtime | Python | Security |
+|------|---------|--------|----------|
+| **Headless REST API** | Host systemd service | Python 3.10 (system) | systemd sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`) |
+| **GUI Desktop App** | Host systemd service or desktop shortcut | Python 3.10 (system) | System packages (`python3-pyqt5`, `python3-opencv`) |
 
-> **Python version note:** The Docker container uses Python 3.8 from the L4T base image
-> because (a) deadsnakes PPA does not support ARM64, and (b) TensorRT Python bindings
-> are pre-compiled for 3.8. This is fully isolated and does not affect the host.
-> The Jetson host, dev environment, and CI all use Python 3.10 (project standard).
+> **Why host-native instead of Docker?** NVIDIA does not provide an official
+> JetPack 6 Docker base image with TRT 10.x + Python 3.10. Running directly
+> on the host ensures correct TensorRT/PyCUDA/CUDA versions match the hardware.
+> Security is maintained via systemd hardening directives.
 
 ### Step 1 -- Check Platform
 
-Verifies the device is ARM64 (`aarch64`) and that Docker with
-`nvidia-container-runtime` is available.
+Verifies the device is ARM64 (`aarch64`) and that Python 3, TensorRT, and
+PyCUDA are available.
 
 ### Step 2 -- Create Service User
 
 ```bash
 useradd -m -s /bin/bash agrikd
-usermod -aG video,docker agrikd
+usermod -aG video agrikd
 ```
 
-A dedicated `agrikd` user is created with `video` (camera access) and `docker`
-group membership. If the user already exists, only group membership is ensured.
+A dedicated `agrikd` user is created with `video` group membership (camera
+access). If the user already exists, only group membership is ensured.
 
 ### Step 3 -- Create Directories
 
@@ -152,20 +151,14 @@ mkdir -p /opt/agrikd/{app,config,models,data/images,logs,scripts}
 ### Step 4 -- Copy Application Files
 
 All files from the repository's `jetson/app/`, `jetson/scripts/`, and
-`jetson/config/` directories are copied into `/opt/agrikd/`. The `Dockerfile`
-and `requirements.txt` are also copied for Docker builds. Ownership is set to
+`jetson/config/` directories are copied into `/opt/agrikd/`. The
+`requirements.txt` is also copied for reference. Ownership is set to
 the `agrikd` user.
 
-### Step 5 -- Build Docker Image
+### Step 5 -- Verify Runtime Dependencies
 
-```bash
-docker build -t agrikd-edge:latest -f /opt/agrikd/Dockerfile /opt/agrikd/
-```
-
-Builds the headless inference Docker image from the NVIDIA L4T TensorRT base.
-The image includes Python, OpenCV (headless), Flask, Waitress, and all
-dependencies from `requirements.txt`. Config, models, data, and logs are NOT
-baked in — they are mounted as volumes at runtime.
+Checks that Python 3 can import `tensorrt`, `pycuda`, and `numpy`. Warns if
+any are missing — the headless service will fail to start without them.
 
 ### Step 6 -- Install System Packages for GUI
 
@@ -186,7 +179,7 @@ apt-get install -y --no-install-recommends \
 
 > **Why no venv?** PyQt5 on ARM64 has no pip wheel — it must be installed via
 > `apt`. Using system Python ensures PyQt5, TensorRT, and PyCUDA all coexist
-> without conflicts. Docker handles isolation for the headless service.
+> without conflicts.
 
 ### Step 7 -- Install GUI Python Dependencies
 
@@ -194,9 +187,8 @@ apt-get install -y --no-install-recommends \
 pip3 install requests flask waitress
 ```
 
-Installs minimal pip packages that are not available via apt. The GUI app
-needs `requests` for Supabase sync; `flask` and `waitress` are needed if
-running `main.py` outside Docker for testing.
+Installs minimal pip packages that are not available via apt. Both headless
+and GUI modes need `flask`, `waitress`, and `requests`.
 
 ### Step 8 -- Configure Supabase Credentials
 
@@ -249,16 +241,14 @@ Engines are hardware-specific and must be built on the target Jetson device.
 
 Two unit files are installed to `/etc/systemd/system/`:
 
-**`agrikd.service` (Headless — Docker):**
+**`agrikd.service` (Headless — Host Python):**
 ```ini
-ExecStart=/usr/bin/docker run --rm --name agrikd-headless \
-    --runtime=nvidia --network=host \
-    -v /opt/agrikd/config:/app/config:ro \
-    -v /opt/agrikd/models:/app/models:ro \
-    -v /opt/agrikd/data:/app/data \
-    -v /opt/agrikd/logs:/app/logs \
-    agrikd-edge:latest
+ExecStart=/usr/bin/python3 /opt/agrikd/app/main.py
 ```
+
+Runs directly on the host with system Python 3.10 and JetPack-provided
+TensorRT/PyCUDA. Security is enforced via systemd sandboxing directives:
+`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, etc.
 
 **`agrikd-gui.service` (GUI — Host Python):**
 ```ini
@@ -952,52 +942,16 @@ journalctl -u agrikd | grep "Sync complete"
 
 ---
 
-## 10. Docker Deployment
+## 10. Docker Deployment (DEPRECATED)
 
-Docker deployment is available for the **headless REST API mode only**. The GUI
-requires direct access to the X server and is not supported inside a container.
-
-### 10.1 Building the Image
-
-```bash
-cd jetson
-docker build -t agrikd-jetson .
-```
-
-The Dockerfile is based on `nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime`, which
-includes TensorRT, CUDA, and cuDNN pre-installed. The container uses
-`opencv-python-headless` (no GUI support) and runs as a non-root `agrikd` user.
-
-### 10.2 Running the Container
-
-```bash
-docker run --runtime nvidia \
-  --device /dev/video0 \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/models:/app/models \
-  -v $(pwd)/config/config.json:/app/config/config.json:ro \
-  agrikd-jetson
-```
-
-| Flag | Purpose |
-|------|---------|
-| `--runtime nvidia` | Enables GPU access inside the container via the NVIDIA Container Runtime |
-| `--device /dev/video0` | Passes the camera device to the container |
-| `-p 8080:8080` | Maps the REST API port |
-| `-v $(pwd)/data:/app/data` | Persists the SQLite database and Active Learning images on the host |
-| `-v $(pwd)/models:/app/models` | Mounts TensorRT engine files from the host |
-| `-v ... config.json:ro` | Mounts the site-specific configuration as read-only |
-
-### 10.3 Health Check
-
-The Dockerfile includes a built-in health check that polls
-`http://localhost:8080/health` every 30 seconds. Docker marks the container as
-unhealthy if three consecutive checks fail.
-
-```bash
-docker inspect --format='{{.State.Health.Status}}' <container_id>
-```
+> **⚠️ Docker deployment is deprecated and no longer supported.**
+> NVIDIA does not provide an official JetPack 6 Docker base image with
+> TRT 10.x + Python 3.10. The Dockerfile in this repository targets
+> JetPack 5 (TRT 8.5, Python 3.8, CUDA 11.4) and is incompatible with
+> JetPack 6 hardware. TensorRT engines are not portable across versions.
+>
+> **Use host-native deployment via systemd** (see sections 3–4 above).
+> The Dockerfile is kept in the repository as a reference only.
 
 ---
 

@@ -629,7 +629,7 @@ npm run dev
 
 | File | Mô tả |
 |------|-------|
-| `Dockerfile` | Base `nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime`, non-root user, health check |
+| `Dockerfile` | DEPRECATED — L4T TensorRT container (JetPack 5 only, kept for reference) |
 | `config/config.json` | Camera, models, sync, server, logging configuration |
 | `app/main.py` | Main entry point: load engines, camera, sync thread, health server, manual/periodic modes |
 | `app/inference.py` | `TensorRTInference` class: load engine, preprocess (ImageNet norm, HWC→CHW), predict with PyCUDA |
@@ -641,7 +641,7 @@ npm run dev
 | `setup_jetson.sh` | One-click setup script: create user, install deps, convert models, install service |
 
 **Features theo spec (section 11):**
-- [x] Docker container (Dockerfile) với base L4T TensorRT, non-root user
+- [x] Host-native deployment (systemd service with system Python + TensorRT + PyCUDA)
 - [x] TensorRT FP16 inference (PyCUDA bindings, ~1-2ms)
 - [x] USB/CSI camera capture (OpenCV)
 - [x] Manual mode (REST API trigger) + Periodic mode (configurable interval)
@@ -889,7 +889,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 | History | ✅ | Filter, search, sort, pagination, statistics (bar + pie chart) |
 | CI/CD | ✅ | GitHub Actions: lint, test, model conversion, build, release |
 | Admin Dashboard | ✅ | React + Vite + Supabase JS (11 pages, 113 tests: 6 test files covering helpers, DataContext, page integration) |
-| Jetson Edge | ✅ | Docker + TensorRT FP16 + REST API + systemd service |
+| Jetson Edge | ✅ | Host-native + TensorRT FP16 + REST API + systemd service |
 | i18n | ✅ | EN + VI (~300 keys each) |
 | Tests | ✅ | 140 Flutter tests + 113 Dashboard tests (unit, DAO, provider, widget, integration) |
 | Code quality | ✅ | `flutter analyze` 0 issues |

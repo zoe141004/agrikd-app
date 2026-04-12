@@ -6,18 +6,24 @@
 #  NVIDIA Jetson device. It is SELF-CONTAINED — you do NOT need
 #  to run setup_dev.sh first.
 #
-#  Two deployment modes:
-#    1. Headless REST API — runs inside a Docker container
-#       (nvidia L4T TensorRT base image, fully isolated)
-#    2. GUI Desktop App — runs on host with system Python + PyQt5
-#       (needs display + camera access, so runs outside Docker)
+#  Two deployment modes (both run directly on host):
+#    1. Headless REST API — systemd service with Flask + Waitress
+#       (uses system Python + TensorRT + PyCUDA from JetPack)
+#    2. GUI Desktop App — systemd service or desktop shortcut
+#       (system Python + PyQt5 + camera access)
+#
+#  NOTE: Docker mode was removed because NVIDIA does not provide an
+#  official JetPack 6 base image with TRT 10.x + Python 3.10.
+#  Running on host ensures correct TensorRT/PyCUDA/CUDA versions.
+#  Security is maintained via systemd sandboxing (ProtectSystem,
+#  NoNewPrivileges, PrivateTmp, etc.)
 #
 #  Steps (13 total):
 #     1. Verify platform (ARM64)       8.  Configure Supabase credentials
 #     2. Create service user           9.  Download ONNX models
 #     3. Create directory structure     10. Convert ONNX → TensorRT
 #     4. Copy application files         11. Install systemd services
-#     5. Build Docker image             12. Create desktop shortcut
+#     5. Verify Python + TRT + PyCUDA   12. Create desktop shortcut
 #     6. Install system packages        13. Camera permissions
 #     7. Install pip packages
 #
@@ -28,9 +34,8 @@
 #    d) Pre-populated config.json (from sync_env.py on dev machine)
 #
 #  Prerequisites:
-#    - JetPack 5.x+ (includes CUDA, cuDNN, TensorRT, Docker)
-#    - nvidia-container-runtime (usually included with JetPack)
-#    - Internet connection (to pull Docker image + download models)
+#    - JetPack 6.x+ (includes CUDA, cuDNN, TensorRT, Python 3.10)
+#    - Internet connection (to download models from Supabase)
 #    - Display + camera (GUI mode only)
 #
 #  Usage:
@@ -51,8 +56,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="/opt/agrikd"
 SERVICE_USER="agrikd"
-DOCKER_IMAGE="agrikd-edge"
-DOCKER_TAG="latest"
 
 echo "========================================================"
 echo "  AgriKD Jetson Edge Deployment Setup"
@@ -75,22 +78,38 @@ if [ "$ARCH" != "aarch64" ]; then
     fi
 fi
 
-# Check Docker is available
-if ! command -v docker &>/dev/null; then
-    echo "  [ERROR] Docker not found."
-    echo "  JetPack 5.x+ should include Docker. Install:"
-    echo "    sudo apt-get install -y docker.io nvidia-container-runtime"
+# Check Python 3 is available
+if ! command -v python3 &>/dev/null; then
+    echo "  [ERROR] Python 3 not found."
+    echo "  JetPack 6.x should include Python 3.10. Install:"
+    echo "    sudo apt-get install -y python3 python3-pip"
     exit 1
 fi
-echo "  [OK] Docker found: $(docker --version | head -1)"
+PYTHON_VER=$(python3 --version 2>&1)
+echo "  [OK] $PYTHON_VER"
 
-# Check nvidia-container-runtime
-if ! docker info 2>/dev/null | grep -q "nvidia"; then
-    echo "  [WARN] nvidia-container-runtime may not be configured."
-    echo "  GPU acceleration in Docker requires nvidia runtime."
-    echo "  Install: sudo apt-get install -y nvidia-container-runtime"
-    echo "  Then add to /etc/docker/daemon.json:"
-    echo '    { "runtimes": { "nvidia": { "path": "nvidia-container-runtime" } }, "default-runtime": "nvidia" }'
+# Check TensorRT
+set +e
+TRT_VER=$(python3 -c "import tensorrt; print(tensorrt.__version__)" 2>/dev/null)
+TRT_OK=$?
+set -e
+if [ $TRT_OK -eq 0 ] && [ -n "$TRT_VER" ]; then
+    echo "  [OK] TensorRT $TRT_VER"
+else
+    echo "  [WARN] TensorRT Python bindings not found."
+    echo "  Install: sudo apt-get install -y python3-libnvinfer tensorrt"
+fi
+
+# Check PyCUDA
+set +e
+PYCUDA_VER=$(python3 -c "import pycuda; print(pycuda.VERSION_TEXT)" 2>/dev/null)
+PYCUDA_OK=$?
+set -e
+if [ $PYCUDA_OK -eq 0 ] && [ -n "$PYCUDA_VER" ]; then
+    echo "  [OK] PyCUDA $PYCUDA_VER"
+else
+    echo "  [WARN] PyCUDA not found."
+    echo "  Install: pip3 install pycuda"
 fi
 
 echo "  [OK] Platform: $ARCH"
@@ -101,12 +120,10 @@ if ! id "$SERVICE_USER" &>/dev/null; then
     echo "[2/13] Creating service user: $SERVICE_USER"
     useradd -m -s /bin/bash "$SERVICE_USER"
     usermod -aG video "$SERVICE_USER"
-    usermod -aG docker "$SERVICE_USER"
 else
     echo "[2/13] User $SERVICE_USER already exists"
     # Ensure groups
     usermod -aG video "$SERVICE_USER" 2>/dev/null || true
-    usermod -aG docker "$SERVICE_USER" 2>/dev/null || true
 fi
 echo ""
 
@@ -127,8 +144,6 @@ echo "[4/13] Copying files from $SCRIPT_DIR → $INSTALL_DIR ..."
 cp -r "$SCRIPT_DIR/app/"* "$INSTALL_DIR/app/"
 cp -r "$SCRIPT_DIR/scripts/"* "$INSTALL_DIR/scripts/" 2>/dev/null || true
 cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
-cp "$SCRIPT_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile"
-cp "$SCRIPT_DIR/.dockerignore" "$INSTALL_DIR/.dockerignore" 2>/dev/null || true
 cp "$SCRIPT_DIR/ruff.toml" "$INSTALL_DIR/ruff.toml" 2>/dev/null || true
 
 # Config: copy example if config.json doesn't exist yet
@@ -146,39 +161,29 @@ fi
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
-# Fix: Docker container runs as a different UID than host's agrikd user.
-# Ensure mounted volumes have correct permissions for any user inside the container.
-# Read-only mounts (config, models): world-readable
+# Standard permissions: user read-write, others read-only
 chmod 755 "$INSTALL_DIR/config" "$INSTALL_DIR/models"
 find "$INSTALL_DIR/config" "$INSTALL_DIR/models" -type f -exec chmod 644 {} + 2>/dev/null || true
-# Read-write mounts (data, logs): world-writable (dirs AND existing files)
-chmod 777 "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
-find "$INSTALL_DIR/data" -type d -exec chmod 777 {} + 2>/dev/null || true
-find "$INSTALL_DIR/data" "$INSTALL_DIR/logs" -type f -exec chmod 666 {} + 2>/dev/null || true
+# Data and logs: user read-write
+chmod 755 "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
+find "$INSTALL_DIR/data" -type d -exec chmod 755 {} + 2>/dev/null || true
 
 echo "  [OK] Files copied. Ownership set to $SERVICE_USER."
 echo ""
 
-# ── 5. Build Docker image (for headless REST API) ───────────
-echo "[5/13] Building Docker image: $DOCKER_IMAGE:$DOCKER_TAG ..."
-echo "  Dockerfile: $INSTALL_DIR/Dockerfile"
-echo "  Context:    $INSTALL_DIR/"
-echo ""
-
-# Pass host UID/GID so container user matches host's agrikd user
-HOST_UID=$(id -u "$SERVICE_USER")
-HOST_GID=$(id -g "$SERVICE_USER")
-echo "  Host agrikd UID:GID = $HOST_UID:$HOST_GID"
-
-cd "$INSTALL_DIR"
-docker build -t "$DOCKER_IMAGE:$DOCKER_TAG" \
-    --build-arg HOST_UID="$HOST_UID" \
-    --build-arg HOST_GID="$HOST_GID" \
-    -f "$INSTALL_DIR/Dockerfile" \
-    "$INSTALL_DIR/"
-cd "$SCRIPT_DIR"
-
-echo "  [OK] Docker image built: $DOCKER_IMAGE:$DOCKER_TAG"
+# ── 5. Verify Python + TensorRT + PyCUDA ─────────────────────
+echo "[5/13] Verifying runtime dependencies..."
+MISSING_DEPS=""
+python3 -c "import tensorrt" 2>/dev/null || MISSING_DEPS="${MISSING_DEPS} tensorrt"
+python3 -c "import pycuda" 2>/dev/null || MISSING_DEPS="${MISSING_DEPS} pycuda"
+python3 -c "import numpy" 2>/dev/null || MISSING_DEPS="${MISSING_DEPS} numpy"
+if [ -n "$MISSING_DEPS" ]; then
+    echo "  [WARN] Missing Python packages:$MISSING_DEPS"
+    echo "  The headless service may fail to start."
+    echo "  Install missing packages before starting the service."
+else
+    echo "  [OK] All runtime dependencies found (tensorrt, pycuda, numpy)."
+fi
 echo ""
 
 # ── 6. Install system packages for GUI mode ─────────────────
@@ -201,8 +206,8 @@ echo "[7/13] Installing GUI Python dependencies (system pip)..."
 # Only install packages not already available via apt
 # numpy and opencv come from apt (python3-numpy, python3-opencv)
 # PyQt5 comes from apt (python3-pyqt5)
-# flask + waitress are for headless (Docker only), but requests is needed for sync
-# Host uses Python 3.10 so we can install fully patched versions
+# flask + waitress: headless REST API server
+# requests: Supabase sync engine
 pip3 install --break-system-packages \
     requests==2.33.0 \
     flask==3.1.3 \
@@ -652,58 +657,52 @@ except Exception as e:
 fi
 echo ""
 
+# Fix ownership for any files created by root during steps 5-10
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/data" "$INSTALL_DIR/logs" "$INSTALL_DIR/models" 2>/dev/null || true
+
 # ── 11. Install systemd services ────────────────────────────
 echo "[11/13] Installing systemd services..."
 
-# Headless service: Docker container with GPU access
-# Auto-detect host Python site-packages for TensorRT/PyCUDA bind-mount
-HOST_SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/lib/python3/dist-packages")
-HOST_TENSORRT_LIB=$(python3 -c "import tensorrt, os; print(os.path.dirname(tensorrt.__file__))" 2>/dev/null || echo "")
-echo "  Host site-packages: $HOST_SITE_PKGS"
-
-# Build volume mounts for TensorRT + PyCUDA
-EXTRA_MOUNTS=""
-if [ -d "$HOST_SITE_PKGS/tensorrt" ]; then
-    EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/tensorrt:/usr/lib/python3/dist-packages/tensorrt:ro"
-fi
-if [ -d "$HOST_SITE_PKGS/pycuda" ]; then
-    EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/pycuda:/usr/lib/python3/dist-packages/pycuda:ro"
-fi
-# Also mount tensorrt_libs and pycuda egg-info if they exist
-for pkg in tensorrt_libs tensorrt_bindings; do
-    if [ -d "$HOST_SITE_PKGS/$pkg" ]; then
-        EXTRA_MOUNTS="$EXTRA_MOUNTS -v $HOST_SITE_PKGS/$pkg:/usr/lib/python3/dist-packages/$pkg:ro"
-    fi
-done
-# Fallback: mount entire dist-packages read-only if specific dirs not found
-if [ -z "$EXTRA_MOUNTS" ] && [ -d "$HOST_SITE_PKGS" ]; then
-    echo "  [WARN] Specific TensorRT/PyCUDA dirs not found — mounting full site-packages"
-    EXTRA_MOUNTS="-v $HOST_SITE_PKGS:/usr/lib/python3/dist-packages:ro"
-fi
-
+# Headless service: runs directly on host with system Python + TRT + PyCUDA
+# NOTE: Docker mode was removed because NVIDIA does not provide an official
+# JetPack 6 Docker image with TRT 10.x + Python 3.10. Running on host
+# ensures correct TensorRT/PyCUDA/CUDA versions match the hardware.
 cat > /etc/systemd/system/agrikd.service << SYSTEMD
 [Unit]
-Description=AgriKD Edge Inference Service (Docker)
-After=network.target docker.service
-Requires=docker.service
+Description=AgriKD Edge Inference Service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-ExecStartPre=-/usr/bin/docker stop agrikd-headless
-ExecStartPre=-/usr/bin/docker rm agrikd-headless
-ExecStart=/usr/bin/docker run --rm --name agrikd-headless \\
-    --runtime=nvidia \\
-    --network=host \\
-    -v $INSTALL_DIR/config:/app/config:ro \\
-    -v $INSTALL_DIR/models:/app/models:ro \\
-    -v $INSTALL_DIR/data:/app/data \\
-    -v $INSTALL_DIR/logs:/app/logs \\
-    $EXTRA_MOUNTS \\
-    $DOCKER_IMAGE:$DOCKER_TAG
-ExecStop=/usr/bin/docker stop agrikd-headless
+User=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=/usr/bin/python3 $INSTALL_DIR/app/main.py
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agrikd
+Environment=PYTHONUNBUFFERED=1
+
+# Crash loop protection: max 5 restarts in 300 seconds
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Resource limits
+MemoryMax=1G
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=$INSTALL_DIR /dev/video0 /dev/video1
 
 [Install]
 WantedBy=multi-user.target
@@ -751,7 +750,7 @@ SYSTEMD
 
 systemctl daemon-reload
 systemctl enable agrikd.service
-echo "  [OK] agrikd.service (Docker headless) — enabled, starts on boot."
+echo "  [OK] agrikd.service (headless REST API) — enabled, starts on boot."
 echo "  [OK] agrikd-gui.service (Host GUI) — available, manual start."
 echo ""
 
@@ -797,10 +796,9 @@ echo "  Setup Complete!"
 echo "========================================================"
 echo ""
 echo "  Install location: $INSTALL_DIR"
-echo "  Docker image:     $DOCKER_IMAGE:$DOCKER_TAG"
 echo ""
-echo "── Headless Mode (Docker REST API) ──────────────────────"
-echo "  sudo systemctl start agrikd        # Start container"
+echo "── Headless Mode (REST API) ─────────────────────────────"
+echo "  sudo systemctl start agrikd        # Start service"
 echo "  sudo systemctl status agrikd       # Check status"
 echo "  sudo journalctl -u agrikd -f       # View logs"
 echo "  curl http://localhost:8080/health   # Health check"
@@ -823,8 +821,8 @@ echo "── Re-provision / Credential Update ───────────�
 echo "  cd $INSTALL_DIR"
 echo "  python3 scripts/provision.py <token>"
 echo ""
-echo "── Docker Management ────────────────────────────────────"
-echo "  docker images | grep agrikd        # List images"
-echo "  docker ps | grep agrikd            # Running containers"
-echo "  docker logs agrikd-headless -f     # Container logs"
+echo "── Service Management ─────────────────────────────────────"
+echo "  sudo systemctl stop agrikd         # Stop service"
+echo "  sudo systemctl restart agrikd      # Restart service"
+echo "  sudo systemctl disable agrikd      # Disable auto-start"
 echo "========================================================"

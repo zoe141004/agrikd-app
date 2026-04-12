@@ -1,22 +1,16 @@
 # AgriKD Jetson — Python Dependencies
-# Used by: Docker build (Dockerfile) and system pip install (GUI mode)
+# Used by: system pip install (setup_jetson.sh step 7)
 #
-# NOTE: TensorRT and PyCUDA are provided by the NVIDIA JetPack SDK / L4T Docker image.
+# NOTE: TensorRT and PyCUDA are provided by the NVIDIA JetPack SDK.
 #       Do NOT add them here.
-# NOTE: PyQt5 is installed via apt (python3-pyqt5) for GPU acceleration on host.
-#       It is NOT needed in Docker (headless mode).
+# NOTE: PyQt5 is installed via apt (python3-pyqt5) for GPU acceleration.
+#       Do NOT add it here.
 #
-# COMPATIBILITY: All versions MUST work with both Python 3.8 (Docker/L4T) and 3.10 (host).
-#   - Docker container uses Python 3.8 (from L4T base image, required for TensorRT bindings)
-#   - Jetson host / dev / CI use Python 3.10 (project standard)
-#   - See Dockerfile header comments for why Docker cannot use 3.10.
-#
-# SECURITY: waitress 3.0.0 is the max version for Python 3.8.
-#   CVE fixes (3.0.1+) require Python 3.9+. Docker health server is internal-only
-#   (localhost via --network=host) so risk is minimal. Host pip install uses 3.0.2.
+# setup_jetson.sh installs newer patched versions for the host.
+# This file pins minimum-compatible versions for reference.
 
 numpy==1.24.4
 opencv-python-headless==4.8.1.78
-flask==3.0.3
-waitress==3.0.0
+flask==3.1.3
+waitress==3.0.2
 requests==2.32.4

@@ -99,7 +99,7 @@ Phase 3 (production audit round 2) applied targeted fixes across all components:
 | Admin Dashboard | React 18 + Vite 6 | SPA on Vercel |
 | Error Tracking (Dashboard) | @sentry/react | ^10.47.0 |
 | MLOps Runtime | Python 3.10 + DVC + GitHub Actions | venv at venv_mlops/ |
-| Edge Hardware | NVIDIA Jetson (ARM64) | L4T-based |
+| Edge Hardware | NVIDIA Jetson (ARM64) | JetPack 6.x, host-native |
 | Local Database | SQLite (sqflite 2.4.1 / Python sqlite3) | - |
 | Authentication | Supabase Auth + Google Sign-In 6.2.1 | PKCE flow |
 | IaC Audit | PL/pgSQL (verify_rls_policies.sql) | Run in SQL Editor |
@@ -157,7 +157,7 @@ agrikd/
 │   ├── config/
 │   │   ├── config.example.json        # Template (committed); fill and rename to config.json
 │   │   └── config.json                # Runtime config (gitignored, never committed)
-│   ├── Dockerfile                     # L4T-based container
+│   ├── Dockerfile                     # DEPRECATED (JetPack 5 only)
 │   ├── setup_jetson.sh                # First-boot provisioning
 │   ├── agrikd.service                 # systemd unit (headless)
 │   └── agrikd-gui.service             # systemd unit (GUI)

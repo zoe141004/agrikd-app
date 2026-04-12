@@ -1,5 +1,5 @@
-# TEMPLATE — setup_jetson.sh generates the actual Docker-based service.
-# This file is a reference for non-Docker (host-only) installs.
+# TEMPLATE — setup_jetson.sh generates the actual service file.
+# This file is a reference for manual installs (copy and adjust paths).
 
 [Unit]
 Description=AgriKD Edge Inference Service
