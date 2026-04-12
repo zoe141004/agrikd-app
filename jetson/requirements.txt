@@ -5,7 +5,7 @@
 #       Do NOT add them here.
 # NOTE: PyQt5 is installed via apt (python3-pyqt5) for GPU acceleration on host.
 #       It is NOT needed in Docker (headless mode).
-# NOTE: L4T Docker base image uses Python 3.8 — all versions MUST be compatible.
+# NOTE: All versions must be compatible with Python 3.10 (project standard).
 
 numpy==1.24.4
 opencv-python-headless==4.8.1.78

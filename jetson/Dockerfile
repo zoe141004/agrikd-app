@@ -11,24 +11,36 @@
 #
 # NOTE: This image is headless only (no GUI/PyQt5).
 #       GUI mode runs on the host with system Python.
+# NOTE: Base image ships Python 3.8; we install Python 3.10 for consistency
+#       with the rest of the project (dev, CI, Jetson host).
 
 FROM nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies
+# Install Python 3.10 + system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-pip \
-    python3-dev \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3.10-venv \
+    python3.10-dev \
     libopencv-dev \
     libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Set Python 3.10 as default python3 and install pip
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
+    && python3 -m ensurepip --upgrade \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
 # Install Python dependencies (pinned versions from requirements.txt)
 COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Create non-root user
 RUN useradd -m -s /bin/bash agrikd && \
