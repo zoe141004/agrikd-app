@@ -151,9 +151,10 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 # Read-only mounts (config, models): world-readable
 chmod 755 "$INSTALL_DIR/config" "$INSTALL_DIR/models"
 find "$INSTALL_DIR/config" "$INSTALL_DIR/models" -type f -exec chmod 644 {} + 2>/dev/null || true
-# Read-write mounts (data, logs): world-writable
+# Read-write mounts (data, logs): world-writable (dirs AND existing files)
 chmod 777 "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
 find "$INSTALL_DIR/data" -type d -exec chmod 777 {} + 2>/dev/null || true
+find "$INSTALL_DIR/data" "$INSTALL_DIR/logs" -type f -exec chmod 666 {} + 2>/dev/null || true
 
 echo "  [OK] Files copied. Ownership set to $SERVICE_USER."
 echo ""
@@ -164,8 +165,15 @@ echo "  Dockerfile: $INSTALL_DIR/Dockerfile"
 echo "  Context:    $INSTALL_DIR/"
 echo ""
 
+# Pass host UID/GID so container user matches host's agrikd user
+HOST_UID=$(id -u "$SERVICE_USER")
+HOST_GID=$(id -g "$SERVICE_USER")
+echo "  Host agrikd UID:GID = $HOST_UID:$HOST_GID"
+
 cd "$INSTALL_DIR"
 docker build -t "$DOCKER_IMAGE:$DOCKER_TAG" \
+    --build-arg HOST_UID="$HOST_UID" \
+    --build-arg HOST_GID="$HOST_GID" \
     -f "$INSTALL_DIR/Dockerfile" \
     "$INSTALL_DIR/"
 cd "$SCRIPT_DIR"

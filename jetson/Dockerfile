@@ -38,8 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Create non-root user
-RUN useradd -m -s /bin/bash agrikd && \
+# Create non-root user — UID/GID passed from setup script to match host
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+RUN groupadd -g $HOST_GID agrikd 2>/dev/null || true && \
+    useradd -m -u $HOST_UID -g $HOST_GID -s /bin/bash agrikd && \
     mkdir -p /app/models /app/data /app/logs && \
     chown -R agrikd:agrikd /app
 
