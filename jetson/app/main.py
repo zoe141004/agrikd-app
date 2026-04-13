@@ -283,6 +283,23 @@ def main():
     interval = config["camera"].get("interval_seconds", 1800)
     default_leaf = available[0]
 
+    # Apply persisted admin config from device_state on startup
+    # (so we don't need to wait for first poll cycle)
+    if device_state and device_state.get("desired_config"):
+        startup_cfg = device_state["desired_config"]
+        startup_mode = startup_cfg.get("mode", mode)
+        startup_interval = startup_cfg.get("interval_seconds", interval)
+        startup_leaf = startup_cfg.get("default_leaf_type", default_leaf)
+        if startup_mode != mode or startup_interval != interval:
+            logger.info(
+                "Applying saved admin config: mode=%s -> %s, interval=%ds -> %ds",
+                mode, startup_mode, interval, startup_interval,
+            )
+        mode = startup_mode
+        interval = startup_interval
+        if startup_leaf in available:
+            default_leaf = startup_leaf
+
     logger.info("Starting main loop (mode=%s) — Local-First active", mode)
 
     # Fix 1.6: try/finally ensures cleanup runs even on uncaught exceptions
@@ -302,8 +319,12 @@ def main():
                         )
                     mode = new_mode
                     interval = new_interval
+                    # Refresh available engines (may have changed via hot-swap)
+                    available = pool.available_engines()
                     if new_leaf in available:
                         default_leaf = new_leaf
+                    elif default_leaf not in available and available:
+                        default_leaf = available[0]
             except Exception as e:
                 logger.warning("Config check failed, keeping current: %s", e)
 
@@ -345,10 +366,13 @@ def main():
                             except OSError as e:
                                 logger.debug("Could not remove orphaned image %s: %s", img_path, e)
                             continue
+                        model_ver = sync.get_model_version(default_leaf)
                         logger.info(
-                            "Prediction: %s (%.1f%%)",
+                            "Prediction: %s (%.1f%%) [model=%s v%s]",
                             result["class_name"],
                             result["confidence"] * 100,
+                            default_leaf,
+                            model_ver,
                         )
                 except Exception as e:
                     logger.error("Capture/inference error: %s", e)
