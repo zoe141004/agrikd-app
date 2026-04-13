@@ -280,6 +280,8 @@ app/
 - **PHAI chay tren Jetson** vi engine file phu thuoc vao GPU architecture
 - FP16 precision cho hieu nang toi uu
 - Script: `convert_onnx_to_tensorrt.py --method trtexec`
+- **Engine file naming**: `{leaf_type}_student_v{version}.engine` (e.g., `tomato_student_v1.1.0.engine`)
+- **trtexec discovery order**: `PATH` → `/usr/src/tensorrt/bin/trtexec` → `/usr/local/bin/trtexec` → `~/trtexec`
 
 **Flow 3: Direct PTH -> TFLite (alternative, Linux only)**
 ```
@@ -817,6 +819,7 @@ CREATE INDEX idx_sync_queue_status ON sync_queue(status);
   - Dashboard: Aggregated stats (server-side RPCs) + BarChart daily scans + PieChart disease distribution
   - Predictions: Paginated table 25/page, filters (leaf type, date range), Export CSV/JSON (max 10000 rows)
   - Models: Model registry management (5 tabs: Registry, Compare, Upload, Pipeline, Benchmarks). Multi-version support with staging/active/backup lifecycle. Upload .pth checkpoints, trigger CI/CD pipeline, compare model versions, view benchmark metrics.
+  - Devices: Device management & provisioning. "Latest active" model version selection is resolved to the actual latest version with `status='active'` from `model_registry` at save time. Empty/unresolved entries are excluded from `desired_config`.
   - Users: Danh sach nguoi dung, so predictions, ngay tham gia, trang thai admin
   - Data Management: Quan ly datasets, export/import du lieu, DVC operations
   - Releases: Quan ly cac phien ban phat hanh, APK, release notes
@@ -933,9 +936,12 @@ Camera (USB/CSI) -> Capture frame
 ### 11.3 Camera Modes (configurable)
 - **Manual Mode**: Trigger qua REST API (`POST /predict` voi image upload)
 - **Periodic Mode**: Timer configurable (e.g., moi 30 phut)
+  - Headless periodic mode uses `capture_single(warmup_delay=3.0, warmup_frames=5)`:
+    - **3-second delay** after camera open for USB/CSI auto-exposure stabilization
+    - **5 warmup frames** captured and discarded before the actual frame
 - Config qua `config/config.json`
 
-### 11.4 Sync Engine
+### 11.4 Sync Engine & Config Flow
 ```
 Background thread (daemon):
 1. Query SQLite: SELECT * FROM predictions WHERE is_synced = 0 LIMIT 50
@@ -944,10 +950,18 @@ Background thread (daemon):
 4. Sleep interval_seconds -> Loop
 ```
 
+**Pre-build on startup**: `SyncEngine.run()` immediately compares `desired_config.model_versions` vs loaded engines and triggers builds without waiting for the first poll cycle.
+
+**Config flow (single-writer)**:
+```
+Admin Dashboard → Supabase → SyncEngine (writes device_state.json + config.json) → main.py reads via get_active_config()
+```
+Only SyncEngine writes local config files; `main.py` is a read-only consumer.
+
 ### 11.5 Operations
 - **Systemd service**: Auto-start on boot, restart on crash (RestartSec=10)
 - **Log rotation**: Max 100 MB, 5 backup files (RotatingFileHandler)
-- **Health check**: `GET /health` tren port 8080 (uptime, models loaded, DB stats)
+- **Health check**: `GET /health` tren port 8080 (uptime, models loaded, DB stats). Authenticated response includes `model_versions: {"tomato": "1.0.0", ...}` showing per-leaf-type loaded engine versions.
 - **SQLite WAL mode**: Crash-safe concurrent reads/writes
 - **REST API**: `/predict` (POST image), `/stats` (GET), `/health` (GET)
 
