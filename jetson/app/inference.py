@@ -295,6 +295,8 @@ class InferenceWorkerPool:
         except Exception as exc:
             self._error = exc
             self._ready.set()
+            # T1-01: Drain queue so pending futures don't hang forever
+            self._drain_queue(exc)
             return
 
         self._ready.set()
@@ -348,13 +350,44 @@ class InferenceWorkerPool:
                         pass
                     if consecutive_errors >= 10:
                         logger.critical(
-                            "10 consecutive inference failures — worker staying alive "
-                            "but CUDA state may be corrupt"
+                            "10 consecutive inference failures — CUDA state "
+                            "likely corrupt, worker exiting for restart"
                         )
+                        # T1-02: Exit loop so is_healthy() returns False
+                        # and main.py can trigger systemd restart
+                        break
             except Exception as outer_exc:
+                # T1-02: Unrecoverable error — exit loop to allow restart
                 logger.critical(
-                    "Unexpected error in inference worker loop: %s", outer_exc
+                    "Unrecoverable error in inference worker — exiting: %s",
+                    outer_exc,
                 )
+                break
+
+        # Drain any remaining jobs when loop exits
+        self._drain_queue(RuntimeError("Inference worker terminated"))
+
+    def _drain_queue(self, error):
+        """Resolve all pending futures with an error so callers don't hang."""
+        drained = 0
+        while True:
+            try:
+                job = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if job is _SHUTDOWN:
+                continue
+            # Extract future from inference jobs and hot-swap jobs
+            fut = None
+            if isinstance(job, tuple) and len(job) == 5 and job[0] is _HOT_SWAP:
+                fut = job[4]
+            elif isinstance(job, tuple) and len(job) == 3:
+                fut = job[2]
+            if fut is not None and not fut.done():
+                fut.set_exception(error)
+                drained += 1
+        if drained:
+            logger.warning("Drained %d pending jobs from inference queue", drained)
 
     def _init_engines(self):
         """Load TensorRT engines ON the worker thread (CUDA-owner)."""
