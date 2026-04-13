@@ -405,7 +405,8 @@ class InferenceWorkerPool:
                 inference_config=self._inference_config,
             )
             self._engines[leaf_type] = eng
-            logger.info("Loaded TensorRT engine: %s (%s)", leaf_type, engine_path)
+            ver = model_cfg.get("version", "unknown")
+            logger.info("Loaded TensorRT engine: %s v%s (%s)", leaf_type, ver, engine_path)
 
         if not self._engines:
             raise RuntimeError("No TensorRT engines loaded.")
@@ -456,4 +457,5 @@ class InferenceWorkerPool:
         if leaf_type not in self._leaf_types:
             self._leaf_types.append(leaf_type)
 
-        logger.info("Hot-swapped engine: %s → %s", leaf_type, engine_path)
+        ver = model_meta.get("version", "unknown") if model_meta else model_cfg.get("version", "unknown")
+        logger.info("Hot-swapped engine: %s v%s → %s", leaf_type, ver, engine_path)

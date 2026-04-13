@@ -150,9 +150,15 @@ def health():
     if _api_key and hmac.compare_digest(provided, _api_key):
         uptime = time.time() - _start_time if _start_time else 0
         stats = _db.get_stats() if _db else {}
+        # Build model version info
+        model_versions = {}
+        if _sync_engine:
+            for lt in (_pool.available_engines() if _pool else []):
+                model_versions[lt] = _sync_engine.get_model_version(lt)
         resp.update({
             "uptime_seconds": int(uptime),
             "models_loaded": _pool.available_engines() if _pool else [],
+            "model_versions": model_versions,
             "database": stats,
         })
 
