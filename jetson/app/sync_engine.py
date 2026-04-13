@@ -41,7 +41,8 @@ class SyncEngine:
       2. email/password JWT — legacy fallback
     """
 
-    def __init__(self, config, db, models_config=None, shutdown_event=None):
+    def __init__(self, config, db, models_config=None, shutdown_event=None,
+                 inference_pool=None, config_path=None):
         self.supabase_url = config.get("supabase_url", "")
         self.supabase_key = config.get("supabase_key", "")
         self.email = config.get("email", "")
@@ -51,6 +52,8 @@ class SyncEngine:
         self.db = db
         self._models_config = models_config or {}
         self._shutdown_event = shutdown_event or threading.Event()
+        self._inference_pool = inference_pool  # For hot-swap
+        self._config_path = config_path        # For persisting model updates
         self._session = requests.Session()
         # Retry adapter: handles transient connection/TLS failures
         from requests.adapters import HTTPAdapter
@@ -74,6 +77,14 @@ class SyncEngine:
         )
         self._config_lock = threading.Lock()
 
+        # Engine build status per leaf_type: 'ready' | 'building' | 'error'
+        self._engine_status = {}
+        # Applied model versions (track what's actually loaded)
+        self._applied_model_versions = {}
+        for lt, cfg in self._models_config.items():
+            self._applied_model_versions[lt] = cfg.get("version", "1.0.0")
+            self._engine_status[lt] = "ready"
+
         if self._device_state:
             logger.info(
                 "Device state loaded: device_id=%s, hw_id=%s",
@@ -84,6 +95,10 @@ class SyncEngine:
     @property
     def _is_configured(self):
         return bool(self.supabase_url and self.supabase_key)
+
+    def get_model_version(self, leaf_type):
+        """Get the currently applied model version for a leaf_type."""
+        return self._applied_model_versions.get(leaf_type, "1.0.0")
 
     # ── Device state (SINGLE-WRITER with file locking) ────────────────
 
@@ -306,15 +321,31 @@ class SyncEngine:
             with self._state_lock:
                 self._device_state["desired_config"] = desired
             self._save_device_state()
+
+            # Check for model version changes and trigger builds
+            self._check_model_versions(desired)
+
             self._report_config(desired, remote_ver)
 
     def _report_config(self, config, version):
-        """ACK: report applied config back to Supabase via RPC."""
+        """ACK: report applied config back to Supabase via RPC.
+
+        Includes engine_status in reported_config so dashboard can show
+        build progress per model.
+        """
         if not self._device_state:
             return
 
         token = self._device_state["device_token"]
         url = f"{self.supabase_url}/rest/v1/rpc/device_ack_config"
+
+        # Merge engine status into reported config
+        reported = dict(config) if config else {}
+        if self._engine_status:
+            reported["engine_status"] = dict(self._engine_status)
+        # Include applied model versions
+        if self._applied_model_versions:
+            reported["applied_model_versions"] = dict(self._applied_model_versions)
 
         try:
             resp = self._session.post(
@@ -322,7 +353,7 @@ class SyncEngine:
                 headers=self._get_headers(),
                 json={
                     "p_device_token": token,
-                    "p_reported_config": config,
+                    "p_reported_config": reported,
                 },
                 timeout=10,
                 verify=True,
@@ -330,7 +361,7 @@ class SyncEngine:
             if resp.status_code in (200, 204):
                 with self._state_lock:
                     self._device_state["config_version_applied"] = version
-                    self._device_state["reported_config"] = config
+                    self._device_state["reported_config"] = reported
                 self._save_device_state()
                 logger.info("Config v%d ACK sent", version)
             else:
@@ -358,6 +389,333 @@ class SyncEngine:
             )
         except requests.RequestException:
             pass  # Heartbeat is best-effort
+
+    # ── Engine management (auto-build/download) ──────────────────────
+
+    def _check_model_versions(self, desired_config):
+        """Check if model_versions in desired_config differ from applied.
+
+        If a version changed, trigger engine build/download in background.
+        """
+        desired_mv = desired_config.get("model_versions", {})
+        if not desired_mv:
+            return
+
+        for leaf_type, desired_ver in desired_mv.items():
+            current_ver = self._applied_model_versions.get(leaf_type)
+            if current_ver == desired_ver:
+                continue
+            if self._engine_status.get(leaf_type) == "building":
+                continue  # Already building
+
+            logger.info(
+                "Model version change: %s %s -> %s, triggering engine build",
+                leaf_type, current_ver, desired_ver,
+            )
+            self._engine_status[leaf_type] = "building"
+            # Run build in background thread to avoid blocking sync loop
+            t = threading.Thread(
+                target=self._build_engine,
+                args=(leaf_type, desired_ver),
+                daemon=True,
+                name=f"engine-build-{leaf_type}",
+            )
+            t.start()
+
+    def _build_engine(self, leaf_type, version):
+        """Download ONNX and build TensorRT engine for a specific version.
+
+        Steps:
+          1. Query Supabase for ONNX URL (get_latest_onnx_url or by version)
+          2. Check if cached engine exists (get_engine_for_hardware)
+          3. Download cached or build from ONNX
+          4. Hot-swap inference engine
+          5. Update local config
+          6. Delete old engine file
+        """
+        import subprocess
+        import hashlib
+
+        try:
+            headers = self._get_headers()
+            models_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "models"
+            )
+            os.makedirs(models_dir, exist_ok=True)
+
+            # Detect hardware tag
+            hw_tag = self._get_hardware_tag()
+
+            # Step 1: Check for cached engine
+            engine_info = self._supabase_rpc("get_engine_for_hardware", {
+                "p_leaf_type": leaf_type,
+                "p_version": version,
+                "p_hardware_tag": hw_tag,
+            })
+
+            new_engine_path = os.path.join(
+                models_dir, f"{leaf_type}_student_v{version}.engine"
+            )
+
+            if engine_info and len(engine_info) > 0 and engine_info[0].get("engine_url"):
+                # Download cached engine
+                logger.info("Downloading cached engine: %s v%s (%s)", leaf_type, version, hw_tag)
+                engine_url = engine_info[0]["engine_url"]
+                expected_sha = engine_info[0].get("engine_sha256", "")
+                self._download_file(engine_url, new_engine_path)
+
+                # Verify SHA256
+                if expected_sha:
+                    actual_sha = self._sha256_file(new_engine_path)
+                    if actual_sha != expected_sha:
+                        logger.error("Engine SHA256 mismatch for %s v%s", leaf_type, version)
+                        self._engine_status[leaf_type] = "error"
+                        return
+            else:
+                # Step 2: Get ONNX URL for this specific version
+                # First try exact version match via REST query
+                onnx_url = self._get_onnx_url_for_version(leaf_type, version)
+                if not onnx_url:
+                    # Fallback: get_latest_onnx_url RPC (may return different version)
+                    onnx_info = self._supabase_rpc("get_latest_onnx_url", {
+                        "p_leaf_type": leaf_type,
+                    })
+                    if onnx_info and len(onnx_info) > 0:
+                        onnx_url = onnx_info[0].get("onnx_url")
+
+                if not onnx_url:
+                    logger.error("No ONNX URL for %s v%s", leaf_type, version)
+                    self._engine_status[leaf_type] = "error"
+                    return
+
+                # Step 3: Download ONNX and build engine
+                import tempfile
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
+                    logger.info("Downloading ONNX: %s v%s", leaf_type, version)
+                    self._download_file(onnx_url, onnx_path)
+
+                    logger.info("Building TensorRT engine: %s v%s (this may take 10-30 min)", leaf_type, version)
+                    result = subprocess.run(
+                        ["trtexec",
+                         f"--onnx={onnx_path}",
+                         f"--saveEngine={new_engine_path}",
+                         "--fp16", "--workspace=1024"],
+                        capture_output=True, text=True, timeout=1800,
+                    )
+                    if result.returncode != 0:
+                        logger.error("trtexec failed: %s", result.stderr[-500:])
+                        self._engine_status[leaf_type] = "error"
+                        return
+
+                # Upload built engine to cache for other devices
+                engine_sha = self._sha256_file(new_engine_path)
+                self._upload_engine_cache(leaf_type, version, hw_tag, new_engine_path, engine_sha)
+
+            # Step 4: Hot-swap inference engine
+            logger.info("Hot-swapping engine: %s v%s", leaf_type, version)
+            old_engine_path = self._models_config.get(leaf_type, {}).get("engine_path", "")
+
+            # Get model metadata from registry for class info
+            model_meta = self._get_model_metadata(leaf_type, version)
+
+            if self._inference_pool:
+                self._inference_pool.hot_swap(leaf_type, new_engine_path, model_meta)
+
+            # Step 5: Update local config
+            if leaf_type not in self._models_config:
+                self._models_config[leaf_type] = {}
+            self._models_config[leaf_type]["engine_path"] = new_engine_path
+            self._models_config[leaf_type]["version"] = version
+            if model_meta:
+                self._models_config[leaf_type]["num_classes"] = model_meta.get("num_classes")
+                self._models_config[leaf_type]["class_labels"] = model_meta.get("class_labels")
+                self._models_config[leaf_type]["sha256_checksum"] = self._sha256_file(new_engine_path)
+            self._persist_config()
+
+            # Step 6: Delete old engine
+            if old_engine_path and os.path.isfile(old_engine_path) and old_engine_path != new_engine_path:
+                try:
+                    os.unlink(old_engine_path)
+                    logger.info("Deleted old engine: %s", old_engine_path)
+                except OSError:
+                    pass
+
+            self._applied_model_versions[leaf_type] = version
+            self._engine_status[leaf_type] = "ready"
+            logger.info("Engine update complete: %s v%s", leaf_type, version)
+
+            # Re-report config so dashboard sees updated engine_status
+            self._re_report_engine_status()
+
+        except Exception as e:
+            logger.error("Engine build failed for %s v%s: %s", leaf_type, version, e)
+            self._engine_status[leaf_type] = "error"
+            self._re_report_engine_status()
+
+    def _re_report_engine_status(self):
+        """Re-send reported_config with current engine_status to dashboard."""
+        if not self._device_state:
+            return
+        applied_ver = self._device_state.get("config_version_applied", -1)
+        desired = self._device_state.get("desired_config")
+        if desired and applied_ver >= 0:
+            self._report_config(desired, applied_ver)
+
+    def _supabase_rpc(self, fn_name, params):
+        """Call Supabase RPC and return JSON result."""
+        try:
+            resp = self._session.post(
+                f"{self.supabase_url}/rest/v1/rpc/{fn_name}",
+                headers=self._get_headers(),
+                json=params, timeout=15, verify=True,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning("RPC %s failed: HTTP %d", fn_name, resp.status_code)
+        except requests.RequestException as e:
+            logger.warning("RPC %s error: %s", fn_name, e)
+        return None
+
+    def _download_file(self, url, dest_path):
+        """Download file from Supabase Storage."""
+        resp = self._session.get(
+            url,
+            headers={
+                "apikey": self.supabase_key,
+                "Authorization": f"Bearer {self.supabase_key}",
+            },
+            timeout=(10, 300), stream=True, verify=True,
+        )
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+    def _sha256_file(self, path):
+        """Compute SHA-256 hash of a file."""
+        import hashlib
+        sha = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha.update(chunk)
+        return sha.hexdigest()
+
+    def _get_hardware_tag(self):
+        """Detect NVIDIA GPU hardware tag (sm53, sm72, sm87)."""
+        import subprocess
+        try:
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                text=True, timeout=10,
+            ).strip()
+            major, minor = out.split(".")
+            return f"sm{major}{minor}"
+        except Exception:
+            # Fallback: check device-tree for Jetson
+            try:
+                with open("/proc/device-tree/model", "r") as f:
+                    model = f.read().lower()
+                if "orin" in model:
+                    return "sm87"
+                elif "xavier" in model:
+                    return "sm72"
+                elif "nano" in model:
+                    return "sm53"
+            except Exception:
+                pass
+        return "unknown"
+
+    def _upload_engine_cache(self, leaf_type, version, hw_tag, engine_path, engine_sha):
+        """Upload built engine to Supabase Storage for other devices to reuse."""
+        try:
+            storage_path = f"engines/{leaf_type}/{version}/{hw_tag}.engine"
+            with open(engine_path, "rb") as f:
+                data = f.read()
+
+            upload_url = f"{self.supabase_url}/storage/v1/object/models/{storage_path}"
+            resp = self._session.post(
+                upload_url,
+                headers={
+                    "apikey": self.supabase_key,
+                    "Authorization": f"Bearer {self.supabase_key}",
+                    "Content-Type": "application/octet-stream",
+                },
+                data=data, timeout=(10, 300), verify=True,
+            )
+            if resp.status_code in (200, 201):
+                # Register in model_engines table
+                engine_url = f"{self.supabase_url}/storage/v1/object/public/models/{storage_path}"
+                device_id = self._device_state.get("device_id") if self._device_state else None
+                self._session.post(
+                    f"{self.supabase_url}/rest/v1/model_engines",
+                    headers={**self._get_headers(), "Prefer": "return=minimal"},
+                    json={
+                        "leaf_type": leaf_type,
+                        "version": version,
+                        "hardware_tag": hw_tag,
+                        "engine_url": engine_url,
+                        "engine_sha256": engine_sha,
+                        "created_by_device": device_id,
+                    },
+                    timeout=10, verify=True,
+                )
+                logger.info("Engine cached: %s v%s %s", leaf_type, version, hw_tag)
+        except Exception as e:
+            logger.warning("Engine cache upload failed (non-fatal): %s", e)
+
+    def _get_model_metadata(self, leaf_type, version):
+        """Fetch model metadata (num_classes, class_labels) from model_registry."""
+        try:
+            resp = self._session.get(
+                f"{self.supabase_url}/rest/v1/model_registry"
+                f"?leaf_type=eq.{leaf_type}&version=eq.{version}&select=num_classes,class_labels",
+                headers=self._get_headers(),
+                timeout=10, verify=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data and len(data) > 0:
+                    return data[0]
+        except requests.RequestException:
+            pass
+        return None
+
+    def _get_onnx_url_for_version(self, leaf_type, version):
+        """Fetch ONNX URL for a specific leaf_type + version from model_registry."""
+        try:
+            resp = self._session.get(
+                f"{self.supabase_url}/rest/v1/model_registry"
+                f"?leaf_type=eq.{leaf_type}&version=eq.{version}&select=onnx_url",
+                headers=self._get_headers(),
+                timeout=10, verify=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data and len(data) > 0:
+                    return data[0].get("onnx_url")
+        except requests.RequestException:
+            pass
+        return None
+
+    def _persist_config(self):
+        """Write updated models config back to config.json.
+
+        Protected by _config_lock to prevent concurrent engine build threads
+        from corrupting the file via read-modify-write races.
+        """
+        if not self._config_path:
+            return
+        with self._config_lock:
+            try:
+                with open(self._config_path, "r") as f:
+                    full_config = json.load(f)
+                full_config["models"] = self._models_config
+                with open(self._config_path, "w") as f:
+                    json.dump(full_config, f, indent=4)
+                logger.debug("Config persisted to %s", self._config_path)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Failed to persist config: %s", e)
 
     # ── Image upload ──────────────────────────────────────────────────
 

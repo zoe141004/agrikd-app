@@ -979,6 +979,36 @@ curl http://localhost:8080/stats
 journalctl -u agrikd | grep "Sync complete"
 ```
 
+### 9.5 Model Version Management (Auto-Engine Build)
+
+The admin dashboard allows assigning specific model versions to each Jetson
+device. When the version changes, the sync engine automatically handles the
+full lifecycle:
+
+**Dashboard Side** (Admin):
+1. Open **Devices** page → Edit device → **Model Versions** section
+2. Select a version per leaf_type from the dropdown (shows active/staging models
+   from `model_registry`)
+3. Save → `desired_config.model_versions` is updated in Supabase
+
+**Jetson Side** (Automatic):
+1. Sync engine polls `desired_config` and detects version change
+2. Checks for cached engine in `model_engines` table (same hardware tag)
+3. If cached: downloads pre-built engine (fast)
+4. If not cached: downloads ONNX from Storage → builds engine with
+   `trtexec --fp16` (10–30 min on Jetson) → uploads to cache for others
+5. Hot-swaps the engine in `InferenceWorkerPool` without service restart
+6. Updates local `config.json` with new version, path, class labels
+7. Deletes old engine file to free storage
+8. Reports `engine_status` (building/ready/error) + `applied_model_versions`
+   in `reported_config`
+
+**Status Monitoring**:
+- Dashboard table shows per-model engine status: ✅ ready / 🔶 building / 🔴 error
+- Edit modal shows detailed engine status per leaf_type
+- Config status shows "Synced" only after Jetson ACKs the new config
+- Logs: `journalctl -u agrikd | grep -i "engine\|hot-swap\|model version"`
+
 ---
 
 ## 10. Docker Deployment (REMOVED)

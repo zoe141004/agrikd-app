@@ -220,8 +220,18 @@ User-submitted feedback on incorrect predictions.
 Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
 
 #### Device Fleet Tab
-- View all registered Jetson devices with status, owner, config sync status.
-- Edit: rename device, assign/unassign user, change capture mode and interval.
+- View all registered Jetson devices with status, owner, config sync status,
+  and assigned model versions with engine build status.
+- **Edit**: rename device, assign/unassign user, change capture mode and
+  interval, assign model versions per leaf_type.
+- **Model Versions**: Select specific model versions for each leaf_type from
+  active/staging models in the registry. Choose "Latest active" (default) to
+  let the device use whatever is currently active. Changes trigger automatic
+  engine build/download on the Jetson device.
+- **Engine Status**: Displayed per model in the device table and edit modal:
+  - **ready** (green) — engine loaded and running
+  - **building** (amber) — downloading ONNX or building TensorRT engine
+  - **error** (red) — build failed, check device logs
 - Decommission: marks device inactive, unlinks user.
 
 #### Provisioning Tokens Tab

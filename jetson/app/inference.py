@@ -198,6 +198,7 @@ class TensorRTInference:
 
 # ── Sentinel to signal worker shutdown ──
 _SHUTDOWN = object()
+_HOT_SWAP = object()  # Sentinel for hot-swap jobs
 
 
 class InferenceWorkerPool:
@@ -263,6 +264,23 @@ class InferenceWorkerPool:
             engine.cleanup()
         self._engines.clear()
 
+    def hot_swap(self, leaf_type, engine_path, model_meta=None):
+        """Hot-swap a single engine on the CUDA worker thread.
+
+        Thread-safe: queues a swap job and waits for completion.
+        The old engine is cleaned up and replaced atomically.
+
+        Args:
+            leaf_type: e.g. "tomato"
+            engine_path: path to new .engine file
+            model_meta: dict with num_classes, class_labels (optional)
+        """
+        fut = Future()
+        self._queue.put((_HOT_SWAP, leaf_type, engine_path, model_meta, fut))
+        # Wait for swap to complete (up to 120s for engine deserialization on slower Jetson devices)
+        result = fut.result(timeout=120)
+        return result
+
     # ── Worker (runs on its own thread — owns CUDA context) ─────────
 
     def _worker_loop(self):
@@ -287,6 +305,16 @@ class InferenceWorkerPool:
                 if job is _SHUTDOWN:
                     logger.info("Inference worker shutting down")
                     break
+
+                # Handle hot-swap request (runs on CUDA thread)
+                if isinstance(job, tuple) and len(job) == 5 and job[0] is _HOT_SWAP:
+                    _, lt, path, meta, swap_fut = job
+                    try:
+                        self._do_hot_swap(lt, path, meta)
+                        swap_fut.set_result(True)
+                    except Exception as exc:
+                        swap_fut.set_exception(exc)
+                    continue
 
                 leaf_type, frame, fut = job
                 try:
@@ -345,3 +373,39 @@ class InferenceWorkerPool:
             raise RuntimeError("No TensorRT engines loaded.")
 
         self._leaf_types = list(self._engines.keys())
+
+    def _do_hot_swap(self, leaf_type, engine_path, model_meta=None):
+        """Replace a single engine (runs on CUDA worker thread).
+
+        Loads the new engine FIRST, then cleans up the old one — so if the
+        new engine fails to load, the old engine remains functional.
+        """
+        # Build model_cfg for the new engine
+        model_cfg = dict(self._model_configs.get(leaf_type, {}))
+        model_cfg["engine_path"] = engine_path
+        if model_meta:
+            if "num_classes" in model_meta:
+                model_cfg["num_classes"] = model_meta["num_classes"]
+            if "class_labels" in model_meta:
+                model_cfg["class_labels"] = model_meta["class_labels"]
+
+        # Load new engine BEFORE cleaning up old (safe degradation)
+        new_engine = TensorRTInference(
+            engine_path,
+            model_cfg,
+            inference_config=self._inference_config,
+        )
+
+        # New engine loaded OK — now clean up old
+        old_engine = self._engines.get(leaf_type)
+        if old_engine:
+            logger.info("Cleaning up old engine: %s", leaf_type)
+            old_engine.cleanup()
+
+        self._engines[leaf_type] = new_engine
+        self._model_configs[leaf_type] = model_cfg
+
+        if leaf_type not in self._leaf_types:
+            self._leaf_types.append(leaf_type)
+
+        logger.info("Hot-swapped engine: %s → %s", leaf_type, engine_path)

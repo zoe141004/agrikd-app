@@ -239,6 +239,8 @@ def main():
         config["sync"], db,
         models_config=config.get("models", {}),
         shutdown_event=shutdown_event,
+        inference_pool=pool,
+        config_path="config/config.json",
     )
     sync_thread = threading.Thread(target=sync.run, daemon=True, name="sync-engine")
     sync_thread.start()

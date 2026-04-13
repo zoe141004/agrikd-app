@@ -18,6 +18,7 @@ export default function DevicesPage() {
   const [devices, setDevices] = useState([])
   const [tokens, setTokens] = useState([])
   const [users, setUsers] = useState([])
+  const [modelVersions, setModelVersions] = useState({}) // {leaf_type: [{version, status}]}
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -62,16 +63,26 @@ export default function DevicesPage() {
     setLoading(true)
     setError(null)
     try {
-      const [devRes, tokRes, usersRes] = await Promise.allSettled([
+      const [devRes, tokRes, usersRes, modelsRes] = await Promise.allSettled([
         supabase.from('devices').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('provisioning_tokens').select('*').order('created_at', { ascending: false }).limit(50),
         supabase.from('profiles').select('id, email, role').eq('role', 'user').order('email').limit(200),
+        supabase.from('model_registry').select('leaf_type, version, status').in('status', ['active', 'staging']).order('leaf_type').order('version', { ascending: false }),
       ])
       if (!mountedRef.current) return
       if (devRes.status === 'fulfilled' && devRes.value.data) setDevices(devRes.value.data)
       else if (devRes.status === 'fulfilled' && devRes.value.error) setError(devRes.value.error.message)
       if (tokRes.status === 'fulfilled' && tokRes.value.data) setTokens(tokRes.value.data)
       if (usersRes.status === 'fulfilled' && usersRes.value.data) setUsers(usersRes.value.data)
+      // Group model versions by leaf_type
+      if (modelsRes.status === 'fulfilled' && modelsRes.value.data) {
+        const grouped = {}
+        for (const m of modelsRes.value.data) {
+          if (!grouped[m.leaf_type]) grouped[m.leaf_type] = []
+          grouped[m.leaf_type].push({ version: m.version, status: m.status })
+        }
+        setModelVersions(grouped)
+      }
     } catch (err) {
       if (mountedRef.current) setError(err.message)
     }
@@ -81,12 +92,19 @@ export default function DevicesPage() {
   // ── Fleet Tab ──────────────────────────────────────────────────
 
   const openEdit = (d) => {
+    // Build model_versions form from desired_config or defaults
+    const mv = d.desired_config?.model_versions || {}
+    const formMv = {}
+    for (const lt of leafTypeOptions) {
+      formMv[lt] = mv[lt] || ''  // empty = "latest active"
+    }
     setForm({
       device_name: d.device_name || '',
       user_id: d.user_id || '',
       mode: d.desired_config?.mode || 'manual',
       interval_seconds: d.desired_config?.interval_seconds || 86400,
       default_leaf_type: d.desired_config?.default_leaf_type || 'tomato',
+      model_versions: formMv,
     })
     setFormError(null)
     setEditDevice(d)
@@ -94,6 +112,11 @@ export default function DevicesPage() {
 
   const saveDevice = async () => {
     setSaving(true)
+    // Only include model_versions entries that have a value selected
+    const mv = {}
+    for (const [lt, ver] of Object.entries(form.model_versions || {})) {
+      if (ver) mv[lt] = ver
+    }
     const update = {
       device_name: form.device_name || null,
       user_id: form.user_id || null,
@@ -102,6 +125,7 @@ export default function DevicesPage() {
         mode: form.mode,
         interval_seconds: Number(form.interval_seconds),
         default_leaf_type: form.default_leaf_type,
+        model_versions: mv,
       },
     }
     const { error: err } = await supabase.from('devices').update(update).eq('id', editDevice.id)
@@ -280,6 +304,7 @@ export default function DevicesPage() {
                     <th>Owner</th>
                     <th>Last Seen</th>
                     <th>Config</th>
+                    <th>Models</th>
                     <th style={{ width: 120 }}>Actions</th>
                   </tr>
                 </thead>
@@ -287,7 +312,12 @@ export default function DevicesPage() {
                   {filteredDevices.map(d => {
                     const sc = STATUS_COLORS[d.status] || STATUS_COLORS.unassigned
                     const owner = users.find(u => u.id === d.user_id)
-                    const synced = d.desired_config && d.reported_config && JSON.stringify(d.desired_config) === JSON.stringify(d.reported_config)
+                    const synced = (() => {
+                      if (!d.desired_config || !d.reported_config) return false
+                      // Compare ignoring engine_status and applied_model_versions (Jetson-added fields)
+                      const { engine_status, applied_model_versions, ...repCore } = d.reported_config
+                      return JSON.stringify(d.desired_config) === JSON.stringify(repCore)
+                    })()
                     const hasDesired = !!d.desired_config
                     const configLabel = !hasDesired ? 'N/A' : synced ? 'Synced' : 'Pending'
                     const configColor = !hasDesired ? '#94a3b8' : synced ? '#16a34a' : '#d97706'
@@ -310,6 +340,18 @@ export default function DevicesPage() {
                         <td>
                           <span title={configTitle} style={{ color: configColor, fontSize: 12, cursor: 'help' }}>{configLabel}</span>
                         </td>
+                        <td style={{ fontSize: 11 }}>
+                          {(() => {
+                            const mv = d.reported_config?.applied_model_versions || d.desired_config?.model_versions || {}
+                            const es = d.reported_config?.engine_status || {}
+                            const entries = Object.entries(mv)
+                            if (entries.length === 0) return <span style={{ color: '#94a3b8' }}>—</span>
+                            return entries.map(([lt, v]) => {
+                              const statusColor = es[lt] === 'ready' ? '#16a34a' : es[lt] === 'building' ? '#d97706' : es[lt] === 'error' ? '#dc2626' : '#64748b'
+                              return <div key={lt}><strong>{lt}</strong>: v{v} <span style={{ color: statusColor }}>{es[lt] ? `(${es[lt]})` : ''}</span></div>
+                            })
+                          })()}
+                        </td>
                         <td>
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button className="btn" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => openEdit(d)}>Edit</button>
@@ -322,7 +364,7 @@ export default function DevicesPage() {
                     )
                   })}
                   {filteredDevices.length === 0 && (
-                    <tr><td colSpan={7} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No devices registered yet</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No devices registered yet</td></tr>
                   )}
                 </tbody>
               </table>
@@ -493,6 +535,50 @@ export default function DevicesPage() {
                   )}
                 </select>
               </div>
+              {/* Model Version Assignment */}
+              <div style={{ marginBottom: 12 }}>
+                <label className="form-label">Model Versions</label>
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 8 }}>
+                  {leafTypeOptions.map(lt => {
+                    const versions = modelVersions[lt] || []
+                    return (
+                      <div key={lt} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ minWidth: 140, fontSize: 13 }}>{lt.replace(/_/g, ' ')}</span>
+                        <select
+                          className="input"
+                          style={{ flex: 1, fontSize: 12 }}
+                          value={(form.model_versions || {})[lt] || ''}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            model_versions: { ...f.model_versions, [lt]: e.target.value }
+                          }))}
+                        >
+                          <option value="">Latest active</option>
+                          {versions.map(v => (
+                            <option key={v.version} value={v.version}>
+                              v{v.version} ({v.status})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  })}
+                  {leafTypeOptions.length === 0 && (
+                    <span style={{ color: '#94a3b8', fontSize: 12 }}>No models available</span>
+                  )}
+                </div>
+              </div>
+              {/* Engine Status */}
+              {editDevice.reported_config?.engine_status && (
+                <div style={{ marginBottom: 12, padding: 8, background: '#fffbeb', borderRadius: 6, fontSize: 12 }}>
+                  <strong>Engine Status:</strong>{' '}
+                  {Object.entries(editDevice.reported_config.engine_status).map(([lt, s]) => (
+                    <span key={lt} style={{ marginRight: 12 }}>
+                      {lt}: <strong style={{ color: s === 'ready' ? '#16a34a' : s === 'building' ? '#d97706' : '#dc2626' }}>{s}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
               <div style={{ marginTop: 8, padding: 8, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#64748b' }}>
                 <strong>HW ID:</strong> {editDevice.hw_id}<br/>
                 <strong>Platform:</strong> {editDevice.hw_info?.platform || '—'}<br/>
