@@ -187,8 +187,11 @@ echo ""
 
 # ── 6. Install system packages for GUI mode ─────────────────
 echo "[6/13] Installing system packages for GUI mode..."
-apt-get update -qq
-apt-get install -y --no-install-recommends \
+if ! apt-get update -qq; then
+    echo "  [ERROR] apt-get update failed — check internet connection"
+    exit 1
+fi
+if ! apt-get install -y --no-install-recommends \
     python3-pyqt5 \
     python3-pip \
     python3-numpy \
@@ -196,7 +199,10 @@ apt-get install -y --no-install-recommends \
     v4l-utils \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    curl
+    curl; then
+    echo "  [ERROR] apt-get install failed — check internet and package availability"
+    exit 1
+fi
 echo "  [OK] System packages installed (PyQt5, OpenCV, v4l-utils)."
 echo ""
 
@@ -440,7 +446,7 @@ else
             # Try 1: Download pre-built .engine for this exact device + TRT version
             ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${DEVICE_TAG}/${leaf_type}_student.engine"
             echo "  Trying pre-built engine for $leaf_type ($DEVICE_TAG)..."
-            HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
+            HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
             if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
                 ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
                 # Sanity check: engine should be at least 100KB
@@ -461,7 +467,7 @@ else
 
             # Try 2: Download ONNX and convert locally in step 10
             echo "  Fetching ONNX URL for $leaf_type..."
-            ONNX_RESP=$(curl -sf \
+            ONNX_RESP=$(curl -sf --max-time 30 --connect-timeout 10 \
                 "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
                 -H "apikey: $CFG_SUPA_KEY" \
                 -H "Authorization: Bearer $CFG_SUPA_KEY" \
@@ -476,7 +482,7 @@ else
             fi
 
             echo "  Downloading ONNX: $leaf_type..."
-            HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
+            HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
             if [ "$HTTP_CODE" = "200" ]; then
                 echo "  [OK] Downloaded ONNX for $leaf_type ($(stat --format=%s "$onnx_file" 2>/dev/null || echo '?') bytes)"
             else
@@ -768,8 +774,8 @@ echo ""
 echo "[12/13] Creating GUI desktop shortcut..."
 
 # Install run_gui.sh wrapper (always uses /usr/bin/python3)
-if [ -f "$REPO_DIR/jetson/run_gui.sh" ]; then
-    cp "$REPO_DIR/jetson/run_gui.sh" "$INSTALL_DIR/run_gui.sh"
+if [ -f "$REPO_ROOT/jetson/run_gui.sh" ]; then
+    cp "$REPO_ROOT/jetson/run_gui.sh" "$INSTALL_DIR/run_gui.sh"
 elif [ -f "$INSTALL_DIR/run_gui.sh" ]; then
     :  # already in place
 fi
