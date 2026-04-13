@@ -21,7 +21,7 @@ dependencies:
   tflite_flutter: ^0.12.1
 
   # Camera & Image
-  camera: ^0.11.0+2
+  camera: ^0.12.0+1
   image_picker: ^1.1.2
   image: ^4.3.0
 
