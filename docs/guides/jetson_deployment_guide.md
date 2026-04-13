@@ -29,8 +29,8 @@ Supported models:
 
 | Leaf Type | Classes | Engine File |
 |-----------|---------|-------------|
-| Tomato | 10 (Bacterial Spot, Early Blight, Late Blight, Leaf Mold, Septoria Leaf Spot, Spider Mites, Target Spot, Yellow Leaf Curl Virus, Mosaic Virus, Healthy) | `tomato_student.engine` |
-| Burmese Grape Leaf | 5 (Anthracnose, Healthy, Insect Damage, Leaf Spot, Powdery Mildew) | `burmese_grape_leaf_student.engine` |
+| Tomato | 10 (Bacterial Spot, Early Blight, Late Blight, Leaf Mold, Septoria Leaf Spot, Spider Mites, Target Spot, Yellow Leaf Curl Virus, Mosaic Virus, Healthy) | `tomato_student.engine` (or `tomato_student_v{version}.engine` when managed by sync engine) |
+| Burmese Grape Leaf | 5 (Anthracnose, Healthy, Insect Damage, Leaf Spot, Powdery Mildew) | `burmese_grape_leaf_student.engine` (or `burmese_grape_leaf_student_v{version}.engine`) |
 
 ---
 
@@ -474,6 +474,11 @@ sudo usermod -aG video $USER   # if not, add and re-login
 
 ### 5.5 Camera Operations
 
+> **Camera Warmup:** `capture_single()` in `camera.py` sleeps for `warmup_delay`
+> seconds (default 3.0) after opening the camera, then discards `warmup_frames`
+> (default 5) frames before capturing. This allows USB/CSI sensors to stabilize
+> auto-exposure and white-balance, fixing the "Frame rejected: low entropy" issue.
+
 1. Click **"Start Camera"** to begin the live preview. The camera thread captures
    frames at approximately 30 FPS (33 ms interval) in a background QThread.
 2. The preview area updates in real time with the camera feed.
@@ -571,12 +576,29 @@ so the service automatically restarts after a crash or OOM kill. Resource limits
 #### `GET /health`
 
 Returns system status, uptime, loaded models, and database statistics.
+When a valid `X-Api-Key` is provided, the response also includes `model_versions`.
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Response:
+Response (with valid API key):
+
+```json
+{
+  "status": "healthy",
+  "model_versions": {"tomato": "1.0.0", "burmese_grape_leaf": "1.0.0"},
+  "models_loaded": ["tomato", "burmese_grape_leaf"],
+  "uptime_seconds": 301,
+  "database": {
+    "total_predictions": 33,
+    "synced": 32,
+    "unsynced": 1
+  }
+}
+```
+
+Without API key, `model_versions` is omitted:
 
 ```json
 {
@@ -826,6 +848,8 @@ site-specific settings (camera source, server port, etc.).
 | `height` | int | `480` | Capture resolution height in pixels |
 | `mode` | string | `"manual"` | `"manual"` (API-triggered only) or `"periodic"` (timed capture) |
 | `interval_seconds` | int | `1800` | Capture interval in seconds (periodic mode only) |
+| `warmup_delay` | float | `3.0` | Seconds to sleep after opening the camera before capturing. Allows USB/CSI sensor auto-exposure and white-balance to stabilize. |
+| `warmup_frames` | int | `5` | Number of frames to discard after warmup delay before the actual capture. Ensures the captured frame has stable exposure. |
 
 ### 7.4 `inference`
 
@@ -899,6 +923,20 @@ trtexec --onnx=/opt/agrikd/models/new_model.onnx \
         --fp16 \
         --workspace=1024
 ```
+
+**`trtexec` Path Discovery:** `sync_engine.py` `_build_engine()` searches for
+`trtexec` in the following order (fixes "No such file or directory: 'trtexec'"
+when running as a systemd service with limited PATH):
+
+1. `shutil.which("trtexec")` — system PATH
+2. `/usr/src/tensorrt/bin/trtexec` — JetPack default location
+3. `/usr/local/bin/trtexec`
+4. `~/trtexec`
+
+**Engine File Naming Convention:** Engine files built by the sync engine are
+named `{leaf_type}_student_v{version}.engine`, e.g.,
+`tomato_student_v1.1.0.engine`. Old engine files are deleted after a successful
+hot-swap to free storage.
 
 Then update `config.json` to add the new model entry under the `models` section
 with the correct `engine_path`, `num_classes`, and `class_labels`.
@@ -1058,6 +1096,25 @@ is the semantic version string (matching `model_registry.version`).  Only
 8. Reports `engine_status` (building/ready/error) + `applied_model_versions`
    in `reported_config`
 
+**Pre-build on Startup:** When `SyncEngine.run()` starts, it immediately
+compares `desired_config.model_versions` against loaded engines. If a version
+mismatch is detected, it triggers an engine build right away instead of waiting
+for the first poll cycle (5 minutes).
+
+**Config Flow (Single Writer Pattern):**
+
+```
+Admin Dashboard → Supabase (devices.desired_config.model_versions)
+    ↓ (poll every 5 min)
+SyncEngine (SINGLE WRITER for device_state.json + config.json)
+    ↓ (thread-safe read)
+main.py reads via sync.get_active_config()
+```
+
+`SyncEngine` is the sole writer of `device_state.json` and `config.json`.
+All other components read config through `sync.get_active_config()` which
+provides a thread-safe snapshot.
+
 **Status Monitoring**:
 - Dashboard table shows per-model engine status: ✅ ready / 🔶 building / 🔴 error
 - Edit modal shows detailed engine status per leaf_type
@@ -1080,7 +1137,19 @@ is the semantic version string (matching `model_registry.version`).  Only
 
 ## 11. Monitoring and Logs
 
-### 11.1 Headless Service Logs
+### 11.1 Model Version Logging
+
+Model versions are logged at three points for traceability:
+
+| Event | Example Log Line |
+|-------|-----------------|
+| **Startup** | `Loaded TensorRT engine: tomato v1.0.0 (models/tomato_student.engine)` |
+| **Hot-swap** | `Hot-swapped engine: tomato v1.1.0 → models/tomato_student_v1.1.0.engine` |
+| **Prediction** | `Prediction: Late_blight (50.9%) [model=tomato v1.0.0]` |
+
+Filter for version events: `journalctl -u agrikd | grep -i "engine\|hot-swap\|model version"`
+
+### 11.2 Headless Service Logs
 
 ```bash
 # Follow live logs from the systemd journal
@@ -1090,7 +1159,7 @@ journalctl -u agrikd -f
 journalctl -u agrikd -n 100 --no-pager
 ```
 
-### 11.2 GUI Application Logs
+### 11.3 GUI Application Logs
 
 The GUI application uses Python's `RotatingFileHandler` to write logs to
 `logs/agrikd_gui.log`:
@@ -1105,7 +1174,7 @@ The log format is: `%(asctime)s [%(levelname)s] %(name)s: %(message)s`
 Log entries include engine loading, camera start/stop events, inference results
 (leaf type, class, confidence, time, image path), and errors.
 
-### 11.3 Log Rotation
+### 11.4 Log Rotation
 
 Both the headless and GUI applications use Python's `RotatingFileHandler`:
 
@@ -1117,7 +1186,7 @@ Both the headless and GUI applications use Python's `RotatingFileHandler`:
 These values can be adjusted in the `logging` section of `config.json` (headless)
 or by modifying the `RotatingFileHandler` parameters in `gui_app.py` (GUI).
 
-### 11.4 systemd Resource Limits
+### 11.5 systemd Resource Limits
 
 Both service unit files enforce resource limits to prevent the inference
 application from starving other processes on the Jetson:
@@ -1239,6 +1308,8 @@ issued by a trusted CA (e.g., Let's Encrypt).
 | **Slow or laggy camera preview** | Lower the camera resolution in `config.json` (e.g., 640x480 instead of 1920x1080). Check that no other application is using the camera device. Use a USB 3.0 port if available. |
 | **"No Frame" dialog when clicking Capture** | The camera has not been started. Click "Start Camera" first, or use "Load Image File" to analyze a static image. |
 | **Database locked errors** | The SQLite database uses WAL mode and a 5-second busy timeout. If errors persist, ensure only one instance of the application (headless or GUI) is running at a time. |
+| **"Frame rejected: low entropy"** | Camera auto-exposure/white-balance not stabilized. `capture_single()` warmup handles this automatically (`warmup_delay=3.0`, `warmup_frames=5`). Increase `warmup_delay` in `config.json` if the issue persists with slow-starting cameras. |
+| **"No such file or directory: 'trtexec'"** | Occurs when running as systemd service with limited PATH. `sync_engine.py` now searches multiple paths automatically. If `trtexec` is in a non-standard location, symlink it to `/usr/local/bin/trtexec`. |
 | **Engine conversion fails with `trtexec`** | Ensure JetPack SDK is fully installed. Run `dpkg -l \| grep tensorrt` to verify TensorRT packages. Check that the ONNX model was exported with opset 11 or higher. |
 | **HTTP 413 on `/predict`** | The uploaded file exceeds the 10 MB limit. Resize or compress the image before uploading. |
 | **HTTP 429 on `/predict`** | The client IP has exceeded 30 requests per minute. Wait 60 seconds before retrying or reduce request frequency. |
@@ -1270,8 +1341,8 @@ issued by a trusted CA (e.g., Let's Encrypt).
     config.example.json  # Version-controlled template (committed to git)
     config.json          # Site-specific config (GITIGNORED — copy from example)
   models/
-    tomato_student.engine
-    burmese_grape_leaf_student.engine
+    tomato_student.engine                # or tomato_student_v1.0.0.engine (versioned by sync engine)
+    burmese_grape_leaf_student.engine     # or burmese_grape_leaf_student_v1.0.0.engine
   data/
     agrikd_jetson.db     # SQLite database file
     device_state.json    # Device registration state (GITIGNORED, chmod 600)

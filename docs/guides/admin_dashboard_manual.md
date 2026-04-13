@@ -232,6 +232,21 @@ Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
   - **ready** (green) — engine loaded and running
   - **building** (amber) — downloading ONNX or building TensorRT engine
   - **error** (red) — build failed, check device logs
+- **"Latest active" Resolution**: The model version dropdown shows
+  `"Latest active"` as the default option (value `""`). On save, the system
+  resolves this to the actual latest version with `status='active'` from the
+  `model_registry` table. For example, if tomato has v1.0.0 (active) and
+  v1.1.0 (staging), selecting "Latest active" saves `"1.0.0"` to Supabase —
+  not an empty string. If no active version exists for a leaf_type, that
+  entry is excluded from `desired_config` entirely.
+- **Model Version Assignment Workflow**:
+  1. Admin saves device config → resolved versions are stored in
+     `devices.desired_config.model_versions` in Supabase.
+  2. Jetson polls every 5 minutes and detects the version change.
+  3. Jetson downloads cached engine or builds from ONNX (10–30 min).
+  4. Engine is hot-swapped without service restart.
+  5. Device status updates engine build progress (`building` → `ready` or
+     `error`).
 - Decommission: marks device inactive, unlinks user.
 
 #### Provisioning Tokens Tab
