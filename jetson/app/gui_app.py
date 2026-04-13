@@ -557,7 +557,51 @@ class MainWindow(QMainWindow):
 # ---------------------------------------------------------------------------
 
 
+def _ensure_system_python():
+    """Verify TensorRT is importable; re-exec with system Python if needed.
+
+    JetPack installs TensorRT for the system Python only.  When the user
+    launches the GUI from a conda or virtualenv environment, ``import
+    tensorrt`` will fail.  Instead of printing a cryptic error, detect the
+    situation and transparently re-launch with ``/usr/bin/python3``.
+    """
+    try:
+        import tensorrt  # noqa: F401
+        return  # TensorRT available — nothing to do
+    except ImportError:
+        pass
+
+    in_conda = os.environ.get("CONDA_PREFIX") or os.environ.get("CONDA_DEFAULT_ENV")
+    in_venv = sys.prefix != sys.base_prefix
+    system_python = "/usr/bin/python3"
+
+    if (in_conda or in_venv) and os.path.isfile(system_python):
+        env_name = (
+            os.environ.get("CONDA_DEFAULT_ENV", "conda")
+            if in_conda
+            else os.path.basename(sys.prefix)
+        )
+        print(
+            f"\n[INFO] TensorRT not found in current Python ({sys.executable})."
+            f"\n  Detected environment: {env_name}"
+            f"\n  TensorRT is provided by JetPack and only available in system Python."
+            f"\n  Re-launching with {system_python} ...\n"
+        )
+        os.execv(system_python, [system_python] + sys.argv)
+        # execv never returns
+    else:
+        print(
+            f"\n[ERROR] TensorRT is not installed."
+            f"\n  Current Python: {sys.executable}"
+            f"\n  Install JetPack SDK or run with system Python:"
+            f"\n    /usr/bin/python3 {' '.join(sys.argv)}\n"
+        )
+        sys.exit(1)
+
+
 def main():
+    _ensure_system_python()
+
     # Resolve working directory to install root so relative paths
     # in config (models/, config/, data/) resolve correctly.
     # Typical layout: /opt/agrikd/app/gui_app.py → use parent /opt/agrikd/

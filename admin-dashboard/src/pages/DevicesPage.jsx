@@ -572,7 +572,7 @@ export default function DevicesPage() {
               {editDevice.reported_config?.engine_status && (
                 <div style={{ marginBottom: 12, padding: 8, background: '#fffbeb', borderRadius: 6, fontSize: 12 }}>
                   <strong>Engine Status:</strong>{' '}
-                  {Object.entries(editDevice.reported_config.engine_status).map(([lt, s]) => (
+                  {Object.entries(editDevice.reported_config?.engine_status || {}).map(([lt, s]) => (
                     <span key={lt} style={{ marginRight: 12 }}>
                       {lt}: <strong style={{ color: s === 'ready' ? '#16a34a' : s === 'building' ? '#d97706' : '#dc2626' }}>{s}</strong>
                     </span>

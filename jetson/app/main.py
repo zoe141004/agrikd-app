@@ -311,6 +311,10 @@ def main():
                         target=sync.run, daemon=True, name="sync-engine"
                     )
                     sync_thread.start()
+                # H4: Pool health check — if CUDA worker dies, exit so systemd restarts
+                if not pool.is_healthy():
+                    logger.critical("Inference pool worker thread died — exiting for systemd restart")
+                    break
                 try:
                     # Fix 1.7: Wake-Capture-Sleep — open camera, capture,
                     # release each cycle to reduce heat and sensor wear.
@@ -328,7 +332,15 @@ def main():
                         img_path = os.path.join(img_dir, f"pred_{ts_ms}_{uid}.jpg")
                         cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
-                        db.save_prediction(default_leaf, result, image_path=img_path, device_id=device_id)
+                        try:
+                            db.save_prediction(default_leaf, result, image_path=img_path, device_id=device_id)
+                        except Exception as db_err:
+                            logger.error("DB save failed, cleaning up image: %s", db_err)
+                            try:
+                                os.unlink(img_path)
+                            except OSError:
+                                pass
+                            continue
                         logger.info(
                             "Prediction: %s (%.1f%%)",
                             result["class_name"],
@@ -349,6 +361,10 @@ def main():
                         target=sync.run, daemon=True, name="sync-engine"
                     )
                     sync_thread.start()
+                # H4: Pool health check — if CUDA worker dies, exit so systemd restarts
+                if not pool.is_healthy():
+                    logger.critical("Inference pool worker thread died — exiting for systemd restart")
+                    break
                 _notify_watchdog()
                 shutdown_event.wait(timeout=5)
                 if shutdown_event.is_set():
@@ -357,7 +373,7 @@ def main():
         logger.info("AgriKD Jetson Edge Inference - Shutting down")
         # Signal sync engine to drain, then wait briefly
         sync.stop()
-        sync_thread.join(timeout=15)
+        sync_thread.join(timeout=30)
         # Clean up resources
         pool.shutdown()
         camera.release()

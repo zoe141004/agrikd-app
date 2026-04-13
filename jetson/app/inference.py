@@ -256,6 +256,10 @@ class InferenceWorkerPool:
         """Return list of loaded leaf-type names."""
         return list(self._leaf_types)
 
+    def is_healthy(self):
+        """Return True if the CUDA worker thread is still alive."""
+        return self._thread.is_alive()
+
     def shutdown(self):
         """Signal the worker to exit and clean up GPU resources."""
         self._queue.put(_SHUTDOWN)
@@ -264,7 +268,7 @@ class InferenceWorkerPool:
             engine.cleanup()
         self._engines.clear()
 
-    def hot_swap(self, leaf_type, engine_path, model_meta=None):
+    def hot_swap(self, leaf_type, engine_path, model_meta=None, timeout=None):
         """Hot-swap a single engine on the CUDA worker thread.
 
         Thread-safe: queues a swap job and waits for completion.
@@ -274,11 +278,12 @@ class InferenceWorkerPool:
             leaf_type: e.g. "tomato"
             engine_path: path to new .engine file
             model_meta: dict with num_classes, class_labels (optional)
+            timeout: seconds to wait (None = wait indefinitely, safe when
+                     called from a background thread such as _build_engine)
         """
         fut = Future()
         self._queue.put((_HOT_SWAP, leaf_type, engine_path, model_meta, fut))
-        # Wait for swap to complete (up to 120s for engine deserialization on slower Jetson devices)
-        result = fut.result(timeout=120)
+        result = fut.result(timeout=timeout)
         return result
 
     # ── Worker (runs on its own thread — owns CUDA context) ─────────
@@ -389,6 +394,13 @@ class InferenceWorkerPool:
             if "class_labels" in model_meta:
                 model_cfg["class_labels"] = model_meta["class_labels"]
 
+        # Validate required fields before attempting engine load
+        if "num_classes" not in model_cfg or "class_labels" not in model_cfg:
+            raise ValueError(
+                f"Cannot hot-swap {leaf_type}: missing num_classes or class_labels "
+                f"in model metadata"
+            )
+
         # Load new engine BEFORE cleaning up old (safe degradation)
         new_engine = TensorRTInference(
             engine_path,
@@ -396,11 +408,14 @@ class InferenceWorkerPool:
             inference_config=self._inference_config,
         )
 
-        # New engine loaded OK — now clean up old
+        # New engine loaded OK — now clean up old (non-fatal if cleanup fails)
         old_engine = self._engines.get(leaf_type)
         if old_engine:
             logger.info("Cleaning up old engine: %s", leaf_type)
-            old_engine.cleanup()
+            try:
+                old_engine.cleanup()
+            except Exception as e:
+                logger.warning("Old engine cleanup failed (non-fatal): %s", e)
 
         self._engines[leaf_type] = new_engine
         self._model_configs[leaf_type] = model_cfg

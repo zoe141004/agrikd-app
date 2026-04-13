@@ -14,6 +14,9 @@ import cv2
 import numpy as np
 from flask import Flask, jsonify, request
 
+# Guard against concurrent cleanup threads
+_cleanup_lock = Lock()
+
 
 logger = logging.getLogger("health")
 app = Flask(__name__)
@@ -218,6 +221,8 @@ def predict():
         h, w = frame.shape[:2]
         if h > 4096 or w > 4096:
             return jsonify({"error": f"Image too large ({w}x{h}), max 4096x4096"}), 400
+        if h < 10 or w < 10:
+            return jsonify({"error": f"Image too small ({w}x{h}), min 10x10"}), 400
 
         # Fix 1.1: Submit to InferenceWorkerPool (thread-safe, CUDA-owner)
         result = _pool.submit(leaf_type, frame).result(timeout=30)
@@ -226,14 +231,28 @@ def predict():
         image_path = _save_prediction_image(frame)
 
         # Fix 2.8: Pass device_id so API predictions are traceable
-        _db.save_prediction(leaf_type, result, image_path=image_path, device_id=_device_id)
+        # Wrap DB save in try-except: clean up orphaned image on failure
+        try:
+            _db.save_prediction(leaf_type, result, image_path=image_path, device_id=_device_id)
+        except Exception as db_err:
+            app.logger.error("DB save failed, cleaning up image: %s", db_err)
+            try:
+                os.unlink(image_path)
+            except OSError:
+                pass
+            return jsonify({"error": "Failed to save prediction"}), 500
 
         # Throttle cleanup to every 100 predictions, run in background (H7)
+        # Use _cleanup_lock to prevent concurrent cleanup threads (M6)
         _prediction_count += 1
         if _prediction_count % 100 == 0:
-            Thread(
-                target=_db.cleanup_old_records, daemon=True, name="db-cleanup"
-            ).start()
+            if _cleanup_lock.acquire(blocking=False):
+                def _run_cleanup():
+                    try:
+                        _db.cleanup_old_records()
+                    finally:
+                        _cleanup_lock.release()
+                Thread(target=_run_cleanup, daemon=True, name="db-cleanup").start()
 
         return jsonify({
             "leaf_type": leaf_type,

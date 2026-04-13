@@ -89,8 +89,12 @@ After setup completes, choose a deployment mode:
 sudo systemctl start agrikd
 
 # GUI Desktop Application (runs on host with system Python + PyQt5)
-python3 /opt/agrikd/app/gui_app.py
+/opt/agrikd/run_gui.sh                           # recommended wrapper
+# or: /usr/bin/python3 /opt/agrikd/app/gui_app.py  # direct
 ```
+
+> **Note:** Always use system Python (`/usr/bin/python3`) for the GUI.
+> Conda/virtualenv environments do NOT have JetPack TensorRT libraries.
 
 ---
 
@@ -332,25 +336,39 @@ camera capture, and TensorRT for inference, all running on the Jetson device.
 
 ### 5.1 Launching the GUI
 
-**Option A -- Command line:**
+> **⚠ Important:** TensorRT and PyCUDA are installed by JetPack for the
+> **system Python** (`/usr/bin/python3`) only. If you are in a conda or
+> virtualenv environment, the GUI will auto-detect this and re-launch with
+> system Python. For best results, use one of the methods below.
+
+**Option A -- Wrapper script (recommended):**
 
 ```bash
-python3 /opt/agrikd/app/gui_app.py
+/opt/agrikd/run_gui.sh
+```
+
+The wrapper script always uses `/usr/bin/python3` regardless of your active
+Python environment.
+
+**Option B -- Direct command line:**
+
+```bash
+/usr/bin/python3 /opt/agrikd/app/gui_app.py
 ```
 
 To specify a custom configuration file:
 
 ```bash
-python3 /opt/agrikd/app/gui_app.py --config /path/to/config.json
+/usr/bin/python3 /opt/agrikd/app/gui_app.py --config /path/to/config.json
 ```
 
-**Option B -- Desktop shortcut:**
+**Option C -- Desktop shortcut:**
 
 Open the application menu on the Jetson desktop and click
 **"AgriKD Plant Disease Detection"**. The shortcut executes the same command as
-Option A using the default configuration path (`config/config.json`).
+Option B using the default configuration path (`config/config.json`).
 
-**Option C -- systemd service (auto-start on login):**
+**Option D -- systemd service (auto-start on login):**
 
 ```bash
 sudo systemctl start agrikd-gui
@@ -824,6 +842,8 @@ Each key is a leaf type identifier. The value is an object with:
 | Key | Type | Description |
 |-----|------|-------------|
 | `engine_path` | string | Relative or absolute path to the TensorRT `.engine` file |
+| `sha256_checksum` | string | (Optional) SHA-256 hex digest of the `.engine` file. Verified at load time to detect corruption or wrong file. |
+| `version` | string | (Optional) Semantic version (e.g., `"2.1.0"`) of the ONNX model this engine was built from. Stored in predictions for traceability. |
 | `num_classes` | int | Number of output classes |
 | `class_labels` | string[] | Ordered list of class names (must match ImageFolder alphabetical order from training) |
 
@@ -833,6 +853,8 @@ Each key is a leaf type identifier. The value is an object with:
 |-----|------|---------|-------------|
 | `supabase_url` | string | `""` | Supabase project URL. Leave empty to disable sync. |
 | `supabase_key` | string | `""` | Supabase anonymous (anon) key. Leave empty to disable sync. |
+| `email` | string | `""` | (Optional) Legacy auth: email for JWT authentication. Ignored when using device-token RPC flow. |
+| `password` | string | `""` | (Optional) Legacy auth: password for JWT authentication. |
 | `batch_size` | int | `50` | Maximum number of predictions to sync per batch |
 | `interval_seconds` | int | `300` | Time between sync attempts in seconds (default: 5 minutes) |
 
@@ -842,6 +864,7 @@ Each key is a leaf type identifier. The value is an object with:
 |-----|------|---------|-------------|
 | `host` | string | `"127.0.0.1"` | Bind address for the REST API server |
 | `port` | int | `8080` | Port number for the REST API server |
+| `api_key` | string | `""` | (Optional) Shared secret for API authentication. When set, all `/predict` requests must include `X-Api-Key` header. Leave empty to disable (suitable for LAN-only deployments). |
 
 ### 7.8 `database`
 
@@ -944,6 +967,19 @@ On network error, the current cycle is aborted and retried on the next
 interval. Predictions stay safely in local SQLite until synced.
 If `supabase_url` or `supabase_key` are empty, sync is silently skipped.
 
+**Retry behavior:**
+- **Network errors / 5xx** — transient; retry next cycle without penalty.
+- **4xx client errors** (except 401) — each affected prediction's
+  `sync_retry_count` is incremented. After **10 failed attempts**, the
+  prediction is permanently skipped (`get_unsynced` excludes it). This
+  prevents a single corrupted record from blocking the entire sync queue.
+- **401 Unauthorized** — triggers re-authentication; retry count is not
+  incremented.
+
+**Shutdown draining:** On SIGTERM the sync engine is signalled to stop. The
+main thread waits up to 30 seconds for the current sync cycle to complete
+before proceeding with shutdown.
+
 ### 9.2 Configuring Credentials
 
 Edit `/opt/agrikd/config/config.json` and fill in the `sync` section:
@@ -991,9 +1027,28 @@ full lifecycle:
    from `model_registry`)
 3. Save → `desired_config.model_versions` is updated in Supabase
 
+**`desired_config.model_versions` format example:**
+
+```json
+{
+    "model_versions": {
+        "tomato": "2.1.0",
+        "burmese_grape_leaf": "1.0.0"
+    }
+}
+```
+
+Each key is a leaf type (matching `model_registry.leaf_type`), and the value
+is the semantic version string (matching `model_registry.version`).  Only
+`active` or `staging` models appear in the dashboard dropdown.
+
 **Jetson Side** (Automatic):
 1. Sync engine polls `desired_config` and detects version change
 2. Checks for cached engine in `model_engines` table (same hardware tag)
+   - **Hardware tag**: a string like `sm53` (Nano), `sm72` (Xavier), `sm87`
+     (Orin) derived from `nvidia-smi --query-gpu=compute_cap` or
+     `/proc/device-tree/model`. Engines built on one GPU architecture cannot
+     run on another, so caching is per hardware tag.
 3. If cached: downloads pre-built engine (fast)
 4. If not cached: downloads ONNX from Storage → builds engine with
    `trtexec --fp16` (10–30 min on Jetson) → uploads to cache for others
@@ -1174,6 +1229,7 @@ issued by a trusted CA (e.g., Let's Encrypt).
 
 | Problem | Solution |
 |---------|----------|
+| **"TensorRT or PyCUDA not installed"** | You are likely running from a **conda or virtualenv** Python which does not have JetPack libraries. Use `/opt/agrikd/run_gui.sh` or `/usr/bin/python3` directly. The GUI will attempt auto-detection and re-launch with system Python, but if that fails, deactivate conda first: `conda deactivate && /usr/bin/python3 /opt/agrikd/app/gui_app.py`. |
 | **TensorRT engine fails to load** | TensorRT engines are hardware-specific. Rebuild the engine on the target Jetson device using `trtexec`. An engine built on one Jetson variant (e.g., Nano) will not load on another (e.g., Xavier). |
 | **Camera not found** | Run `v4l2-ctl --list-devices` to list connected cameras. Verify the USB cable is securely connected. For CSI cameras, check the ribbon cable and ensure it is properly seated in the connector. |
 | **GUI does not display** | Ensure the `DISPLAY` environment variable is set: `export DISPLAY=:0`. Verify the X server is running with `xdpyinfo`. If using SSH, enable X forwarding with `ssh -X`. |

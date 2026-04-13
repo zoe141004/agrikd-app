@@ -764,8 +764,18 @@ echo "  [OK] agrikd.service (headless REST API) — enabled, starts on boot."
 echo "  [OK] agrikd-gui.service (Host GUI) — available, manual start."
 echo ""
 
-# ── 12. Create desktop shortcut (GUI) ────────────────────────
+# ── 12. Create desktop shortcut + GUI launcher (GUI) ────────────────────────
 echo "[12/13] Creating GUI desktop shortcut..."
+
+# Install run_gui.sh wrapper (always uses /usr/bin/python3)
+if [ -f "$REPO_DIR/jetson/run_gui.sh" ]; then
+    cp "$REPO_DIR/jetson/run_gui.sh" "$INSTALL_DIR/run_gui.sh"
+elif [ -f "$INSTALL_DIR/run_gui.sh" ]; then
+    :  # already in place
+fi
+chmod +x "$INSTALL_DIR/run_gui.sh" 2>/dev/null || true
+echo "  [OK] run_gui.sh installed (always uses system Python with JetPack TensorRT)."
+
 if [ -d "/usr/share/applications" ]; then
     cat > /usr/share/applications/agrikd-gui.desktop << DESKTOP
 [Desktop Entry]
@@ -824,9 +834,12 @@ echo "  sudo journalctl -u agrikd -f       # View logs"
 echo "  curl http://localhost:8080/health   # Health check"
 echo ""
 echo "── GUI Mode (Host Desktop Application) ──────────────────"
-echo "  python3 $INSTALL_DIR/app/gui_app.py"
+echo "  $INSTALL_DIR/run_gui.sh              # Recommended (auto system Python)"
+echo "  /usr/bin/python3 $INSTALL_DIR/app/gui_app.py   # Direct (must use system Python)"
 echo "  # Or: sudo systemctl start agrikd-gui"
 echo "  # Or: click 'AgriKD Plant Disease Detection' in desktop menu"
+echo ""
+echo "  ⚠ Do NOT use conda/virtualenv Python — TensorRT is only in system Python."
 echo ""
 echo "── API Inference ────────────────────────────────────────"
 echo '  curl -X POST http://localhost:8080/predict \'

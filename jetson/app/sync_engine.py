@@ -434,10 +434,8 @@ class SyncEngine:
           6. Delete old engine file
         """
         import subprocess
-        import hashlib
 
         try:
-            headers = self._get_headers()
             models_dir = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "..", "models"
             )
@@ -899,8 +897,12 @@ class SyncEngine:
                     f"Server error: {resp.status_code}"
                 )
             else:
+                # Client error (4xx except 401) — increment retry count
+                # so persistently failing predictions are eventually skipped
+                for pred in unsynced:
+                    self.db.increment_retry_count(pred["id"])
                 logger.warning(
-                    "Batch sync failed: HTTP %d %s",
+                    "Batch sync failed: HTTP %d %s (retry counts incremented)",
                     resp.status_code,
                     resp.text[:200],
                 )

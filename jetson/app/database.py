@@ -71,6 +71,15 @@ class JetsonDatabase:
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
+            # Add sync_retry_count column (skip after MAX_SYNC_RETRIES failures)
+            try:
+                self.conn.execute(
+                    "ALTER TABLE predictions ADD COLUMN sync_retry_count INTEGER NOT NULL DEFAULT 0"
+                )
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
     def save_prediction(self, leaf_type, result, image_path=None, device_id=None):
         """Save a prediction result to the database.
 
@@ -105,15 +114,30 @@ class JetsonDatabase:
             )
             self.conn.commit()
 
+    # Maximum sync attempts before a prediction is permanently skipped
+    MAX_SYNC_RETRIES = 10
+
     def get_unsynced(self, limit=50):
-        """Get unsynced predictions."""
+        """Get unsynced predictions (skips permanently failed after MAX_SYNC_RETRIES)."""
         with self._lock:
             cursor = self.conn.execute(
-                "SELECT * FROM predictions WHERE is_synced = 0 ORDER BY id LIMIT ?",
-                (limit,),
+                """SELECT * FROM predictions
+                   WHERE is_synced = 0
+                     AND sync_retry_count < ?
+                   ORDER BY id LIMIT ?""",
+                (self.MAX_SYNC_RETRIES, limit),
             )
             columns = [d[0] for d in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def increment_retry_count(self, pred_id):
+        """Increment sync retry count for a prediction."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE predictions SET sync_retry_count = sync_retry_count + 1 WHERE id = ?",
+                (pred_id,),
+            )
+            self.conn.commit()
 
     def mark_synced(self, pred_id):
         """Mark a prediction as synced."""
