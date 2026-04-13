@@ -45,7 +45,11 @@ export default function DevicesPage() {
       }, () => {
         if (mountedRef.current) loadData()
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Devices realtime subscription failed:', status)
+        }
+      })
 
     return () => {
       mountedRef.current = false

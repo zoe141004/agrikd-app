@@ -77,7 +77,10 @@ export default function PredictionsPage() {
 
   const setFilter = (key, val) => { setPage(0); setFilters(f => ({ ...f, [key]: val })) }
 
+  const [exporting, setExporting] = useState(false)
+
   const exportData = async (fmt) => {
+    setExporting(true)
     try {
     let query = supabase.from('predictions').select('*').order('created_at', { ascending: false }).limit(10000)
     if (filters.leafType) query = query.eq('leaf_type', filters.leafType)
@@ -94,6 +97,7 @@ export default function PredictionsPage() {
       downloadFile(JSON.stringify(data, null, 2), `${filename}.json`, 'application/json')
     }
     } catch (err) { setError('Export failed: ' + err.message) }
+    finally { setExporting(false) }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -157,13 +161,13 @@ export default function PredictionsPage() {
           </select>
           <input type="date" value={filters.startDate} onChange={e => setFilter('startDate', e.target.value)} />
           <input type="date" value={filters.endDate} onChange={e => setFilter('endDate', e.target.value)} />
-          <button className="btn" onClick={() => exportData('csv')}>
+          <button className="btn" onClick={() => exportData('csv')} disabled={exporting}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-            Export CSV
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
-          <button className="btn" onClick={() => exportData('json')}>
+          <button className="btn" onClick={() => exportData('json')} disabled={exporting}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-            Export JSON
+            {exporting ? 'Exporting…' : 'Export JSON'}
           </button>
         </div>
 
