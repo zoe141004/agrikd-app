@@ -66,6 +66,8 @@ def get_hardware_tag():
 
 def sha256_file(filepath):
     """Compute SHA-256 hash of a file."""
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"Cannot hash: {filepath} not found")
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):

@@ -187,77 +187,99 @@ export default function DataManagementPage() {
   const performDeleteCleanup = async (dsName, dvcOpId, userId) => {
     const ts = () => new Date().toLocaleTimeString()
     const nameLower = dsName.toLowerCase().trim()
+    const errors = []
+    const safe = async (label, fn) => {
+      try { await fn() } catch (e) {
+        console.warn(`Cascade delete "${label}" failed:`, e.message)
+        errors.push(label)
+      }
+    }
 
     setDvcLog(l => [...l, `[${ts()}] DVC remote cleanup confirmed. Starting database cleanup…`])
 
+    let modelsToDelete = []
     // Delete model benchmarks
-    await supabase.from('model_benchmarks').delete().ilike('leaf_type', dsName)
+    await safe('model_benchmarks', () => supabase.from('model_benchmarks').delete().ilike('leaf_type', dsName))
     // Delete model versions
-    await supabase.from('model_versions').delete().ilike('leaf_type', dsName)
+    await safe('model_versions', () => supabase.from('model_versions').delete().ilike('leaf_type', dsName))
     // Delete models from registry + remove storage files
-    const { data: modelsToDelete } = await supabase.from('model_registry').select('id, model_url, leaf_type').ilike('leaf_type', dsName)
-    if (modelsToDelete?.length) {
-      const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
-        const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
-        return match ? decodeURIComponent(match[1]) : null
-      }).filter(Boolean)
-      if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
-      await supabase.from('model_registry').delete().ilike('leaf_type', dsName)
-    }
+    await safe('model_registry', async () => {
+      const { data } = await supabase.from('model_registry').select('id, model_url, leaf_type').ilike('leaf_type', dsName)
+      modelsToDelete = data || []
+      if (modelsToDelete.length) {
+        const modelPaths = modelsToDelete.map(m => m.model_url).filter(Boolean).map(url => {
+          const match = url.match(/\/storage\/v1\/object\/public\/models\/(.+)/)
+          return match ? decodeURIComponent(match[1]) : null
+        }).filter(Boolean)
+        if (modelPaths.length) await supabase.storage.from('models').remove(modelPaths)
+        await supabase.from('model_registry').delete().ilike('leaf_type', dsName)
+      }
+    })
     // Delete pipeline runs
-    await supabase.from('pipeline_runs').delete().ilike('leaf_type', dsName)
+    await safe('pipeline_runs', () => supabase.from('pipeline_runs').delete().ilike('leaf_type', dsName))
     // Delete DVC operations (except the active delete tracking op)
-    if (dvcOpId) {
-      await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName).neq('id', dvcOpId)
-    } else {
-      await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName)
-    }
-    // Cross-reference cleanup in other operations' metadata.datasets
-    const { data: relatedOps } = await supabase.from('dvc_operations')
-      .select('id, metadata')
-      .not('metadata', 'is', null)
-    for (const op of (relatedOps || [])) {
-      if (op.id === dvcOpId) continue
-      const md = op.metadata
-      if (!md?.datasets) continue
-      const matchKey = Object.keys(md.datasets).find(k => k.toLowerCase().trim() === nameLower)
-      if (!matchKey) continue
-      const remaining = { ...md.datasets }
-      delete remaining[matchKey]
-      if (Object.keys(remaining).length === 0) {
-        await supabase.from('dvc_operations').delete().eq('id', op.id)
+    await safe('dvc_operations', async () => {
+      if (dvcOpId) {
+        await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName).neq('id', dvcOpId)
       } else {
-        await supabase.from('dvc_operations').update({ metadata: { ...md, datasets: remaining } }).eq('id', op.id)
+        await supabase.from('dvc_operations').delete().ilike('leaf_type', dsName)
       }
-    }
+    })
+    // Cross-reference cleanup in other operations' metadata.datasets
+    await safe('metadata_cleanup', async () => {
+      const { data: relatedOps } = await supabase.from('dvc_operations')
+        .select('id, metadata')
+        .not('metadata', 'is', null)
+      for (const op of (relatedOps || [])) {
+        if (op.id === dvcOpId) continue
+        const md = op.metadata
+        if (!md?.datasets) continue
+        const matchKey = Object.keys(md.datasets).find(k => k.toLowerCase().trim() === nameLower)
+        if (!matchKey) continue
+        const remaining = { ...md.datasets }
+        delete remaining[matchKey]
+        if (Object.keys(remaining).length === 0) {
+          await supabase.from('dvc_operations').delete().eq('id', op.id)
+        } else {
+          await supabase.from('dvc_operations').update({ metadata: { ...md, datasets: remaining } }).eq('id', op.id)
+        }
+      }
+    })
     // Storage cleanup (recursive)
-    const deleteRecursive = async (prefix) => {
-      const { data: items } = await supabase.storage.from('datasets').list(prefix, { limit: 200 })
-      if (!items?.length) return
-      const files = items.filter(i => i.id).map(i => prefix ? `${prefix}/${i.name}` : i.name)
-      const folders = items.filter(i => !i.id)
-      for (const folder of folders) {
-        await deleteRecursive(prefix ? `${prefix}/${folder.name}` : folder.name)
+    await safe('storage_cleanup', async () => {
+      const deleteRecursive = async (prefix) => {
+        const { data: items } = await supabase.storage.from('datasets').list(prefix, { limit: 200 })
+        if (!items?.length) return
+        const files = items.filter(i => i.id).map(i => prefix ? `${prefix}/${i.name}` : i.name)
+        const folders = items.filter(i => !i.id)
+        for (const folder of folders) {
+          await deleteRecursive(prefix ? `${prefix}/${folder.name}` : folder.name)
+        }
+        if (files.length) await supabase.storage.from('datasets').remove(files)
       }
-      if (files.length) await supabase.storage.from('datasets').remove(files)
-    }
-    await deleteRecursive(dsName)
-    await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
+      await deleteRecursive(dsName)
+      await supabase.storage.from('datasets').remove([`${dsName}.zip`, `data_${dsName}.zip`])
+    })
     // Mark the delete operation as completed (preserve for history)
     if (dvcOpId) {
-      await supabase.from('dvc_operations').update({
+      await safe('mark_completed', () => supabase.from('dvc_operations').update({
         status: 'completed',
         completed_at: new Date().toISOString(),
-        metadata: { deleted: true, leaf_type: dsName, db_cleanup: true },
-      }).eq('id', dvcOpId)
+        metadata: { deleted: true, leaf_type: dsName, db_cleanup: true, partial_errors: errors.length ? errors : undefined },
+      }).eq('id', dvcOpId))
     }
     // Audit log
     logAudit(supabase, 'dataset_deleted', 'dataset', dsName, {
       deleted_models: modelsToDelete?.length || 0,
       dvc_workflow_triggered: !!dvcOpId,
       triggered_by: userId,
+      partial_errors: errors.length ? errors : undefined,
     })
-    setDvcLog(l => [...l, `[${ts()}] ✓ Dataset "${dsName}" fully deleted.`])
+    if (errors.length) {
+      setDvcLog(l => [...l, `[${ts()}] ⚠ Dataset "${dsName}" deleted with partial errors: ${errors.join(', ')}`])
+    } else {
+      setDvcLog(l => [...l, `[${ts()}] ✓ Dataset "${dsName}" fully deleted.`])
+    }
   }
 
   // Helper to handle operation completion: refresh shared context data + handle pending deletes

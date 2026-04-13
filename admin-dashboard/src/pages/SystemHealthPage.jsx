@@ -68,7 +68,7 @@ export default function SystemHealthPage() {
       const ghRepo = sessionStorage.getItem('gh_repo')
       if (ghToken && ghOwner && ghRepo) {
         const ghCtrl = new AbortController()
-        const ghTimeout = setTimeout(() => ghCtrl.abort(), 8000)
+        const ghTimeout = setTimeout(() => ghCtrl.abort(), 10000)
         const ghRes = await fetch(`https://api.github.com/repos/${ghOwner}/${ghRepo}`, {
           headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github.v3+json' },
           signal: ghCtrl.signal,

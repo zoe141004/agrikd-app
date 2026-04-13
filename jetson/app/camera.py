@@ -19,7 +19,12 @@ class CameraCapture:
     """Manages USB/CSI camera via OpenCV."""
 
     def __init__(self, config):
-        self.source = config.get("source", 0)
+        raw = config.get("source", 0)
+        if isinstance(raw, str) and raw.isdigit():
+            raw = int(raw)
+        if not isinstance(raw, (int, str)):
+            raise ValueError(f"camera source must be int or string, got {type(raw).__name__}")
+        self.source = raw
         self.width = config.get("width", 640)
         self.height = config.get("height", 480)
         self.cap = None
