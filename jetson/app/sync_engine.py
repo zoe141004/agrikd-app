@@ -576,19 +576,33 @@ class SyncEngine:
         return None
 
     def _download_file(self, url, dest_path):
-        """Download file from Supabase Storage."""
-        resp = self._session.get(
-            url,
-            headers={
-                "apikey": self.supabase_key,
-                "Authorization": f"Bearer {self.supabase_key}",
-            },
-            timeout=(10, 300), stream=True, verify=True,
-        )
-        resp.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
+        """Download file from Supabase Storage with atomic write.
+
+        Downloads to a temp file first, then renames on success to
+        prevent partial/corrupted files if interrupted (T2-02).
+        """
+        tmp_path = dest_path + ".tmp"
+        try:
+            resp = self._session.get(
+                url,
+                headers={
+                    "apikey": self.supabase_key,
+                    "Authorization": f"Bearer {self.supabase_key}",
+                },
+                timeout=(10, 300), stream=True, verify=True,
+            )
+            resp.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            os.replace(tmp_path, dest_path)
+        except BaseException:
+            # Clean up partial temp file on any failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _sha256_file(self, path):
         """Compute SHA-256 hash of a file."""
@@ -628,18 +642,28 @@ class SyncEngine:
         """Upload built engine to Supabase Storage for other devices to reuse."""
         try:
             storage_path = f"engines/{leaf_type}/{version}/{hw_tag}.engine"
-            with open(engine_path, "rb") as f:
-                data = f.read()
+
+            # T1-03: Stream file instead of reading entire engine into memory
+            # to prevent OOM on large engines (>1GB)
+            def _file_reader():
+                with open(engine_path, "rb") as f:
+                    while True:
+                        chunk = f.read(65536)  # 64KB chunks
+                        if not chunk:
+                            break
+                        yield chunk
 
             upload_url = f"{self.supabase_url}/storage/v1/object/models/{storage_path}"
+            file_size = os.path.getsize(engine_path)
             resp = self._session.post(
                 upload_url,
                 headers={
                     "apikey": self.supabase_key,
                     "Authorization": f"Bearer {self.supabase_key}",
                     "Content-Type": "application/octet-stream",
+                    "Content-Length": str(file_size),
                 },
-                data=data, timeout=(10, 300), verify=True,
+                data=_file_reader(), timeout=(10, 300), verify=True,
             )
             if resp.status_code in (200, 201):
                 # Register in model_engines table
