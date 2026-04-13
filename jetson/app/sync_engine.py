@@ -1018,6 +1018,14 @@ class SyncEngine:
         running to poll for assignment. Only POST is skipped.
         Fix 1.6: Checks shutdown_event so main thread can drain gracefully.
         """
+        # Pre-check: if desired_config has model_versions, verify engines
+        # match and trigger builds immediately (don't wait for first poll)
+        if self._active_config:
+            desired_mv = self._active_config.get("model_versions", {})
+            if desired_mv:
+                logger.info("Startup engine check: verifying assigned model versions")
+                self._check_model_versions(self._active_config)
+
         base_interval = self.interval
         current_interval = base_interval
         max_interval = 3600

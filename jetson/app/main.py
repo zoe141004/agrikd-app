@@ -283,22 +283,14 @@ def main():
     interval = config["camera"].get("interval_seconds", 1800)
     default_leaf = available[0]
 
-    # Apply persisted admin config from device_state on startup
-    # (so we don't need to wait for first poll cycle)
-    if device_state and device_state.get("desired_config"):
-        startup_cfg = device_state["desired_config"]
-        startup_mode = startup_cfg.get("mode", mode)
-        startup_interval = startup_cfg.get("interval_seconds", interval)
-        startup_leaf = startup_cfg.get("default_leaf_type", default_leaf)
-        if startup_mode != mode or startup_interval != interval:
-            logger.info(
-                "Applying saved admin config: mode=%s -> %s, interval=%ds -> %ds",
-                mode, startup_mode, interval, startup_interval,
-            )
-        mode = startup_mode
-        interval = startup_interval
-        if startup_leaf in available:
-            default_leaf = startup_leaf
+    # Apply admin config from SyncEngine if available (persisted across restarts)
+    admin_cfg = sync.get_active_config()
+    if admin_cfg:
+        mode = admin_cfg.get("mode", mode)
+        interval = admin_cfg.get("interval_seconds", interval)
+        cfg_leaf = admin_cfg.get("default_leaf_type", default_leaf)
+        if cfg_leaf in available:
+            default_leaf = cfg_leaf
 
     logger.info("Starting main loop (mode=%s) — Local-First active", mode)
 
