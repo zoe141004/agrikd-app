@@ -187,7 +187,11 @@ def main():
         install_root = script_dir
     else:
         install_root = os.path.dirname(script_dir)
-    os.chdir(install_root)
+    try:
+        os.chdir(install_root)
+    except OSError as e:
+        print(f"[FATAL] Cannot chdir to {install_root}: {e}", file=sys.stderr)
+        sys.exit(1)
 
     config = load_config()
     setup_logging(config)

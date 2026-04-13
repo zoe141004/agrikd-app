@@ -38,7 +38,14 @@ def _save_prediction_image(frame):
     uid = uuid.uuid4().hex[:8]
     filename = f"pred_{ts}_{uid}.jpg"
     path = os.path.join(_IMAGES_DIR, filename)
-    cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    ok = cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        logger.error("cv2.imwrite failed for %s", path)
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
     return path
 
 # These are set when the server starts
@@ -236,10 +243,11 @@ def predict():
             _db.save_prediction(leaf_type, result, image_path=image_path, device_id=_device_id)
         except Exception as db_err:
             app.logger.error("DB save failed, cleaning up image: %s", db_err)
-            try:
-                os.unlink(image_path)
-            except OSError:
-                pass
+            if image_path:
+                try:
+                    os.unlink(image_path)
+                except OSError:
+                    pass
             return jsonify({"error": "Failed to save prediction"}), 500
 
         # Throttle cleanup to every 100 predictions, run in background (H7)
