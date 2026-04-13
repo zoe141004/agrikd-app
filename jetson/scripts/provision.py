@@ -231,9 +231,11 @@ def provision(token_data, force=False):
     print("[1/4] Detecting hardware...")
     mac, serial, hostname, hw_info = get_hardware_info()
     hw_id = compute_hw_id(mac, serial)
-    # Display only non-sensitive info (hw_id is a SHA-256 hash, further masked)
-    print(f"  Hostname: {hostname[:3]}***")
-    print(f"  HW ID:    {hw_id[:8]}...")
+    # Mask before display to avoid clear-text logging of hardware identifiers
+    masked_host = hostname[:3] + "***" if hostname else "***"
+    masked_hwid = hw_id[:8] + "..." if hw_id else "..."
+    print(f"  Hostname: {masked_host}")
+    print(f"  HW ID:    {masked_hwid}")
     print(f"  Platform: {platform.machine()}")
 
     # 2. Provision device via atomic server RPC
@@ -342,10 +344,11 @@ def provision(token_data, force=False):
     except OSError:
         pass  # Windows or permission issue
 
+    masked_devid = str(device_id)[:8] + "..."
     print()
     print("=" * 40)
-    print(f"Provisioned as '{hostname[:3]}***' (hw_id: {hw_id[:8]}...)")
-    print(f"Device ID: {str(device_id)[:8]}...")
+    print(f"Provisioned as '{masked_host}' (hw_id: {masked_hwid})")
+    print(f"Device ID: {masked_devid}")
     print()
     print("Next steps:")
     print("  1. Start the service:  systemctl start agrikd")

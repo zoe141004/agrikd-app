@@ -44,7 +44,7 @@ def _save_prediction_image(frame):
         try:
             os.unlink(path)
         except OSError:
-            pass
+            logger.debug("Could not remove failed image file %s", path)
         return None
     return path
 
@@ -246,8 +246,8 @@ def predict():
             if image_path:
                 try:
                     os.unlink(image_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    app.logger.debug("Could not remove orphaned image %s: %s", image_path, e)
             return jsonify({"error": "Failed to save prediction"}), 500
 
         # Throttle cleanup to every 100 predictions, run in background (H7)

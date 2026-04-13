@@ -342,8 +342,8 @@ def main():
                             logger.error("DB save failed, cleaning up image: %s", db_err)
                             try:
                                 os.unlink(img_path)
-                            except OSError:
-                                pass
+                            except OSError as e:
+                                logger.debug("Could not remove orphaned image %s: %s", img_path, e)
                             continue
                         logger.info(
                             "Prediction: %s (%.1f%%)",

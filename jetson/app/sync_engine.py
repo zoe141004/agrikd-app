@@ -536,8 +536,8 @@ class SyncEngine:
                 try:
                     os.unlink(old_engine_path)
                     logger.info("Deleted old engine: %s", old_engine_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug("Could not delete old engine %s: %s", old_engine_path, e)
 
             self._applied_model_versions[leaf_type] = version
             self._engine_status[leaf_type] = "ready"
@@ -601,7 +601,7 @@ class SyncEngine:
             try:
                 os.unlink(tmp_path)
             except OSError:
-                pass
+                logger.debug("Temp file %s already removed", tmp_path)
             raise
 
     def _sha256_file(self, path):
@@ -635,7 +635,7 @@ class SyncEngine:
                 elif "nano" in model:
                     return "sm53"
             except Exception:
-                pass
+                logger.debug("Could not read /proc/device-tree/model for hw detection")
         return "unknown"
 
     def _upload_engine_cache(self, leaf_type, version, hw_tag, engine_path, engine_sha):
@@ -699,8 +699,8 @@ class SyncEngine:
                 data = resp.json()
                 if data and len(data) > 0:
                     return data[0]
-        except requests.RequestException:
-            pass
+        except requests.RequestException as e:
+            logger.debug("Failed to fetch model metadata for %s v%s: %s", leaf_type, version, e)
         return None
 
     def _get_onnx_url_for_version(self, leaf_type, version):
@@ -716,8 +716,8 @@ class SyncEngine:
                 data = resp.json()
                 if data and len(data) > 0:
                     return data[0].get("onnx_url")
-        except requests.RequestException:
-            pass
+        except requests.RequestException as e:
+            logger.debug("Failed to fetch ONNX URL for %s v%s: %s", leaf_type, version, e)
         return None
 
     def _persist_config(self):
@@ -907,8 +907,8 @@ class SyncEngine:
                         if local_path:
                             try:
                                 os.unlink(local_path)
-                            except OSError:
-                                pass
+                            except OSError as e:
+                                logger.debug("Could not remove local image %s: %s", local_path, e)
             elif resp.status_code == 401:
                 logger.warning("Auth expired, re-authenticating...")
                 self._access_token = ""
@@ -984,13 +984,13 @@ class SyncEngine:
                         },
                         timeout=10, verify=True,
                     )
-                except requests.RequestException:
-                    pass  # Best-effort
+                except requests.RequestException as e:
+                    logger.debug("Best-effort image URL update failed: %s", e)
                 # Delete local image
                 try:
                     os.unlink(local_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug("Could not remove local image %s: %s", local_path, e)
                 logger.debug("Retry upload OK: pred %d", pred["id"])
 
     # ── Main loop ─────────────────────────────────────────────────────
