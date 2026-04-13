@@ -116,10 +116,17 @@ export default function DevicesPage() {
 
   const saveDevice = async () => {
     setSaving(true)
-    // Only include model_versions entries that have a value selected
+    // Resolve model_versions: empty string means "latest active" — look up actual version
     const mv = {}
     for (const [lt, ver] of Object.entries(form.model_versions || {})) {
-      if (ver) mv[lt] = ver
+      if (ver) {
+        mv[lt] = ver
+      } else {
+        // Resolve "Latest active" to the actual latest active version
+        const versions = modelVersions[lt] || []
+        const latestActive = versions.find(v => v.status === 'active')
+        if (latestActive) mv[lt] = latestActive.version
+      }
     }
     const update = {
       device_name: form.device_name || null,

@@ -688,6 +688,9 @@ cat > /etc/systemd/system/agrikd.service << SYSTEMD
 Description=AgriKD Edge Inference Service
 After=network-online.target
 Wants=network-online.target
+# Crash loop protection: max 5 restarts in 300 seconds
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -700,10 +703,6 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=agrikd
 Environment=PYTHONUNBUFFERED=1
-
-# Crash loop protection: max 5 restarts in 300 seconds
-StartLimitBurst=5
-StartLimitIntervalSec=300
 
 # Resource limits
 MemoryMax=1G

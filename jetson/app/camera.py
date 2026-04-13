@@ -94,17 +94,19 @@ class CameraCapture:
         ret, frame = self.cap.read()
         return frame if ret else None
 
-    def capture_single(self, warmup_frames=3):
+    def capture_single(self, warmup_frames=5, warmup_delay=3.0):
         """Wake-Capture-Sleep: open camera, capture one frame, release.
 
-        Fix 1.7: For periodic mode — opens camera, discards warmup frames
-        (auto-exposure settle), captures one frame, then releases immediately.
+        For periodic mode — opens camera, waits for sensor to stabilize,
+        discards warmup frames (auto-exposure settle), captures one frame,
+        then releases immediately.
         Reduces Jetson heat and sensor wear during long intervals.
 
         Uses exponential backoff reconnection if camera open fails.
 
         Args:
             warmup_frames: Number of frames to discard for auto-exposure.
+            warmup_delay: Seconds to wait after open for sensor init.
 
         Returns:
             BGR numpy array or None if capture failed validation.
@@ -113,6 +115,10 @@ class CameraCapture:
             self._open_with_reconnect()
             if self.cap is None or not self.cap.isOpened():
                 return None
+
+            # Wait for camera sensor to initialize (auto-exposure, white balance)
+            if warmup_delay > 0:
+                time.sleep(warmup_delay)
 
             # Discard warmup frames for auto-exposure/white-balance settle
             for _ in range(warmup_frames):
