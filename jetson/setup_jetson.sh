@@ -435,17 +435,37 @@ else
         echo "  Device tag: $DEVICE_TAG"
 
         for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
-            engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
-            onnx_file="$INSTALL_DIR/models/${leaf_type}_student.onnx"
+
+            # Get latest active version + ONNX URL from Supabase
+            echo "  Querying latest model for $leaf_type..."
+            ONNX_RESP=$(curl -sf --max-time 30 --connect-timeout 10 \
+                "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
+                -H "apikey: $CFG_SUPA_KEY" \
+                -H "Authorization: Bearer $CFG_SUPA_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
+
+            MODEL_VERSION=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['version'] if r else '')" 2>/dev/null || echo "")
+            ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
+
+            if [ -z "$MODEL_VERSION" ]; then
+                echo "  [WARN] No active model found for $leaf_type — skipping"
+                continue
+            fi
+
+            # Use versioned filenames
+            engine_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.engine"
+            onnx_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.onnx"
 
             if [ -f "$engine_file" ]; then
-                echo "  Engine already exists: $leaf_type — skipping download"
+                echo "  Engine already exists: $leaf_type v$MODEL_VERSION — skipping download"
                 continue
             fi
 
             # Try 1: Download pre-built .engine for this exact device + TRT version
-            ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${DEVICE_TAG}/${leaf_type}_student.engine"
-            echo "  Trying pre-built engine for $leaf_type ($DEVICE_TAG)..."
+            # Path scheme matches sync_engine._upload_engine_cache(): engines/{leaf_type}/{version}/{hw_tag}.engine
+            ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${leaf_type}/${MODEL_VERSION}/${DEVICE_TAG}.engine"
+            echo "  Trying pre-built engine for $leaf_type v$MODEL_VERSION ($DEVICE_TAG)..."
             HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
             if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
                 ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
@@ -453,8 +473,25 @@ else
                 if [ "$ENGINE_SIZE" -gt 102400 ]; then
                     chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
                     chmod 644 "$engine_file"
-                    echo "  [OK] Downloaded pre-built engine for $leaf_type (${ENGINE_SIZE} bytes)"
+                    echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION (${ENGINE_SIZE} bytes)"
                     echo "       Built on: $DEVICE_TAG — no conversion needed!"
+                    # Update config.json with versioned engine path
+                    ENGINE_REL="models/$(basename "$engine_file")"
+                    python3 -c "
+import json, sys
+try:
+    cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    with open(cfg_path) as f:
+        c = json.load(f)
+    if 'models' not in c: c['models'] = {}
+    if leaf not in c['models']: c['models'][leaf] = {}
+    c['models'][leaf]['engine_path'] = eng_path
+    c['models'][leaf]['version'] = ver
+    with open(cfg_path, 'w') as f:
+        json.dump(c, f, indent=4)
+except Exception as e:
+    print(f'[WARNING] Config update failed: {e}', file=sys.stderr)
+" "$CFG" "$leaf_type" "$ENGINE_REL" "$MODEL_VERSION"
                     continue
                 else
                     echo "  [WARN] Downloaded file too small (${ENGINE_SIZE} bytes) — invalid engine"
@@ -466,25 +503,15 @@ else
             fi
 
             # Try 2: Download ONNX and convert locally in step 10
-            echo "  Fetching ONNX URL for $leaf_type..."
-            ONNX_RESP=$(curl -sf --max-time 30 --connect-timeout 10 \
-                "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
-                -H "apikey: $CFG_SUPA_KEY" \
-                -H "Authorization: Bearer $CFG_SUPA_KEY" \
-                -H "Content-Type: application/json" \
-                -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
-
-            ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
-
             if [ -z "$ONNX_URL" ]; then
                 echo "  [WARN] No ONNX URL found for $leaf_type — skipping"
                 continue
             fi
 
-            echo "  Downloading ONNX: $leaf_type..."
+            echo "  Downloading ONNX: $leaf_type v$MODEL_VERSION..."
             HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
             if [ "$HTTP_CODE" = "200" ]; then
-                echo "  [OK] Downloaded ONNX for $leaf_type ($(stat --format=%s "$onnx_file" 2>/dev/null || echo '?') bytes)"
+                echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION ($(stat --format=%s "$onnx_file" 2>/dev/null || echo '?') bytes)"
             else
                 echo "  [WARN] Download failed (HTTP $HTTP_CODE) for $leaf_type"
                 rm -f "$onnx_file"
@@ -539,19 +566,36 @@ if [ -z "$TRTEXEC" ]; then
     echo "  [WARN] trtexec still not available — cannot convert ONNX to TensorRT."
     echo "  Install TensorRT manually:  sudo apt-get install tensorrt"
     echo "  Skipping conversion. Pre-built .engine files can be placed at:"
-    echo "    $INSTALL_DIR/models/<leaf_type>_student.engine"
+    echo "    $INSTALL_DIR/models/<leaf_type>_student_v<version>.engine"
 else
-    for onnx_file in "$INSTALL_DIR/models"/*_student.onnx; do
+    for onnx_file in "$INSTALL_DIR/models"/*_student*.onnx; do
         [ -f "$onnx_file" ] || { echo "  No ONNX files to convert."; break; }
-        leaf_type=$(basename "$onnx_file" | sed 's/_student\.onnx$//')
-        engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
+        onnx_basename=$(basename "$onnx_file" .onnx)
+
+        # Extract leaf_type and version from filename
+        # Versioned: tomato_student_v1.2.0.onnx → leaf=tomato, ver=1.2.0
+        # Legacy:    tomato_student.onnx → leaf=tomato, ver=unknown
+        if echo "$onnx_basename" | grep -qP '_student_v\d'; then
+            leaf_type=$(echo "$onnx_basename" | sed 's/_student_v.*$//')
+            onnx_ver=$(echo "$onnx_basename" | sed 's/.*_student_v//')
+        else
+            leaf_type=$(echo "$onnx_basename" | sed 's/_student$//')
+            onnx_ver=""
+        fi
+
+        # Engine filename includes version
+        if [ -n "$onnx_ver" ]; then
+            engine_file="$INSTALL_DIR/models/${leaf_type}_student_v${onnx_ver}.engine"
+        else
+            engine_file="$INSTALL_DIR/models/${leaf_type}_student.engine"
+        fi
 
         if [ -f "$engine_file" ]; then
-            echo "  Engine already exists: $leaf_type — skipping"
+            echo "  Engine already exists: $leaf_type v${onnx_ver:-unknown} — skipping"
             continue
         fi
 
-        echo "  Converting: $leaf_type (this may take several minutes)..."
+        echo "  Converting: $leaf_type v${onnx_ver:-unknown} (this may take several minutes)..."
         set +e  # trtexec failure should not abort setup
         "$TRTEXEC" \
             --onnx="$onnx_file" \
@@ -569,12 +613,13 @@ else
         chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
         chmod 644 "$engine_file"
 
-        # Inject SHA-256 into config.json
+        # Inject SHA-256 + version into config.json
         HASH=$(sha256sum "$engine_file" | awk '{print $1}')
+        ENGINE_REL="models/$(basename "$engine_file")"
         python3 -c "
 import json, sys
 try:
-    cfg_path, leaf, sha = sys.argv[1], sys.argv[2], sys.argv[3]
+    cfg_path, leaf, sha, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
     with open(cfg_path) as f:
         c = json.load(f)
     if 'models' not in c:
@@ -582,24 +627,33 @@ try:
     if leaf not in c['models']:
         c['models'][leaf] = {}
     c['models'][leaf]['sha256_checksum'] = sha
-    c['models'][leaf]['engine_path'] = f'models/{leaf}_student.engine'
+    c['models'][leaf]['engine_path'] = eng_path
+    if ver:
+        c['models'][leaf]['version'] = ver
     with open(cfg_path, 'w') as f:
         json.dump(c, f, indent=4)
 except Exception as e:
     print(f'[WARNING] Failed to inject SHA-256 into config: {e}', file=sys.stderr)
-" "$CFG" "$leaf_type" "$HASH"
-        echo "  SHA-256: ${HASH:0:16}... → config.json"
+" "$CFG" "$leaf_type" "$HASH" "$ENGINE_REL" "$onnx_ver"
+        echo "  SHA-256: ${HASH:0:16}... → config.json (version: ${onnx_ver:-unset})"
 
         # Upload .engine to Supabase Storage for backup
         # NOTE: .engine files are device-specific (GPU arch + TensorRT version).
         #       They only work on the SAME hardware they were built on.
+        # Path scheme matches sync_engine._upload_engine_cache():
+        #   engines/{leaf_type}/{version}/{device_tag}.engine
         python3 -c "
 import json, sys, os, urllib.request, subprocess
 
-cfg_path   = sys.argv[1]
-leaf_type  = sys.argv[2]
+cfg_path    = sys.argv[1]
+leaf_type   = sys.argv[2]
 engine_file = sys.argv[3]
-sha256     = sys.argv[4]
+sha256      = sys.argv[4]
+version     = sys.argv[5] if len(sys.argv) > 5 else ''
+
+if not version:
+    print('  [SKIP] No version info — engine not uploaded.')
+    sys.exit(0)
 
 # Read Supabase credentials from config
 try:
@@ -614,13 +668,12 @@ except Exception as e:
     print(f'  [SKIP] Cannot read config: {e}')
     sys.exit(0)
 
-# Detect device hardware for storage path annotation
+# Detect device hardware tag (same logic as step 9)
 hw_model = 'unknown'
 trt_ver  = 'unknown'
 try:
     with open('/proc/device-tree/model', 'r') as f:
         hw_model = f.read().strip().rstrip(chr(0))
-    # Shorten: 'NVIDIA Jetson Orin Nano Developer Kit' -> 'jetson-orin-nano'
     hw_model = hw_model.lower().replace('nvidia ', '').replace(' developer kit', '')
     hw_model = hw_model.replace(' ', '-')
 except FileNotFoundError:
@@ -634,37 +687,38 @@ try:
 except Exception:
     pass
 
-# Storage path: engines/{hw_model}/{leaf_type}_student.engine
-storage_tag = f'{hw_model}_trt{trt_ver}'
-storage_path = f'engines/{storage_tag}/{leaf_type}_student.engine'
+device_tag = f'{hw_model}_trt{trt_ver}'
+
+# Unified path: engines/{leaf_type}/{version}/{device_tag}.engine
+storage_path = f'engines/{leaf_type}/{version}/{device_tag}.engine'
 
 print(f'  Uploading .engine to storage: {storage_path}')
-print(f'    Device: {hw_model}, TensorRT: {trt_ver}')
+print(f'    Device: {device_tag}, Version: {version}')
 
-with open(engine_file, 'rb') as f:
-    data = f.read()
-
+file_size = os.path.getsize(engine_file)
 upload_url = f'{url}/storage/v1/object/models/{storage_path}'
 headers = {
     'apikey': key,
     'Authorization': f'Bearer {key}',
     'Content-Type': 'application/octet-stream',
+    'Content-Length': str(file_size),
     'x-upsert': 'true',
 }
-req = urllib.request.Request(upload_url, data=data, headers=headers, method='POST')
+
+with open(engine_file, 'rb') as f:
+    req = urllib.request.Request(upload_url, data=f.read(), headers=headers, method='POST')
 try:
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        size_mb = len(data) / (1024*1024)
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        size_mb = file_size / (1024*1024)
         print(f'  [OK] Uploaded .engine ({size_mb:.1f} MB)')
         print(f'    Path: models/{storage_path}')
         print(f'    SHA-256: {sha256[:16]}...')
-        print(f'    NOTE: This engine ONLY works on {hw_model} + TRT {trt_ver}')
 except urllib.error.HTTPError as e:
     body = e.read().decode('utf-8', errors='replace')[:200]
     print(f'  [WARN] Upload failed ({e.code}): {body}')
 except Exception as e:
     print(f'  [WARN] Upload failed: {e}')
-" "$CFG" "$leaf_type" "$engine_file" "$HASH"
+" "$CFG" "$leaf_type" "$engine_file" "$HASH" "$onnx_ver"
 
         # Clean up ONNX after successful conversion
         rm -f "$onnx_file"

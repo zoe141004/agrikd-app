@@ -433,9 +433,6 @@ class SyncEngine:
           5. Update local config
           6. Delete old engine file
         """
-        import subprocess
-        import shutil
-
         try:
             models_dir = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "..", "models"
@@ -488,37 +485,22 @@ class SyncEngine:
                     return
 
                 # Step 3: Download ONNX and build engine
-                import tempfile
+                from .engine_builder import build_engine
+
                 with tempfile.TemporaryDirectory() as tmpdir:
                     onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
                     logger.info("Downloading ONNX: %s v%s", leaf_type, version)
                     self._download_file(onnx_url, onnx_path)
 
                     logger.info("Building TensorRT engine: %s v%s (this may take 10-30 min)", leaf_type, version)
-                    # Find trtexec binary — may not be in PATH on Jetson
-                    trtexec_bin = shutil.which("trtexec")
-                    if not trtexec_bin:
-                        for candidate in [
-                            "/usr/src/tensorrt/bin/trtexec",
-                            "/usr/local/bin/trtexec",
-                            os.path.expanduser("~/trtexec"),
-                        ]:
-                            if os.path.isfile(candidate):
-                                trtexec_bin = candidate
-                                break
-                    if not trtexec_bin:
-                        logger.error("trtexec not found in PATH or known locations")
+                    try:
+                        build_engine(onnx_path, new_engine_path, timeout=1800)
+                    except FileNotFoundError as e:
+                        logger.error("%s", e)
                         self._engine_status[leaf_type] = "error"
                         return
-                    result = subprocess.run(
-                        [trtexec_bin,
-                         f"--onnx={onnx_path}",
-                         f"--saveEngine={new_engine_path}",
-                         "--fp16", "--workspace=1024"],
-                        capture_output=True, text=True, timeout=1800,
-                    )
-                    if result.returncode != 0:
-                        logger.error("trtexec failed: %s", result.stderr[-500:])
+                    except RuntimeError as e:
+                        logger.error("%s", e)
                         self._engine_status[leaf_type] = "error"
                         return
 
@@ -630,29 +612,38 @@ class SyncEngine:
         return sha.hexdigest()
 
     def _get_hardware_tag(self):
-        """Detect NVIDIA GPU hardware tag (sm53, sm72, sm87)."""
+        """Detect device hardware tag for engine cache matching.
+
+        Format: {hw_model}_trt{trt_version}
+        Example: jetson-orin-nx-engineering-reference_trt10.3.0.30
+
+        Must match the tag produced by setup_jetson.sh so engines are
+        downloaded from / uploaded to the same Storage path.
+        """
         import subprocess
+        hw_model = "unknown"
+        trt_ver = "unknown"
         try:
-            out = subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
-                text=True, timeout=10,
-            ).strip()
-            major, minor = out.split(".")
-            return f"sm{major}{minor}"
+            with open("/proc/device-tree/model", "r") as f:
+                hw_model = f.read().strip().rstrip("\x00")
+            hw_model = (hw_model.lower()
+                        .replace("nvidia ", "")
+                        .replace(" developer kit", "")
+                        .replace(" ", "-"))
         except Exception:
-            # Fallback: check device-tree for Jetson
-            try:
-                with open("/proc/device-tree/model", "r") as f:
-                    model = f.read().lower()
-                if "orin" in model:
-                    return "sm87"
-                elif "xavier" in model:
-                    return "sm72"
-                elif "nano" in model:
-                    return "sm53"
-            except Exception:
-                logger.debug("Could not read /proc/device-tree/model for hw detection")
-        return "unknown"
+            logger.debug("Could not read /proc/device-tree/model")
+        try:
+            result = subprocess.run(
+                ["dpkg", "-l", "tensorrt"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("ii"):
+                    trt_ver = line.split()[2].split("-")[0]
+                    break
+        except Exception:
+            logger.debug("Could not detect TensorRT version via dpkg")
+        return f"{hw_model}_trt{trt_ver}"
 
     def _upload_engine_cache(self, leaf_type, version, hw_tag, engine_path, engine_sha):
         """Upload built engine to Supabase Storage for other devices to reuse."""
