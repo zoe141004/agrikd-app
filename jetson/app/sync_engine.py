@@ -434,6 +434,7 @@ class SyncEngine:
           6. Delete old engine file
         """
         import subprocess
+        import shutil
 
         try:
             models_dir = os.path.join(
@@ -494,8 +495,23 @@ class SyncEngine:
                     self._download_file(onnx_url, onnx_path)
 
                     logger.info("Building TensorRT engine: %s v%s (this may take 10-30 min)", leaf_type, version)
+                    # Find trtexec binary — may not be in PATH on Jetson
+                    trtexec_bin = shutil.which("trtexec")
+                    if not trtexec_bin:
+                        for candidate in [
+                            "/usr/src/tensorrt/bin/trtexec",
+                            "/usr/local/bin/trtexec",
+                            os.path.expanduser("~/trtexec"),
+                        ]:
+                            if os.path.isfile(candidate):
+                                trtexec_bin = candidate
+                                break
+                    if not trtexec_bin:
+                        logger.error("trtexec not found in PATH or known locations")
+                        self._engine_status[leaf_type] = "error"
+                        return
                     result = subprocess.run(
-                        ["trtexec",
+                        [trtexec_bin,
                          f"--onnx={onnx_path}",
                          f"--saveEngine={new_engine_path}",
                          "--fp16", "--workspace=1024"],
