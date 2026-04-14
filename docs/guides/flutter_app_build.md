@@ -81,7 +81,7 @@ flutter test --exclude-tags=widget
 flutter test
 ```
 
-Current test count: **140 tests** across 14 test files:
+Current test count: **144 tests** across 14 test files:
 - `test/unit/` — Prediction model, image preprocessor, model constants, model integrity, app strings, app constants (36 tests)
 - `test/provider/` — History provider, settings provider (20 tests)
 - `test/dao/` — PredictionDao, PreferenceDao, ModelDao, SyncQueue, PredictionDao filters (31 tests)
@@ -147,7 +147,7 @@ Output location: `build/app/outputs/flutter-apk/`
 
 3. The `build.gradle.kts` already has R8 minification and ProGuard configured:
    - `minSdk = 24` (Android 7.0)
-   - `targetSdk = 34` (Android 14)
+   - `targetSdk = 35` (Android 15)
    - `isMinifyEnabled = true`
    - `isShrinkResources = true`
 

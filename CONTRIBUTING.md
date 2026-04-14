@@ -148,7 +148,7 @@ agrikd-app/
 │   │   └── config.example.json  # Template (commit this)
 │   └── requirements.txt         # Jetson Python dependencies
 ├── database/
-│   ├── migrations/              # 15 SQL migration files (001-015)
+│   ├── migrations/              # 20 SQL migration files (001-020)
 │   └── verify_rls_policies.sql  # RLS verification queries
 ├── dvc/                         # DVC tracking files
 │   ├── data_tomato.dvc

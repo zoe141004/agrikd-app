@@ -38,7 +38,7 @@ All formats uploaded to Supabase Storage. Jetson devices auto-detect hardware (S
 
 All guides are in [`docs/`](docs/README.md):
 
-- [Project Architecture & Overview](docs/technical/project_context.md)
+- [System Technical Reference](docs/technical/system_reference.md)
 - [Product Release Guide](docs/guides/product_release.md)
 - [Supabase Setup](docs/guides/supabase_setup.md)
 - [CI/CD Setup](docs/guides/cicd_setup.md)

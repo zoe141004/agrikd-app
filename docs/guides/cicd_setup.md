@@ -69,11 +69,10 @@ base64 -w 0 service-account.json
 
 ## 3. CI Workflow (`ci.yml`)
 
-Runs on every push to `main`/`develop`/`release/*` or PR to `main`/`develop`/`feature/**`. 8 stages:
+Runs on every push to `main`/`develop`/`release/*` or PR to `main`/`develop`/`feature/**`. 6 jobs:
 
 ```
 Dependency Audit → Lint & Format → Flutter Tests → Build APK
-                                                 ↘ Model Conversion → Model Validation
                                    Dashboard Tests → Jetson Python Lint
 ```
 
@@ -81,11 +80,9 @@ Dependency Audit → Lint & Format → Flutter Tests → Build APK
 |-------|-------------|
 | **Dependency Audit** | `npm audit` + `pip audit` for known vulnerabilities |
 | **Lint** | `dart format --set-exit-if-changed .` + `flutter analyze` |
-| **Tests** | `flutter test --exclude-tags=widget` |
+| **Tests** | `flutter test --exclude-tags=widget` (144 tests) |
 | **Build APK** | Release APK with obfuscation + `--dart-define` secrets |
-| **Model Conversion** | Only runs if commit contains `[model]` or `mlops_pipeline/` files changed |
-| **Model Validation** | Validates + evaluates converted models |
-| **Dashboard Tests** | `vitest run` — admin dashboard unit/integration tests (113 tests: helpers, DataContext, page integration) |
+| **Dashboard Tests** | `vitest run` — admin dashboard unit/integration tests (113 tests) |
 | **Jetson Python Lint** | `ruff check` on Jetson Python code |
 
 **Flutter version:** 3.41.4
