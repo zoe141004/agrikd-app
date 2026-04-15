@@ -31,7 +31,8 @@ DECLARE
         'devices',
         'provisioning_tokens',
         'dvc_operations',
-        'model_engines'
+        'model_engines',
+        'system_secrets'
     ];
 BEGIN
     RAISE NOTICE '===================================================================';

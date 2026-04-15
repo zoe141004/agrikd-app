@@ -22,6 +22,7 @@ COMMENT ON TABLE public.system_secrets IS
 ALTER TABLE public.system_secrets ENABLE ROW LEVEL SECURITY;
 
 -- Admin read/write policy (via service_role or admin check)
+DROP POLICY IF EXISTS "Admins can manage system_secrets" ON public.system_secrets;
 CREATE POLICY "Admins can manage system_secrets"
     ON public.system_secrets
     FOR ALL

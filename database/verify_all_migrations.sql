@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–017)
+-- AgriKD — Comprehensive Migration Verification (001–022)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 17 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 22 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -16,7 +16,8 @@ DECLARE
     _required_tables TEXT[] := ARRAY[
         'profiles', 'predictions', 'model_registry', 'audit_log',
         'model_benchmarks', 'model_versions', 'model_reports', 'pipeline_runs',
-        'dvc_operations', 'devices', 'provisioning_tokens', 'model_engines'
+        'dvc_operations', 'devices', 'provisioning_tokens', 'model_engines',
+        'system_secrets'
     ];
 
     -- ── Helper: check column ──
@@ -28,7 +29,12 @@ DECLARE
         'is_admin_role', 'handle_new_user', 'enforce_version_lifecycle',
         'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options',
         'claim_provisioning_token', 'update_device_config', 'increment_config_version',
-        'get_latest_onnx_url', 'get_engine_for_hardware'
+        'get_latest_onnx_url', 'get_engine_for_hardware',
+        'provision_device',
+        'device_poll_config', 'device_ack_config', 'device_heartbeat',
+        'device_push_predictions', 'device_update_prediction_image',
+        'is_device_assigned_user',
+        'get_system_secret'
     ];
 
     -- ── Helper: check trigger ──
@@ -84,7 +90,9 @@ DECLARE
         'Admin manage tokens', 'Anon read unused tokens', 'Anon claim token',
         -- model_engines (4 from 013)
         'Anyone can read engines', 'Service role manages engines',
-        'Service role updates engines', 'Admins delete engines'
+        'Service role updates engines', 'Admins delete engines',
+        -- system_secrets (1 from 022)
+        'Admins can manage system_secrets'
     ];
 
     -- ── Helper: check storage bucket ──
@@ -320,7 +328,12 @@ BEGIN
               'is_admin_role', 'handle_new_user', 'sync_model_urls',
               'enforce_version_lifecycle',
               'get_dashboard_stats', 'get_disease_distribution', 'get_leaf_type_options',
-              'claim_provisioning_token', 'update_device_config'
+              'claim_provisioning_token', 'update_device_config',
+              'provision_device',
+              'device_poll_config', 'device_ack_config', 'device_heartbeat',
+              'device_push_predictions', 'device_update_prediction_image',
+              'is_device_assigned_user',
+              'get_system_secret'
           )
     LOOP
         IF _col_check.is_secdef THEN
@@ -547,7 +560,7 @@ BEGIN
 
     INSERT INTO _verify_results VALUES (
         '09. Constraints (008)',
-        'model_benchmarks.format CHECK (pytorch/onnx/tflite_float16)',
+        'model_benchmarks.format CHECK (pytorch/onnx/tflite_float16/tflite_float32/tensorrt_fp16)',
         CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
         CASE WHEN _exists THEN 'exists' ELSE 'CONSTRAINT MISSING — run 008' END
     );
@@ -712,18 +725,18 @@ BEGIN
              ELSE 'invalid status values found!' END
     );
 
-    -- model_benchmarks: no invalid format values (008)
+    -- model_benchmarks: no invalid format values (008 + 021)
     SELECT EXISTS (
         SELECT 1 FROM public.model_benchmarks
-        WHERE format NOT IN ('pytorch', 'onnx', 'tflite_float16')
+        WHERE format NOT IN ('pytorch', 'onnx', 'tflite_float16', 'tflite_float32', 'tensorrt_fp16')
     ) INTO _exists;
 
     INSERT INTO _verify_results VALUES (
         '13. Data Integrity (008)',
         'model_benchmarks: valid format values only',
         CASE WHEN NOT _exists THEN 'PASS' ELSE 'FAIL' END,
-        CASE WHEN NOT _exists THEN 'all pytorch/onnx/tflite_float16'
-             ELSE 'invalid format values found! Re-run 008' END
+        CASE WHEN NOT _exists THEN 'all pytorch/onnx/tflite_float16/tflite_float32/tensorrt_fp16'
+             ELSE 'invalid format values found! Re-run 008/021' END
     );
 
     -- model_benchmarks: row count per format (informational)
@@ -1005,6 +1018,358 @@ BEGIN
 END $$;
 
 -- =====================================================================
+-- Section 19 — Migration 018: provision_device RPC
+-- =====================================================================
+DO $$
+DECLARE _exists boolean; _secdef boolean; _text_val text;
+BEGIN
+    -- Check provision_device() is SECURITY DEFINER
+    SELECT p.prosecdef INTO _secdef
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'provision_device';
+
+    INSERT INTO _verify_results VALUES (
+        '19. Migration 018',
+        'provision_device() SECURITY DEFINER',
+        CASE WHEN _secdef THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _secdef THEN 'SECURITY DEFINER (correct)'
+             WHEN _secdef IS NULL THEN 'FUNCTION MISSING — run 018'
+             ELSE 'NOT SECURITY DEFINER — run 018' END
+    );
+
+    -- Check EXECUTE grant to anon
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.routine_privileges
+        WHERE routine_schema = 'public'
+          AND routine_name = 'provision_device'
+          AND grantee = 'anon'
+          AND privilege_type = 'EXECUTE'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '19. Migration 018',
+        'provision_device() EXECUTE grant to anon',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'granted' ELSE 'MISSING — run 018' END
+    );
+
+    -- Check EXECUTE grant to authenticated
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.routine_privileges
+        WHERE routine_schema = 'public'
+          AND routine_name = 'provision_device'
+          AND grantee = 'authenticated'
+          AND privilege_type = 'EXECUTE'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '19. Migration 018',
+        'provision_device() EXECUTE grant to authenticated',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'granted' ELSE 'MISSING — run 018' END
+    );
+END $$;
+
+-- =====================================================================
+-- Section 20 — Migration 019: Engine upload storage policies
+-- =====================================================================
+DO $$
+DECLARE _pol text; _exists boolean;
+BEGIN
+    FOREACH _pol IN ARRAY ARRAY[
+        'jetson_engine_upload',
+        'jetson_engine_upsert',
+        'jetson_engine_read'
+    ] LOOP
+        SELECT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'storage' AND policyname = _pol
+        ) INTO _exists;
+
+        INSERT INTO _verify_results VALUES (
+            '20. Migration 019',
+            _pol || ' on storage.objects',
+            CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+            CASE WHEN _exists THEN 'exists' ELSE 'POLICY MISSING — run 019' END
+        );
+    END LOOP;
+END $$;
+
+-- =====================================================================
+-- Section 21 — Migration 020: Device sync RPCs
+-- =====================================================================
+DO $$
+DECLARE _fn text; _exists boolean; _secdef boolean;
+BEGIN
+    -- Verify each device sync function is SECURITY DEFINER
+    FOREACH _fn IN ARRAY ARRAY[
+        'device_poll_config',
+        'device_ack_config',
+        'device_heartbeat',
+        'device_push_predictions',
+        'device_update_prediction_image',
+        'is_device_assigned_user'
+    ] LOOP
+        SELECT p.prosecdef INTO _secdef
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'public' AND p.proname = _fn;
+
+        INSERT INTO _verify_results VALUES (
+            '21. Migration 020',
+            _fn || '() SECURITY DEFINER',
+            CASE
+                WHEN _secdef IS NULL THEN 'FAIL'
+                WHEN _secdef THEN 'PASS'
+                ELSE 'FAIL'
+            END,
+            CASE
+                WHEN _secdef IS NULL THEN 'FUNCTION MISSING — run 020'
+                WHEN _secdef THEN 'SECURITY DEFINER (correct)'
+                ELSE 'NOT SECURITY DEFINER — run 020'
+            END
+        );
+    END LOOP;
+
+    -- Storage policies for device prediction images (020)
+    FOREACH _fn IN ARRAY ARRAY[
+        'Devices upload prediction images',
+        'Devices read prediction images'
+    ] LOOP
+        SELECT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'storage' AND policyname = _fn
+        ) INTO _exists;
+
+        INSERT INTO _verify_results VALUES (
+            '21. Migration 020',
+            _fn || ' on storage.objects',
+            CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+            CASE WHEN _exists THEN 'exists' ELSE 'POLICY MISSING — run 020' END
+        );
+    END LOOP;
+
+    -- devices table in supabase_realtime publication (020)
+    SELECT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND tablename = 'devices'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '21. Migration 020',
+        'devices in supabase_realtime publication',
+        CASE WHEN _exists THEN 'PASS' ELSE 'WARN' END,
+        CASE WHEN _exists THEN 'enabled'
+             ELSE 'not in publication — add via Dashboard or run 020' END
+    );
+END $$;
+
+-- =====================================================================
+-- Section 22 — Migration 021: TensorRT benchmark format
+-- =====================================================================
+DO $$
+DECLARE _exists boolean; _check_clause text;
+BEGIN
+    -- Verify model_benchmarks_format_check includes 'tensorrt_fp16'
+    SELECT cc.check_clause INTO _check_clause
+    FROM information_schema.check_constraints cc
+    WHERE cc.constraint_name = 'model_benchmarks_format_check';
+
+    INSERT INTO _verify_results VALUES (
+        '22. Migration 021',
+        'model_benchmarks format CHECK includes tensorrt_fp16',
+        CASE
+            WHEN _check_clause IS NULL THEN 'FAIL'
+            WHEN _check_clause LIKE '%tensorrt_fp16%' THEN 'PASS'
+            ELSE 'FAIL'
+        END,
+        CASE
+            WHEN _check_clause IS NULL THEN 'CONSTRAINT MISSING — run 021'
+            WHEN _check_clause LIKE '%tensorrt_fp16%' THEN 'includes tensorrt_fp16'
+            ELSE 'tensorrt_fp16 NOT in constraint — run 021'
+        END
+    );
+
+    -- Verify constraint also includes 'tflite_float32'
+    INSERT INTO _verify_results VALUES (
+        '22. Migration 021',
+        'model_benchmarks format CHECK includes tflite_float32',
+        CASE
+            WHEN _check_clause IS NULL THEN 'FAIL'
+            WHEN _check_clause LIKE '%tflite_float32%' THEN 'PASS'
+            ELSE 'FAIL'
+        END,
+        CASE
+            WHEN _check_clause IS NULL THEN 'CONSTRAINT MISSING — run 021'
+            WHEN _check_clause LIKE '%tflite_float32%' THEN 'includes tflite_float32'
+            ELSE 'tflite_float32 NOT in constraint — run 021'
+        END
+    );
+END $$;
+
+-- =====================================================================
+-- Section 23 — Migration 022: system_secrets table + RPC
+-- =====================================================================
+DO $$
+DECLARE _exists boolean; _col_type text; _secdef boolean;
+BEGIN
+    -- system_secrets.key column (TEXT PK)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'system_secrets'
+      AND column_name = 'key';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets.key column',
+        CASE WHEN _col_type = 'text' THEN 'PASS'
+             WHEN _col_type IS NULL THEN 'FAIL'
+             ELSE 'WARN' END,
+        CASE WHEN _col_type = 'text' THEN 'TEXT (correct)'
+             WHEN _col_type IS NULL THEN 'COLUMN MISSING — run 022'
+             ELSE 'type=' || _col_type END
+    );
+
+    -- system_secrets.value column (TEXT NOT NULL)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'system_secrets'
+      AND column_name = 'value';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets.value column',
+        CASE WHEN _col_type = 'text' THEN 'PASS'
+             WHEN _col_type IS NULL THEN 'FAIL'
+             ELSE 'WARN' END,
+        CASE WHEN _col_type = 'text' THEN 'TEXT (correct)'
+             WHEN _col_type IS NULL THEN 'COLUMN MISSING — run 022'
+             ELSE 'type=' || _col_type END
+    );
+
+    -- system_secrets.description column (TEXT)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'system_secrets'
+          AND column_name = 'description'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets.description column',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'exists' ELSE 'COLUMN MISSING — run 022' END
+    );
+
+    -- system_secrets.updated_at column (TIMESTAMPTZ)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'system_secrets'
+      AND column_name = 'updated_at';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets.updated_at column',
+        CASE WHEN _col_type = 'timestamp with time zone' THEN 'PASS'
+             WHEN _col_type IS NULL THEN 'FAIL'
+             ELSE 'WARN' END,
+        CASE WHEN _col_type = 'timestamp with time zone' THEN 'TIMESTAMPTZ (correct)'
+             WHEN _col_type IS NULL THEN 'COLUMN MISSING — run 022'
+             ELSE 'type=' || _col_type END
+    );
+
+    -- system_secrets.updated_by column (UUID FK)
+    SELECT data_type INTO _col_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'system_secrets'
+      AND column_name = 'updated_by';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets.updated_by column',
+        CASE WHEN _col_type = 'uuid' THEN 'PASS'
+             WHEN _col_type IS NULL THEN 'FAIL'
+             ELSE 'WARN' END,
+        CASE WHEN _col_type = 'uuid' THEN 'UUID (correct)'
+             WHEN _col_type IS NULL THEN 'COLUMN MISSING — run 022'
+             ELSE 'type=' || _col_type END
+    );
+
+    -- RLS enabled on system_secrets
+    SELECT c.relrowsecurity INTO _exists
+    FROM pg_class c
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE n.nspname = 'public' AND c.relname = 'system_secrets';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'system_secrets RLS enabled',
+        CASE WHEN _exists THEN 'PASS'
+             WHEN _exists IS NULL THEN 'FAIL'
+             ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'RLS ON'
+             WHEN _exists IS NULL THEN 'TABLE MISSING — run 022'
+             ELSE 'RLS OFF — run 022' END
+    );
+
+    -- get_system_secret() is SECURITY DEFINER
+    SELECT p.prosecdef INTO _secdef
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_system_secret';
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'get_system_secret() SECURITY DEFINER',
+        CASE WHEN _secdef THEN 'PASS'
+             WHEN _secdef IS NULL THEN 'FAIL'
+             ELSE 'FAIL' END,
+        CASE WHEN _secdef THEN 'SECURITY DEFINER (correct)'
+             WHEN _secdef IS NULL THEN 'FUNCTION MISSING — run 022'
+             ELSE 'NOT SECURITY DEFINER — run 022' END
+    );
+
+    -- Check EXECUTE grant on get_system_secret to anon
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.routine_privileges
+        WHERE routine_schema = 'public'
+          AND routine_name = 'get_system_secret'
+          AND grantee = 'anon'
+          AND privilege_type = 'EXECUTE'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'get_system_secret() EXECUTE grant to anon',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'granted' ELSE 'MISSING — run 022' END
+    );
+
+    -- Check EXECUTE grant on get_system_secret to authenticated
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.routine_privileges
+        WHERE routine_schema = 'public'
+          AND routine_name = 'get_system_secret'
+          AND grantee = 'authenticated'
+          AND privilege_type = 'EXECUTE'
+    ) INTO _exists;
+
+    INSERT INTO _verify_results VALUES (
+        '23. Migration 022',
+        'get_system_secret() EXECUTE grant to authenticated',
+        CASE WHEN _exists THEN 'PASS' ELSE 'FAIL' END,
+        CASE WHEN _exists THEN 'granted' ELSE 'MISSING — run 022' END
+    );
+END $$;
+
+-- =====================================================================
 -- OUTPUT 1: FAILURES ONLY (most important — check this first)
 -- =====================================================================
 SELECT
@@ -1041,7 +1406,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED (migrations 001–017)'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–022)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;
