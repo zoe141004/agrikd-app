@@ -118,15 +118,14 @@ export default function DevicesPage() {
 
   const openEdit = (device) => {
     setEditDevice(device)
+    const mv = device.desired_config?.model_versions || {}
     setForm({
       device_name: device.device_name || '',
       user_id: device.user_id || '',
       mode: device.desired_config?.mode || 'periodic',
       interval_seconds: device.desired_config?.interval_seconds ?? 1800,
       default_leaf_type: device.desired_config?.default_leaf_type || '',
-      model_versions: device.desired_config?.model_versions
-        ? JSON.stringify(device.desired_config.model_versions)
-        : '{}',
+      model_versions_entries: Object.entries(mv).map(([lt, v]) => ({ leaf_type: lt, version: v })),
     })
     setFormError(null)
   }
@@ -137,13 +136,17 @@ export default function DevicesPage() {
     setFormError(null)
 
     try {
-      let parsedModelVersions = {}
-      try {
-        parsedModelVersions = JSON.parse(form.model_versions || '{}')
-      } catch {
-        setFormError('model_versions must be valid JSON, e.g. {"tomato":"v1.0.0"}')
-        setSaving(false)
-        return
+      // Convert model_versions_entries array → { leaf_type: version } object
+      const parsedModelVersions = {}
+      for (const entry of (form.model_versions_entries || [])) {
+        if (entry.leaf_type && entry.version) {
+          if (parsedModelVersions[entry.leaf_type]) {
+            setFormError(`Duplicate dataset: "${entry.leaf_type}". Each dataset can only be assigned once.`)
+            setSaving(false)
+            return
+          }
+          parsedModelVersions[entry.leaf_type] = entry.version
+        }
       }
 
       // 1. Try RPC first (restricted column update via DB function)
@@ -586,21 +589,91 @@ export default function DevicesPage() {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Model Versions (JSON)</label>
-              <textarea
-                className="input"
-                rows={3}
-                style={{ fontFamily: 'monospace', fontSize: 12 }}
-                value={form.model_versions}
-                onChange={e => setForm(f => ({ ...f, model_versions: e.target.value }))}
-                placeholder='{"tomato":"v1.0.0","burmese_grape_leaf":"v1.0.0"}'
-              />
-              {Object.keys(modelVersions).length > 0 && (
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
-                  Available: {Object.entries(modelVersions).map(([lt, vs]) =>
-                    `${lt}: ${vs.map(v => `${v.version} (${v.status})`).join(', ')}`
-                  ).join(' | ')}
+              <label className="form-label">Assigned Models</label>
+              {(form.model_versions_entries || []).length === 0 && (
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
+                  No models assigned. Click "Add Model" to assign a dataset version.
                 </div>
+              )}
+              {(form.model_versions_entries || []).map((entry, idx) => {
+                const availableLeafTypes = Object.keys(modelVersions).filter(lt =>
+                  lt === entry.leaf_type || !(form.model_versions_entries || []).some((e, i) => i !== idx && e.leaf_type === lt)
+                )
+                const versionsForLeaf = modelVersions[entry.leaf_type] || []
+                return (
+                  <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <select
+                      className="input"
+                      style={{ flex: 1 }}
+                      value={entry.leaf_type}
+                      onChange={e => {
+                        const newEntries = [...form.model_versions_entries]
+                        const newLeaf = e.target.value
+                        const newVersions = modelVersions[newLeaf] || []
+                        const activeVer = newVersions.find(v => v.status === 'active')
+                        newEntries[idx] = { leaf_type: newLeaf, version: activeVer?.version || newVersions[0]?.version || '' }
+                        setForm(f => ({ ...f, model_versions_entries: newEntries }))
+                      }}
+                    >
+                      <option value="">— Select Dataset —</option>
+                      {availableLeafTypes.map(lt => (
+                        <option key={lt} value={lt}>{lt}</option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      style={{ flex: 1 }}
+                      value={entry.version}
+                      onChange={e => {
+                        const newEntries = [...form.model_versions_entries]
+                        newEntries[idx] = { ...newEntries[idx], version: e.target.value }
+                        setForm(f => ({ ...f, model_versions_entries: newEntries }))
+                      }}
+                      disabled={!entry.leaf_type}
+                    >
+                      <option value="">— Select Version —</option>
+                      {versionsForLeaf.map(v => (
+                        <option key={v.version} value={v.version}>
+                          {v.version} ({v.status})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: '6px 10px', color: '#dc2626', minWidth: 'auto' }}
+                      title="Remove"
+                      onClick={() => {
+                        const newEntries = form.model_versions_entries.filter((_, i) => i !== idx)
+                        setForm(f => ({ ...f, model_versions_entries: newEntries }))
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              })}
+              {Object.keys(modelVersions).length > (form.model_versions_entries || []).length && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: 13, padding: '4px 12px' }}
+                  onClick={() => {
+                    const usedLeafTypes = new Set((form.model_versions_entries || []).map(e => e.leaf_type))
+                    const nextLeaf = Object.keys(modelVersions).find(lt => !usedLeafTypes.has(lt)) || ''
+                    const nextVersions = modelVersions[nextLeaf] || []
+                    const activeVer = nextVersions.find(v => v.status === 'active')
+                    setForm(f => ({
+                      ...f,
+                      model_versions_entries: [
+                        ...(f.model_versions_entries || []),
+                        { leaf_type: nextLeaf, version: activeVer?.version || nextVersions[0]?.version || '' },
+                      ],
+                    }))
+                  }}
+                >
+                  + Add Model
+                </button>
               )}
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
