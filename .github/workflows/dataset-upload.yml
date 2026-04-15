@@ -171,12 +171,30 @@ jobs:
           display = os.environ.get('DISPLAY_NAME', leaf)
           data_dir = f'data/{leaf}'
           classes = sorted([d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))])
+          class_map = {
+              str(i): {
+                  'name': folder.replace('___', '_').replace('__', '_'),
+                  'folder_name': folder,
+                  'display_name': folder.replace('___', '_').replace('__', '_').replace('_', ' ').title(),
+                  'description': f'Class: {folder.replace(\"___\", \"_\").replace(\"__\", \"_\")}'
+              }
+              for i, folder in enumerate(classes)
+          }
           config = {
               'leaf_type': leaf,
               'display_name': display,
+              'input_size': [224, 224],
+              'input_channels': 3,
+              'checkpoint_filename': f'{leaf}_student.pth',
               'data_dir': data_dir,
               'num_classes': len(classes),
+              'class_mapping_note': 'Class indices follow ImageFolder alphabetical sort of folder names (training convention).',
+              'classes': class_map,
               'class_names': classes,
+              'normalization': {
+                  'mean': [0.485, 0.456, 0.406],
+                  'std': [0.229, 0.224, 0.225]
+              }
           }
           os.makedirs('mlops_pipeline/configs', exist_ok=True)
           with open(f'mlops_pipeline/configs/{leaf}.json', 'w') as f:

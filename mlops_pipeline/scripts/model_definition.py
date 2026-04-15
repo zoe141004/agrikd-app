@@ -279,6 +279,10 @@ def load_leaf_config(config_path):
     if num_classes is None or not isinstance(num_classes, int) or num_classes < 2 or num_classes > 1000:
         raise ValueError(f"num_classes must be int in [2, 1000], got: {num_classes}")
     input_size = config.get("input_size")
+    if input_size is None:
+        logger.warning("[!] input_size missing in config; defaulting to [224, 224]")
+        config["input_size"] = [224, 224]
+        input_size = config["input_size"]
     # Accept both int (square) and [H, W] list/tuple
     if isinstance(input_size, (list, tuple)):
         if len(input_size) != 2 or not all(isinstance(v, int) and 32 <= v <= 1024 for v in input_size):
