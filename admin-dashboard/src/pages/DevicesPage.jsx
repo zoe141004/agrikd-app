@@ -12,6 +12,20 @@ const STATUS_COLORS = {
   decommissioned: { bg: '#fee2e2', text: '#dc2626' },
 }
 
+// If a device's DB status is 'online' but last_seen_at is stale, treat it as offline on the UI.
+const HEARTBEAT_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+
+function getEffectiveStatus(device) {
+  if (
+    device.status === 'online' &&
+    device.last_seen_at &&
+    Date.now() - new Date(device.last_seen_at).getTime() > HEARTBEAT_TIMEOUT_MS
+  ) {
+    return 'offline'
+  }
+  return device.status
+}
+
 export default function DevicesPage() {
   const { triggerRefresh, refreshKey, leafTypeOptions } = useData()
   const [tab, setTab] = useState('fleet')
@@ -57,6 +71,13 @@ export default function DevicesPage() {
     }
   }, [refreshKey])
 
+  // Re-render every 60s so stale heartbeat detection updates displayed statuses
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60_000)
+    return () => clearInterval(id)
+  }, [])
+
   useEffect(() => {
     if (!successMsg) return
     const t = setTimeout(() => setSuccessMsg(null), 4000)
@@ -64,158 +85,175 @@ export default function DevicesPage() {
   }, [successMsg])
 
   const loadData = async () => {
-    setLoading(true)
-    setError(null)
     try {
-      const [devRes, tokRes, usersRes, modelsRes] = await Promise.allSettled([
-        supabase.from('devices').select('*').order('created_at', { ascending: false }).limit(200),
-        supabase.from('provisioning_tokens').select('*').order('created_at', { ascending: false }).limit(50),
-        supabase.from('profiles').select('id, email, role').eq('role', 'user').order('email').limit(200),
-        supabase.from('model_registry').select('leaf_type, version, status').in('status', ['active', 'staging']).order('leaf_type').order('version', { ascending: false }),
+      setLoading(true)
+      setError(null)
+      const [devRes, tokRes, usersRes, modelsRes] = await Promise.all([
+        supabase.from('devices').select('*').order('created_at', { ascending: false }),
+        supabase.from('provisioning_tokens').select('*').order('created_at', { ascending: false }),
+        supabase.from('profiles').select('id, email, role'),
+        supabase.from('model_registry').select('leaf_type, version, status').in('status', ['active', 'staging']),
       ])
       if (!mountedRef.current) return
-      if (devRes.status === 'fulfilled' && devRes.value.data) setDevices(devRes.value.data)
-      else if (devRes.status === 'fulfilled' && devRes.value.error) setError(devRes.value.error.message)
-      if (tokRes.status === 'fulfilled' && tokRes.value.data) setTokens(tokRes.value.data)
-      if (usersRes.status === 'fulfilled' && usersRes.value.data) setUsers(usersRes.value.data)
+      if (devRes.error) throw devRes.error
+      if (tokRes.error) throw tokRes.error
+
+      setDevices(devRes.data || [])
+      setTokens(tokRes.data || [])
+      setUsers(usersRes.data || [])
+
       // Group model versions by leaf_type
-      if (modelsRes.status === 'fulfilled' && modelsRes.value.data) {
-        const grouped = {}
-        for (const m of modelsRes.value.data) {
-          if (!grouped[m.leaf_type]) grouped[m.leaf_type] = []
-          grouped[m.leaf_type].push({ version: m.version, status: m.status })
-        }
-        setModelVersions(grouped)
+      const mv = {}
+      for (const m of (modelsRes.data || [])) {
+        if (!mv[m.leaf_type]) mv[m.leaf_type] = []
+        mv[m.leaf_type].push({ version: m.version, status: m.status })
       }
+      setModelVersions(mv)
     } catch (err) {
       if (mountedRef.current) setError(err.message)
+    } finally {
+      if (mountedRef.current) setLoading(false)
     }
-    if (mountedRef.current) setLoading(false)
   }
 
-  // ── Fleet Tab ──────────────────────────────────────────────────
-
-  const openEdit = (d) => {
-    // Build model_versions form from desired_config or defaults
-    const mv = d.desired_config?.model_versions || {}
-    const formMv = {}
-    for (const lt of leafTypeOptions) {
-      formMv[lt] = mv[lt] || ''  // empty = "latest active"
-    }
+  const openEdit = (device) => {
+    setEditDevice(device)
     setForm({
-      device_name: d.device_name || '',
-      user_id: d.user_id || '',
-      mode: d.desired_config?.mode || 'manual',
-      interval_seconds: d.desired_config?.interval_seconds || 86400,
-      default_leaf_type: d.desired_config?.default_leaf_type || 'tomato',
-      model_versions: formMv,
+      device_name: device.device_name || '',
+      user_id: device.user_id || '',
+      mode: device.desired_config?.mode || 'periodic',
+      interval_seconds: device.desired_config?.interval_seconds ?? 1800,
+      default_leaf_type: device.desired_config?.default_leaf_type || '',
+      model_versions: device.desired_config?.model_versions
+        ? JSON.stringify(device.desired_config.model_versions)
+        : '{}',
     })
     setFormError(null)
-    setEditDevice(d)
   }
 
   const saveDevice = async () => {
+    if (!editDevice) return
     setSaving(true)
-    // Resolve model_versions: empty string means "latest active" — look up actual version
-    const mv = {}
-    for (const [lt, ver] of Object.entries(form.model_versions || {})) {
-      if (ver) {
-        mv[lt] = ver
-      } else {
-        // Resolve "Latest active" to the actual latest active version
-        const versions = modelVersions[lt] || []
-        const latestActive = versions.find(v => v.status === 'active')
-        if (latestActive) mv[lt] = latestActive.version
-      }
-    }
-    const update = {
-      device_name: form.device_name || null,
-      user_id: form.user_id || null,
-      status: form.user_id ? 'assigned' : 'unassigned',
-      desired_config: {
-        mode: form.mode,
-        interval_seconds: Number(form.interval_seconds),
-        default_leaf_type: form.default_leaf_type,
-        model_versions: mv,
-      },
-    }
-    const { error: err } = await supabase.from('devices').update(update).eq('id', editDevice.id)
-    setSaving(false)
-    if (!err) {
-      logAudit(supabase, 'device_updated', 'device', editDevice.id, { device_name: form.device_name, user_id: form.user_id })
-      setEditDevice(null); setFormError(null)
-      setSuccessMsg(`Device "${form.device_name || editDevice.hostname}" updated`)
-      loadData(); triggerRefresh()
-    } else {
-      setFormError(err.message)
-    }
-  }
+    setFormError(null)
 
-  const decommission = (d) => {
-    setConfirmAction({
-      title: 'Decommission Device',
-      message: `Decommission "${d.device_name || d.hostname}"? This will unassign the user and prevent the device from syncing.`,
-      danger: true,
-      confirmLabel: 'Decommission',
-      onConfirm: async () => {
-        setConfirmAction(null)
-        const { error: err } = await supabase.from('devices')
-          .update({ status: 'decommissioned', user_id: null })
-          .eq('id', d.id)
-        if (!err) {
-          logAudit(supabase, 'device_decommissioned', 'device', d.id, { hostname: d.hostname })
-          setSuccessMsg(`Device "${d.device_name || d.hostname}" decommissioned`)
-          loadData(); triggerRefresh()
-        } else setError(err.message)
-      }
-    })
-  }
-
-  // ── Tokens Tab ──────────────────────────────────────────────────
-
-  const generateToken = async () => {
-    setSaving(true)
-    setError(null)
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const userId = sessionData?.session?.user?.id
-      if (!userId) throw new Error('Not authenticated')
+      let parsedModelVersions = {}
+      try {
+        parsedModelVersions = JSON.parse(form.model_versions || '{}')
+      } catch {
+        setFormError('model_versions must be valid JSON, e.g. {"tomato":"v1.0.0"}')
+        setSaving(false)
+        return
+      }
 
-      const { data, error: err } = await supabase.from('provisioning_tokens')
-        .insert({ created_by: userId, label: tokenLabel || null })
-        .select()
-        .single()
+      // 1. Try RPC first (restricted column update via DB function)
+      const desiredConfig = {
+        mode: form.mode,
+        interval_seconds: Number(form.interval_seconds) || 1800,
+        default_leaf_type: form.default_leaf_type || null,
+        model_versions: parsedModelVersions,
+      }
+
+      const { error: rpcErr } = await supabase.rpc('update_device_config', {
+        p_device_id: editDevice.id,
+        p_desired_config: desiredConfig,
+        p_device_name: form.device_name || null,
+      })
+
+      if (rpcErr) {
+        console.warn('RPC update_device_config failed, falling back to direct update:', rpcErr.message)
+        // Fallback: direct update
+        const { error: updErr } = await supabase
+          .from('devices')
+          .update({
+            device_name: form.device_name || null,
+            desired_config: desiredConfig,
+          })
+          .eq('id', editDevice.id)
+        if (updErr) throw updErr
+      }
+
+      // 2. Handle user assignment change
+      const prevUserId = editDevice.user_id || null
+      const newUserId = form.user_id || null
+
+      if (prevUserId !== newUserId) {
+        const statusVal = newUserId ? 'assigned' : 'unassigned'
+        const { error: assignErr } = await supabase
+          .from('devices')
+          .update({ user_id: newUserId || null, status: statusVal })
+          .eq('id', editDevice.id)
+        if (assignErr) throw assignErr
+
+        await logAudit('device_assign', 'device', String(editDevice.id), {
+          before: { user_id: prevUserId },
+          after: { user_id: newUserId },
+        })
+      }
+
+      setEditDevice(null)
+      setSuccessMsg(`Device "${form.device_name || editDevice.hostname}" updated.`)
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setFormError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const decommissionDevice = async (device) => {
+    try {
+      const { error: err } = await supabase.from('devices').update({
+        status: 'decommissioned',
+        user_id: null,
+      }).eq('id', device.id)
       if (err) throw err
 
-      // Build agrikd:// token
-      const url = import.meta.env.VITE_SUPABASE_URL || supabase.supabaseUrl
-      const key = import.meta.env.VITE_SUPABASE_ANON_KEY || supabase.supabaseKey
-      const exp = Math.floor(new Date(data.expires_at).getTime() / 1000)
-      const payload = JSON.stringify({ url, key, tid: data.id, exp })
-      const encoded = btoa(payload)
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-      setGeneratedToken(`agrikd://${encoded}`)
-      setTokenLabel('')
-      loadData(); triggerRefresh()
-    } catch (err) { setError(err.message) }
-    setSaving(false)
+      await logAudit('device_decommission', 'device', String(device.id), {
+        hostname: device.hostname,
+        hw_id: device.hw_id,
+      })
+      setSuccessMsg(`Device "${device.device_name || device.hostname}" decommissioned.`)
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
-  const revokeToken = (t) => {
-    setConfirmAction({
-      title: 'Revoke Token',
-      message: `Revoke provisioning token "${t.label || t.id.slice(0, 8)}"? It will no longer be usable.`,
-      danger: true,
-      confirmLabel: 'Revoke',
-      onConfirm: async () => {
-        setConfirmAction(null)
-        const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', t.id)
-        if (!err) {
-          setSuccessMsg(`Token "${t.label || t.id.slice(0, 8)}" revoked`)
-          loadData(); triggerRefresh()
-        } else setError(err.message)
-      }
-    })
+  const createToken = async () => {
+    try {
+      const id = crypto.randomUUID()
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      const { error: err } = await supabase.from('provisioning_tokens').insert({
+        id,
+        label: tokenLabel || 'Unnamed token',
+        expires_at: expiresAt,
+      })
+      if (err) throw err
+
+      await logAudit('token_create', 'provisioning_token', id, { label: tokenLabel, expires_at: expiresAt })
+      setGeneratedToken(id)
+      setTokenLabel('')
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const deleteToken = async (tok) => {
+    try {
+      const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', tok.id)
+      if (err) throw err
+      await logAudit('token_delete', 'provisioning_token', tok.id, { label: tok.label })
+      setSuccessMsg('Token deleted.')
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   const filteredDevices = devices.filter(d =>
@@ -227,9 +265,9 @@ export default function DevicesPage() {
 
   const statCounts = {
     total: devices.length,
-    online: devices.filter(d => d.status === 'online').length,
-    assigned: devices.filter(d => ['online', 'assigned', 'offline'].includes(d.status)).length,
-    unassigned: devices.filter(d => d.status === 'unassigned').length,
+    online: devices.filter(d => getEffectiveStatus(d) === 'online').length,
+    assigned: devices.filter(d => ['online', 'assigned', 'offline'].includes(getEffectiveStatus(d))).length,
+    unassigned: devices.filter(d => getEffectiveStatus(d) === 'unassigned').length,
   }
 
   if (loading) return (
@@ -321,7 +359,8 @@ export default function DevicesPage() {
                 </thead>
                 <tbody>
                   {filteredDevices.map(d => {
-                    const sc = STATUS_COLORS[d.status] || STATUS_COLORS.unassigned
+                    const effectiveStatus = getEffectiveStatus(d)
+                    const sc = STATUS_COLORS[effectiveStatus] || STATUS_COLORS.unassigned
                     const owner = users.find(u => u.id === d.user_id)
                     const synced = (() => {
                       if (!d.desired_config || !d.reported_config) return false
@@ -342,7 +381,7 @@ export default function DevicesPage() {
                         <td style={{ fontWeight: 500 }}>{d.device_name || '—'}</td>
                         <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.hostname}</td>
                         <td>
-                          <span className="badge" style={{ background: sc.bg, color: sc.text }}>{d.status}</span>
+                          <span className="badge" style={{ background: sc.bg, color: sc.text }}>{effectiveStatus}</span>
                         </td>
                         <td style={{ fontSize: 12 }}>{owner?.email || (d.user_id ? d.user_id.slice(0, 8) : '—')}</td>
                         <td style={{ fontSize: 12, color: '#64748b' }}>
@@ -358,16 +397,45 @@ export default function DevicesPage() {
                             const entries = Object.entries(mv)
                             if (entries.length === 0) return <span style={{ color: '#94a3b8' }}>—</span>
                             return entries.map(([lt, v]) => {
-                              const statusColor = es[lt] === 'ready' ? '#16a34a' : es[lt] === 'building' ? '#d97706' : es[lt] === 'error' ? '#dc2626' : '#64748b'
-                              return <div key={lt}><strong>{lt}</strong>: v{v} <span style={{ color: statusColor }}>{es[lt] ? `(${es[lt]})` : ''}</span></div>
+                              const engineInfo = es[lt]
+                              let engineLabel = ''
+                              let engineColor = '#64748b'
+                              if (engineInfo) {
+                                if (engineInfo.status === 'ready') {
+                                  engineLabel = ''
+                                } else if (engineInfo.status === 'building') {
+                                  engineLabel = ' (building)'
+                                  engineColor = '#d97706'
+                                } else if (engineInfo.status === 'error') {
+                                  engineLabel = ' (error)'
+                                  engineColor = '#dc2626'
+                                } else if (engineInfo.status === 'downloading') {
+                                  engineLabel = ' (downloading)'
+                                  engineColor = '#0284c7'
+                                }
+                              }
+                              return (
+                                <div key={lt} style={{ lineHeight: 1.4 }}>
+                                  <strong>{lt}</strong>: {v}
+                                  {engineLabel && <span style={{ color: engineColor, fontSize: 10 }}>{engineLabel}</span>}
+                                </div>
+                              )
                             })
                           })()}
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button className="btn" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => openEdit(d)}>Edit</button>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn btn-sm" onClick={() => openEdit(d)}>Edit</button>
                             {d.status !== 'decommissioned' && (
-                              <button className="btn" style={{ padding: '4px 8px', fontSize: 11, color: '#dc2626' }} onClick={() => decommission(d)}>Decom</button>
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
+                                onClick={() => setConfirmAction({
+                                  title: 'Decommission Device',
+                                  message: `Are you sure you want to decommission "${d.device_name || d.hostname}"? This will unassign the device and mark it as decommissioned.`,
+                                  onConfirm: () => decommissionDevice(d),
+                                })}
+                              >Decom</button>
                             )}
                           </div>
                         </td>
@@ -375,7 +443,7 @@ export default function DevicesPage() {
                     )
                   })}
                   {filteredDevices.length === 0 && (
-                    <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No devices registered yet</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: 32 }}>No devices found</td></tr>
                   )}
                 </tbody>
               </table>
@@ -386,87 +454,81 @@ export default function DevicesPage() {
 
       {tab === 'tokens' && (
         <>
-          {/* Generate Token */}
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header">
-              <div>
-                <div className="card-label">Provisioning</div>
-                <div className="card-title">Generate New Token</div>
-              </div>
+          {/* Create Token */}
+          <div className="card" style={{ marginBottom: 20, padding: 20 }}>
+            <h3 style={{ margin: '0 0 12px' }}>Create Provisioning Token</h3>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                className="input"
+                placeholder="Label (e.g., Lab Room A)"
+                value={tokenLabel}
+                onChange={e => setTokenLabel(e.target.value)}
+                style={{ maxWidth: 280 }}
+              />
+              <button className="btn btn-primary" onClick={createToken}>Generate Token</button>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '0 0 16px' }}>
-              <div style={{ flex: 1, maxWidth: 300 }}>
-                <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Label (optional)</label>
-                <input
-                  className="input"
-                  placeholder='e.g. "Tomato Garden #3"'
-                  value={tokenLabel}
-                  onChange={e => setTokenLabel(e.target.value)}
-                />
-              </div>
-              <button className="btn btn-primary" onClick={generateToken} disabled={saving}>
-                {saving ? 'Generating...' : 'Generate Token'}
-              </button>
-            </div>
-
             {generatedToken && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 16, marginBottom: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', marginBottom: 8 }}>
-                  Token Generated — Copy and send to technician
+              <div className="alert alert-success" style={{ marginTop: 12 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <div>
+                  <strong>Token created!</strong>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, marginTop: 4, wordBreak: 'break-all' }}>{generatedToken}</div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Copy this token — it won't be shown again. Expires in 24 hours.</div>
                 </div>
-                <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', background: 'white', padding: 12, borderRadius: 6, border: '1px solid #dcfce7', marginBottom: 8 }}>
-                  {generatedToken}
-                </div>
-                <button className="btn" style={{ fontSize: 12 }} onClick={() => { navigator.clipboard.writeText(generatedToken); }}>
-                  Copy to Clipboard
-                </button>
               </div>
             )}
           </div>
 
           {/* Tokens table */}
           <div className="card">
-            <div className="card-header">
-              <div>
-                <div className="card-label">History</div>
-                <div className="card-title">Provisioning Tokens</div>
-              </div>
-            </div>
             <div className="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th>Token ID</th>
                     <th>Label</th>
-                    <th>Status</th>
+                    <th>Created</th>
                     <th>Expires</th>
+                    <th>Status</th>
                     <th>Used By</th>
                     <th style={{ width: 80 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {tokens.map(t => {
-                    const used = !!t.used_at
-                    const expired = !used && new Date(t.expires_at) < new Date()
-                    const statusLabel = used ? 'Used' : expired ? 'Expired' : 'Active'
-                    const statusColor = used ? '#16a34a' : expired ? '#dc2626' : '#0284c7'
+                  {tokens.map(tok => {
+                    const isUsed = !!tok.used_at
+                    const isExpired = !isUsed && new Date(tok.expires_at) < new Date()
+                    const statusLabel = isUsed ? 'Used' : isExpired ? 'Expired' : 'Available'
+                    const statusColor = isUsed ? '#16a34a' : isExpired ? '#dc2626' : '#0284c7'
                     return (
-                      <tr key={t.id}>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.id.slice(0, 8)}...</td>
-                        <td>{t.label || '—'}</td>
-                        <td><span className="badge" style={{ background: `${statusColor}15`, color: statusColor }}>{statusLabel}</span></td>
-                        <td style={{ fontSize: 12, color: '#64748b' }}>{new Date(t.expires_at).toLocaleString()}</td>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.used_by_hw_id ? t.used_by_hw_id.slice(0, 12) + '...' : '—'}</td>
+                      <tr key={tok.id}>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{tok.id}</td>
+                        <td>{tok.label || '—'}</td>
+                        <td style={{ fontSize: 12, color: '#64748b' }}>{new Date(tok.created_at).toLocaleString()}</td>
+                        <td style={{ fontSize: 12, color: '#64748b' }}>{new Date(tok.expires_at).toLocaleString()}</td>
                         <td>
-                          {!used && !expired && (
-                            <button className="btn" style={{ padding: '4px 8px', fontSize: 11, color: '#dc2626' }} onClick={() => revokeToken(t)}>Revoke</button>
+                          <span className="badge" style={{ background: isUsed ? '#dcfce7' : isExpired ? '#fee2e2' : '#e0f2fe', color: statusColor }}>{statusLabel}</span>
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{tok.used_by_hw_id || '—'}</td>
+                        <td>
+                          {!isUsed && (
+                            <button
+                              className="btn btn-sm"
+                              style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
+                              onClick={() => setConfirmAction({
+                                title: 'Delete Token',
+                                message: `Delete token "${tok.label || tok.id.slice(0,8)}"? This cannot be undone.`,
+                                onConfirm: () => deleteToken(tok),
+                              })}
+                            >Del</button>
                           )}
                         </td>
                       </tr>
                     )
                   })}
                   {tokens.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No tokens generated yet</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', color: '#94a3b8', padding: 32 }}>No provisioning tokens</td></tr>
                   )}
                 </tbody>
               </table>
@@ -478,136 +540,84 @@ export default function DevicesPage() {
       {/* Edit Device Modal */}
       {editDevice && (
         <div className="modal-overlay" onClick={() => setEditDevice(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <div className="modal-header">
-              <h3>Edit Device: {editDevice.hostname}</h3>
-              <button className="btn" onClick={() => setEditDevice(null)} style={{ padding: '4px 8px' }}>×</button>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h3 style={{ margin: '0 0 16px' }}>Edit Device — {editDevice.hostname}</h3>
+            {formError && (
+              <div className="alert alert-error" style={{ marginBottom: 12 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+                <div style={{ flex: 1 }}>{formError}</div>
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label">Device Name</label>
+              <input className="input" value={form.device_name} onChange={e => setForm(f => ({ ...f, device_name: e.target.value }))} />
             </div>
-            <div className="modal-body">
-              <div style={{ marginBottom: 12 }}>
-                <label className="form-label">Device Name</label>
-                <input
-                  className="input"
-                  value={form.device_name}
-                  onChange={e => setForm(f => ({ ...f, device_name: e.target.value }))}
-                  placeholder="e.g. Tomato Garden #3"
-                />
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label className="form-label">Assign User</label>
-                <select
-                  className="input"
-                  value={form.user_id}
-                  onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}
-                >
-                  <option value="">Unassigned</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
-                </select>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label className="form-label">Capture Mode</label>
-                <select
-                  className="input"
-                  value={form.mode}
-                  onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}
-                >
-                  <option value="manual">Manual</option>
-                  <option value="periodic">Periodic</option>
-                </select>
-              </div>
-              {form.mode === 'periodic' && (
-                <div style={{ marginBottom: 12 }}>
-                  <label className="form-label">Interval (seconds)</label>
-                  <select
-                    className="input"
-                    value={form.interval_seconds}
-                    onChange={e => setForm(f => ({ ...f, interval_seconds: Number(e.target.value) }))}
-                  >
-                    <option value={60}>1 minute</option>
-                    <option value={300}>5 minutes</option>
-                    <option value={900}>15 minutes</option>
-                    <option value={1800}>30 minutes</option>
-                    <option value={3600}>1 hour</option>
-                    <option value={21600}>6 hours</option>
-                    <option value={86400}>24 hours</option>
-                  </select>
+            <div className="form-group">
+              <label className="form-label">Assign to User</label>
+              <select className="input" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
+                <option value="">— Unassigned —</option>
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>{u.email} ({u.role})</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Operating Mode</label>
+              <select className="input" value={form.mode} onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}>
+                <option value="periodic">Periodic</option>
+                <option value="manual">Manual</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Capture Interval (seconds)</label>
+              <input className="input" type="number" min={60} max={86400} value={form.interval_seconds} onChange={e => setForm(f => ({ ...f, interval_seconds: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Default Leaf Type</label>
+              <select className="input" value={form.default_leaf_type} onChange={e => setForm(f => ({ ...f, default_leaf_type: e.target.value }))}>
+                <option value="">— None —</option>
+                {(leafTypeOptions || []).map(lt => (
+                  <option key={lt} value={lt}>{lt}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Model Versions (JSON)</label>
+              <textarea
+                className="input"
+                rows={3}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+                value={form.model_versions}
+                onChange={e => setForm(f => ({ ...f, model_versions: e.target.value }))}
+                placeholder='{"tomato":"v1.0.0","burmese_grape_leaf":"v1.0.0"}'
+              />
+              {Object.keys(modelVersions).length > 0 && (
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                  Available: {Object.entries(modelVersions).map(([lt, vs]) =>
+                    `${lt}: ${vs.map(v => `${v.version} (${v.status})`).join(', ')}`
+                  ).join(' | ')}
                 </div>
               )}
-              <div style={{ marginBottom: 12 }}>
-                <label className="form-label">Default Leaf Type</label>
-                <select
-                  className="form-input"
-                  value={form.default_leaf_type}
-                  onChange={e => setForm(f => ({ ...f, default_leaf_type: e.target.value }))}
-                >
-                  {leafTypeOptions.map(lt => <option key={lt} value={lt}>{lt.replace(/_/g, ' ')}</option>)}
-                  {!leafTypeOptions.includes(form.default_leaf_type) && form.default_leaf_type && (
-                    <option value={form.default_leaf_type}>{form.default_leaf_type}</option>
-                  )}
-                </select>
-              </div>
-              {/* Model Version Assignment */}
-              <div style={{ marginBottom: 12 }}>
-                <label className="form-label">Model Versions</label>
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 8 }}>
-                  {leafTypeOptions.map(lt => {
-                    const versions = modelVersions[lt] || []
-                    return (
-                      <div key={lt} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ minWidth: 140, fontSize: 13 }}>{lt.replace(/_/g, ' ')}</span>
-                        <select
-                          className="input"
-                          style={{ flex: 1, fontSize: 12 }}
-                          value={(form.model_versions || {})[lt] || ''}
-                          onChange={e => setForm(f => ({
-                            ...f,
-                            model_versions: { ...f.model_versions, [lt]: e.target.value }
-                          }))}
-                        >
-                          <option value="">Latest active</option>
-                          {versions.map(v => (
-                            <option key={v.version} value={v.version}>
-                              v{v.version} ({v.status})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )
-                  })}
-                  {leafTypeOptions.length === 0 && (
-                    <span style={{ color: '#94a3b8', fontSize: 12 }}>No models available</span>
-                  )}
-                </div>
-              </div>
-              {/* Engine Status */}
-              {editDevice.reported_config?.engine_status && (
-                <div style={{ marginBottom: 12, padding: 8, background: '#fffbeb', borderRadius: 6, fontSize: 12 }}>
-                  <strong>Engine Status:</strong>{' '}
-                  {Object.entries(editDevice.reported_config?.engine_status || {}).map(([lt, s]) => (
-                    <span key={lt} style={{ marginRight: 12 }}>
-                      {lt}: <strong style={{ color: s === 'ready' ? '#16a34a' : s === 'building' ? '#d97706' : '#dc2626' }}>{s}</strong>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div style={{ marginTop: 8, padding: 8, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#64748b' }}>
-                <strong>HW ID:</strong> {editDevice.hw_id}<br/>
-                <strong>Platform:</strong> {editDevice.hw_info?.platform || '—'}<br/>
-                <strong>Registered:</strong> {new Date(editDevice.created_at).toLocaleString()}
-              </div>
             </div>
-            <div className="modal-footer">
-              {formError && <div className="alert alert-danger" style={{ marginBottom: 8, fontSize: 13 }}>{formError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
               <button className="btn" onClick={() => setEditDevice(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveDevice} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <ConfirmDialog open={!!confirmAction} {...(confirmAction || {})} onCancel={() => setConfirmAction(null)} />
+      {/* Confirm dialog */}
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.title}
+          message={confirmAction.message}
+          onConfirm={() => { confirmAction.onConfirm(); setConfirmAction(null) }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
     </>
   )
 }
