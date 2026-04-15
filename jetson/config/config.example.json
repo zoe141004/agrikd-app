@@ -55,5 +55,8 @@
         "file": "logs/agrikd.log",
         "max_bytes": 104857600,
         "backup_count": 5
+    },
+    "gcs": {
+        "credentials_path": "config/secrets/gcs-readonly.json"
     }
 }
