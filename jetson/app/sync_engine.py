@@ -467,6 +467,10 @@ class SyncEngine:
                         logger.error("Engine SHA256 mismatch for %s v%s", leaf_type, version)
                         self._engine_status[leaf_type] = "error"
                         return
+
+                # Check if benchmark already exists — skip validation if so
+                has_benchmark = bool(engine_info[0].get("benchmark_json"))
+                needs_validation = not has_benchmark
             else:
                 # Step 2: Get ONNX URL for this specific version
                 # First try exact version match via REST query
@@ -508,6 +512,8 @@ class SyncEngine:
                 engine_sha = self._sha256_file(new_engine_path)
                 self._upload_engine_cache(leaf_type, version, hw_tag, new_engine_path, engine_sha)
 
+                needs_validation = True  # New engine always needs benchmark
+
             # Step 4: Hot-swap inference engine
             logger.info("Hot-swapping engine: %s v%s", leaf_type, version)
             old_engine_path = self._models_config.get(leaf_type, {}).get("engine_path", "")
@@ -541,6 +547,10 @@ class SyncEngine:
             self._engine_status[leaf_type] = "ready"
             logger.info("Engine update complete: %s v%s", leaf_type, version)
 
+            # Step 7: On-device validation (non-blocking, non-fatal)
+            if needs_validation:
+                self._run_engine_validation(leaf_type, version, hw_tag, new_engine_path)
+
             # Re-report config so dashboard sees updated engine_status
             self._re_report_engine_status()
 
@@ -548,6 +558,82 @@ class SyncEngine:
             logger.error("Engine build failed for %s v%s: %s", leaf_type, version, e)
             self._engine_status[leaf_type] = "error"
             self._re_report_engine_status()
+
+    def _run_engine_validation(self, leaf_type, version, hw_tag, engine_path):
+        """Run on-device TensorRT validation: DVC pull → eval → upload → cleanup.
+
+        Non-fatal: if validation fails, the engine is still usable.
+        """
+        try:
+            config = self._config
+            gcs_config = config.get("gcs", {})
+            if not gcs_config.get("credentials_path"):
+                logger.info("GCS credentials not configured — skipping engine validation")
+                return
+
+            logger.info("Starting engine validation: %s v%s (%s)", leaf_type, version, hw_tag)
+
+            # Import validation functions
+            import sys as _sys
+            scripts_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "scripts"
+            )
+            if scripts_dir not in _sys.path:
+                _sys.path.insert(0, scripts_dir)
+
+            from validate_engine import (
+                setup_gcs_credentials,
+                dvc_pull_dataset,
+                load_test_images,
+                run_tensorrt_inference,
+                compute_metrics,
+                cleanup_dataset,
+            )
+            from engine_builder import _upload_engine_benchmark, _upload_model_benchmark
+
+            num_classes = self._models_config.get(leaf_type, {}).get("num_classes")
+            input_size = config.get("inference", {}).get("input_size", 224)
+            repo_root = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", ".."
+            )
+            base_url = config["sync"]["supabase_url"]
+            key = config["sync"]["supabase_key"]
+
+            if not num_classes:
+                logger.warning("num_classes unknown for %s — skipping validation", leaf_type)
+                return
+
+            data_dir = None
+            try:
+                setup_gcs_credentials(config)
+                data_dir = dvc_pull_dataset(leaf_type, repo_root)
+                images, labels, class_names = load_test_images(data_dir, input_size)
+                logger.info("Loaded %d test images for validation", len(images))
+
+                predictions, probs, latencies = run_tensorrt_inference(
+                    engine_path, images, num_classes
+                )
+                benchmark = compute_metrics(
+                    predictions, labels, probs, latencies, engine_path, class_names
+                )
+                benchmark["hardware_tag"] = hw_tag
+
+                _upload_engine_benchmark(base_url, key, leaf_type, version, hw_tag, benchmark)
+                _upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
+
+                logger.info(
+                    "Validation done: %s v%s — acc=%.2f%% fps=%.1f",
+                    leaf_type, version,
+                    benchmark.get("accuracy", 0),
+                    benchmark.get("fps", 0),
+                )
+            finally:
+                if data_dir:
+                    cleanup_dataset(data_dir)
+                os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+
+        except Exception as e:
+            logger.error("Engine validation failed (non-fatal) for %s: %s", leaf_type, e)
 
     def _re_report_engine_status(self):
         """Re-send reported_config with current engine_status to dashboard."""
