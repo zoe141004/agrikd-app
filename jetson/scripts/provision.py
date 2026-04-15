@@ -313,8 +313,10 @@ def provision(token_data, force=False):
 
     # 3. Generate config.json
     print("[3/4] Generating config.json...")
-    config_path = os.path.join("config", "config.json")
-    template_path = os.path.join("config", "config.example.json")
+    # Use absolute paths based on install directory (parent of scripts/)
+    install_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(install_dir, "config", "config.json")
+    template_path = os.path.join(install_dir, "config", "config.example.json")
 
     if os.path.exists(config_path):
         # Merge: only update sync section, keep existing config
@@ -364,7 +366,7 @@ def provision(token_data, force=False):
             print("  [FALLBACK] Using AGRIKD_GCS_KEY_DATA env var")
 
     if gcs_key_data:
-        gcs_dir = os.path.join("config", "secrets")
+        gcs_dir = os.path.join(install_dir, "config", "secrets")
         os.makedirs(gcs_dir, exist_ok=True)
         gcs_key_path = os.path.join(gcs_dir, "gcs-readonly.json")
         with open(gcs_key_path, "w") as f:
@@ -384,7 +386,7 @@ def provision(token_data, force=False):
     # 4. Write device_state.json
     print("[4/4] Writing device state...")
     from datetime import datetime, timezone
-    state_path = os.path.join("data", "device_state.json")
+    state_path = os.path.join(install_dir, "data", "device_state.json")
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
     state = {

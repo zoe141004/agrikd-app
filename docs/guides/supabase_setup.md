@@ -60,6 +60,8 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 | 18 | `database/migrations/018_provision_device_rpc.sql` | Atomic provision_device RPC (SECURITY DEFINER): token validation + device registration + token claim in single transaction |
 | 19 | `database/migrations/019_engine_upload_policy.sql` | Storage policy for TensorRT engine uploads |
 | 20 | `database/migrations/020_device_sync_rpcs.sql` | Device sync RPC functions: device_poll_config, device_ack_config, device_heartbeat, device_push_predictions (replaces header-based RLS) |
+| 21 | `database/migrations/021_tensorrt_benchmark_format.sql` | Adds `tensorrt_fp16` to `model_benchmarks` format CHECK constraint for Jetson on-device validation results |
+| 22 | `database/migrations/022_system_secrets.sql` | `system_secrets` key-value table + `get_system_secret` RPC for credential distribution to devices |
 
 ### Migration 012: Device Management
 - `provisioning_tokens` table — one-time tokens for Zero-Touch Provisioning
@@ -84,7 +86,19 @@ Open **Dashboard → SQL Editor → New query** and run these files in order:
 - Required by the `dataset-delete.yml` GitHub Actions workflow and the admin dashboard cascade delete feature
 - File: `database/migrations/017_dataset_delete.sql`
 
-All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, and `CREATE OR REPLACE`.
+### Migration 021: TensorRT Benchmark Format
+- Adds `tensorrt_fp16` to the `model_benchmarks.format` CHECK constraint
+- Allows Jetson on-device validation results to be stored alongside CI pipeline benchmarks
+- File: `database/migrations/021_tensorrt_benchmark_format.sql`
+
+### Migration 022: System Secrets
+- `system_secrets` table — admin-managed key-value store for operational secrets
+- `get_system_secret(device_token, key)` RPC — device-authenticated secret retrieval
+- RLS: admin-only direct access; devices use RPC (validated by device_token)
+- Primary use case: GCS service account credentials for DVC dataset access
+- File: `database/migrations/022_system_secrets.sql`
+
+All scripts are idempotent (safe to re-run): they use `IF NOT EXISTS`, `DROP IF EXISTS`, `DROP POLICY IF EXISTS`, and `CREATE OR REPLACE`.
 
 ## 4. Verify Setup
 
@@ -199,7 +213,7 @@ This generates:
 
 | Problem | Solution |
 |---------|----------|
-| "relation does not exist" | Run migrations in order: 001 → 002 → ... → 020 |
+| "relation does not exist" | Run migrations in order: 001 → 002 → ... → 022 |
 | "function is_admin_role() does not exist" | Run 002_functions_triggers.sql (creates the function referenced by 003_rls_policies.sql) |
 | RLS blocks all queries | Ensure the user has a profile row. Check `handle_new_user()` trigger exists. |
 | Storage upload fails | Check bucket policies in 005_storage.sql. Verify bucket exists. |

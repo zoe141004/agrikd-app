@@ -1039,9 +1039,23 @@ sudo systemctl restart agrikd
 
 ### 9.3 GCS Service Account Key
 
-The service account key file is gitignored and must never be committed. If
-this key was previously exposed in git history, rotate it immediately in the
-Google Cloud Console and replace the file on all deployed Jetson devices.
+The GCS service account key enables DVC dataset access for on-device TensorRT
+validation. Credentials are distributed automatically via the Supabase
+`system_secrets` table:
+
+1. **Dashboard upload:** Admin uploads the read-only GCS SA JSON via
+   Settings → Integrations. The key is stored in `system_secrets` with key
+   `gcs_readonly_key`.
+2. **Auto-fetch:** During provisioning or first engine validation, the device
+   calls `get_system_secret(device_token, 'gcs_readonly_key')` and saves the
+   result to `config/secrets/gcs-readonly.json` (mode 0600).
+3. **Env var fallback:** Set `AGRIKD_GCS_KEY_DATA` with the raw JSON content
+   for manual provisioning scenarios.
+
+The key file is gitignored and must never be committed. If a key was
+previously exposed, rotate it immediately in the Google Cloud Console and
+re-upload the new key via the admin dashboard — all devices will pick up the
+new credential on next sync.
 
 ### 9.4 Monitoring Sync Status
 

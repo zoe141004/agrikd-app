@@ -96,7 +96,7 @@ export default function SettingsPage() {
         updated_by: user?.id || null,
       }, { onConflict: 'key' })
       if (error) throw error
-      await logAudit('update_gcs_key', 'system_secrets', null, { action: 'uploaded GCS service account key' })
+      await logAudit(supabase, 'update_gcs_key', 'system_secrets', null, { action: 'uploaded GCS service account key' })
       setGcsStatus('configured')
       setGcsKey('')
       setGcsMsg({ type: 'success', text: 'GCS key saved — Jetson devices will auto-fetch on next provisioning or sync' })
@@ -113,7 +113,7 @@ export default function SettingsPage() {
     try {
       const { error } = await supabase.from('system_secrets').delete().eq('key', 'gcs_readonly_key')
       if (error) throw error
-      await logAudit('delete_gcs_key', 'system_secrets', null, { action: 'removed GCS service account key' })
+      await logAudit(supabase, 'delete_gcs_key', 'system_secrets', null, { action: 'removed GCS service account key' })
       setGcsStatus('not_configured')
       setGcsMsg({ type: 'success', text: 'GCS key removed' })
     } catch (err) {
