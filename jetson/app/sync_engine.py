@@ -489,7 +489,7 @@ class SyncEngine:
                     return
 
                 # Step 3: Download ONNX and build engine
-                from .engine_builder import build_engine
+                from engine_builder import build_engine
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
@@ -601,7 +601,15 @@ class SyncEngine:
                 compute_metrics,
                 cleanup_dataset,
             )
-            from engine_builder import _upload_engine_benchmark, _upload_model_benchmark
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location(
+                "scripts_engine_builder",
+                os.path.join(scripts_dir, "engine_builder.py"),
+            )
+            _seb = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_seb)
+            _upload_engine_benchmark = _seb._upload_engine_benchmark
+            _upload_model_benchmark = _seb._upload_model_benchmark
 
             num_classes = self._models_config.get(leaf_type, {}).get("num_classes")
             input_size = config.get("inference", {}).get("input_size", 224)
@@ -718,12 +726,29 @@ class SyncEngine:
             logger.warning("RPC %s error: %s", fn_name, e)
         return None
 
+    def _validate_download_url(self, url):
+        """Validate download URL points to configured Supabase host (SSRF prevention)."""
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+            allowed_host = urlparse(self.supabase_url).hostname
+        except Exception as exc:
+            raise ValueError(f"Malformed URL: {url[:80]}") from exc
+        if parsed.scheme != "https":
+            raise ValueError(f"Only HTTPS download URLs are allowed: {url[:80]}")
+        if parsed.hostname != allowed_host:
+            raise ValueError(
+                f"Download URL host '{parsed.hostname}' does not match "
+                f"configured Supabase host '{allowed_host}'"
+            )
+
     def _download_file(self, url, dest_path):
         """Download file from Supabase Storage with atomic write.
 
         Downloads to a temp file first, then renames on success to
         prevent partial/corrupted files if interrupted (T2-02).
         """
+        self._validate_download_url(url)
         tmp_path = dest_path + ".tmp"
         try:
             resp = self._session.get(
@@ -814,16 +839,17 @@ class SyncEngine:
                     "Authorization": f"Bearer {self.supabase_key}",
                     "Content-Type": "application/octet-stream",
                     "Content-Length": str(file_size),
+                    "x-upsert": "true",
                 },
                 data=_file_reader(), timeout=(10, 300), verify=True,
             )
             if resp.status_code in (200, 201):
-                # Register in model_engines table
+                # Register in model_engines table (upsert for re-builds)
                 engine_url = f"{self.supabase_url}/storage/v1/object/public/models/{storage_path}"
                 device_id = self._device_state.get("device_id") if self._device_state else None
                 self._session.post(
                     f"{self.supabase_url}/rest/v1/model_engines",
-                    headers={**self._get_headers(), "Prefer": "return=minimal"},
+                    headers={**self._get_headers(), "Prefer": "return=minimal,resolution=merge-duplicates"},
                     json={
                         "leaf_type": leaf_type,
                         "version": version,

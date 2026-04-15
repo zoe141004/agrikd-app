@@ -186,9 +186,9 @@ def load_test_images(data_dir, input_size=224):
 
     log.info("Test split: %d images out of %d total", len(test_idx), len(all_labels))
 
-    # Preprocess test images
+    # Preprocess test images — track valid labels to stay aligned
     images = []
-    labels = all_labels[test_idx]
+    valid_labels = []
     for idx in test_idx:
         img = cv2.imread(all_paths[idx])
         if img is None:
@@ -200,8 +200,12 @@ def load_test_images(data_dir, input_size=224):
         img = (img - IMAGENET_MEAN) / IMAGENET_STD
         img = np.transpose(img, (2, 0, 1))  # HWC → CHW
         images.append(img[np.newaxis, ...])  # Add batch dim: (1,3,H,W)
+        valid_labels.append(all_labels[idx])
 
-    return images, labels, class_names
+    if not images:
+        raise RuntimeError(f"No test images loaded successfully from {data_dir}")
+
+    return images, np.array(valid_labels), class_names
 
 
 def run_tensorrt_inference(engine_path, images, num_classes):

@@ -5,6 +5,9 @@
 Description=AgriKD Edge Inference Service
 After=network-online.target
 Wants=network-online.target
+# Crash loop protection: max 5 restarts in 300 seconds
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -18,18 +21,14 @@ StandardError=journal
 SyslogIdentifier=agrikd
 Environment=PYTHONUNBUFFERED=1
 
-# Crash loop protection: max 5 restarts in 300 seconds
-StartLimitBurst=5
-StartLimitIntervalSec=300
-
 # Resource limits
-MemoryMax=512M
+MemoryMax=1G
 CPUQuota=80%
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

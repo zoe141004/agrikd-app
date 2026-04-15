@@ -608,7 +608,7 @@ def main():
         if args.onnx is None:
             args.onnx = cfg["_paths"]["onnx"]
         if args.tflite is None:
-            args.tflite = cfg["_paths"]["tflite"]
+            args.tflite = cfg["_paths"].get("tflite_float16") or cfg["_paths"]["tflite"]
         if args.num_classes is None:
             args.num_classes = cfg["num_classes"]
         if args.output_dir is None:

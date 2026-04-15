@@ -41,7 +41,8 @@ def convert_pth_to_tflite_aiedge(
     checkpoint_path: str,
     output_path: str,
     num_classes: int,
-    quantize: str = "none"
+    quantize: str = "none",
+    input_size: int = 224,
 ):
     logger.info(f"\n{'='*60}")
     logger.info(f"  AgriKD: PyTorch -> TFLite (ai-edge-torch)")
@@ -57,8 +58,8 @@ def convert_pth_to_tflite_aiedge(
     model = load_student_from_checkpoint(checkpoint_path, num_classes=num_classes)
     model.eval()
     
-    # 2. Create sample input (1 image, 3 channels, 224x224)
-    sample_input = (torch.randn(1, 3, 224, 224),)
+    # 2. Create sample input matching config input_size
+    sample_input = (torch.randn(1, 3, input_size, input_size),)
     
     # 3. Handle Quantization Configuration
     quant_config = None
@@ -123,8 +124,13 @@ if __name__ == "__main__":
             args.num_classes = cfg["num_classes"]
         if args.output is None:
             args.output = cfg["_paths"]["tflite"]
+        input_size = cfg["input_size"]
+        if isinstance(input_size, list):
+            input_size = input_size[0]
+    else:
+        input_size = 224
 
     if not args.checkpoint or args.num_classes is None or not args.output:
         parser.error("Either --config or all of --checkpoint, --num-classes, --output are required")
 
-    convert_pth_to_tflite_aiedge(args.checkpoint, args.output, args.num_classes, args.quantize)
+    convert_pth_to_tflite_aiedge(args.checkpoint, args.output, args.num_classes, args.quantize, input_size)

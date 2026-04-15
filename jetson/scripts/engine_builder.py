@@ -201,7 +201,6 @@ def build_engine(onnx_path, engine_path):
         f"--onnx={onnx_path}",
         f"--saveEngine={engine_path}",
         "--fp16",
-        "--workspace=1024",
     ]
     log.info("Building engine: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)

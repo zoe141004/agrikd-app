@@ -50,7 +50,7 @@
 #  The repo clone is only needed during setup; it is not modified.
 # ============================================================
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -283,7 +283,7 @@ if [ ! -f "$CFG" ]; then
 }
 MINCFG
     chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
-    chmod 644 "$CFG"
+    chmod 640 "$CFG"
 fi
 
 # Write a temp Python script (avoids heredoc + env var issues entirely)
@@ -372,7 +372,7 @@ rm -f "$INJECT_SCRIPT"
 
 # Fix ownership after writing (script runs as root via sudo)
 chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
-chmod 644 "$CFG" 2>/dev/null || true
+chmod 640 "$CFG" 2>/dev/null || true
 
 if [ $INJECT_RESULT -eq 0 ]; then
     echo ""
@@ -401,7 +401,7 @@ with open(sys.argv[1], 'w') as f:
 " "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
                 echo "  [OK] Credentials saved."
                 chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
-                chmod 644 "$CFG" 2>/dev/null || true
+                chmod 640 "$CFG" 2>/dev/null || true
             else
                 echo "  [WARN] Incomplete — skipping."
             fi
