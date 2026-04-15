@@ -226,14 +226,20 @@ pip3 install --break-system-packages \
     flask==3.1.3 \
     waitress==3.0.2 \
     pycuda \
+    dvc dvc-gs \
+    scikit-learn \
+    opencv-python-headless==4.8.1.78 \
     2>/dev/null \
 || pip3 install \
     "numpy>=1.24,<2" \
     requests==2.33.0 \
     flask==3.1.3 \
     waitress==3.0.2 \
-    pycuda
-echo "  [OK] GUI dependencies installed."
+    pycuda \
+    dvc dvc-gs \
+    scikit-learn \
+    opencv-python-headless==4.8.1.78
+echo "  [OK] Python dependencies installed (including DVC for engine validation)."
 echo ""
 
 # ── 8. Configure Supabase credentials ────────────────────────
