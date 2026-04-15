@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { logAudit } from '../lib/helpers'
+import { logAudit, formatDateTime } from '../lib/helpers'
 import { useData } from '../lib/DataContext'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -185,7 +185,7 @@ export default function DevicesPage() {
           .eq('id', editDevice.id)
         if (assignErr) throw assignErr
 
-        await logAudit('device_assign', 'device', String(editDevice.id), {
+        await logAudit(supabase, 'device_assign', 'device', String(editDevice.id), {
           before: { user_id: prevUserId },
           after: { user_id: newUserId },
         })
@@ -210,7 +210,7 @@ export default function DevicesPage() {
       }).eq('id', device.id)
       if (err) throw err
 
-      await logAudit('device_decommission', 'device', String(device.id), {
+      await logAudit(supabase, 'device_decommission', 'device', String(device.id), {
         hostname: device.hostname,
         hw_id: device.hw_id,
       })
@@ -233,7 +233,7 @@ export default function DevicesPage() {
       })
       if (err) throw err
 
-      await logAudit('token_create', 'provisioning_token', id, { label: tokenLabel, expires_at: expiresAt })
+      await logAudit(supabase, 'token_create', 'provisioning_token', id, { label: tokenLabel, expires_at: expiresAt })
       setGeneratedToken(id)
       setTokenLabel('')
       loadData()
@@ -247,7 +247,7 @@ export default function DevicesPage() {
     try {
       const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', tok.id)
       if (err) throw err
-      await logAudit('token_delete', 'provisioning_token', tok.id, { label: tok.label })
+      await logAudit(supabase, 'token_delete', 'provisioning_token', tok.id, { label: tok.label })
       setSuccessMsg('Token deleted.')
       loadData()
       triggerRefresh()
@@ -433,7 +433,9 @@ export default function DevicesPage() {
                                 onClick={() => setConfirmAction({
                                   title: 'Decommission Device',
                                   message: `Are you sure you want to decommission "${d.device_name || d.hostname}"? This will unassign the device and mark it as decommissioned.`,
-                                  onConfirm: () => decommissionDevice(d),
+                                  danger: true,
+                                  confirmLabel: 'Decommission',
+                                  onConfirm: () => { setConfirmAction(null); decommissionDevice(d) },
                                 })}
                               >Decom</button>
                             )}
@@ -519,7 +521,9 @@ export default function DevicesPage() {
                               onClick={() => setConfirmAction({
                                 title: 'Delete Token',
                                 message: `Delete token "${tok.label || tok.id.slice(0,8)}"? This cannot be undone.`,
-                                onConfirm: () => deleteToken(tok),
+                                danger: true,
+                                confirmLabel: 'Delete',
+                                onConfirm: () => { setConfirmAction(null); deleteToken(tok) },
                               })}
                             >Del</button>
                           )}
@@ -610,14 +614,7 @@ export default function DevicesPage() {
       )}
 
       {/* Confirm dialog */}
-      {confirmAction && (
-        <ConfirmDialog
-          title={confirmAction.title}
-          message={confirmAction.message}
-          onConfirm={() => { confirmAction.onConfirm(); setConfirmAction(null) }}
-          onCancel={() => setConfirmAction(null)}
-        />
-      )}
+      <ConfirmDialog open={!!confirmAction} {...(confirmAction || {})} onCancel={() => setConfirmAction(null)} />
     </>
   )
 }
