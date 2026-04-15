@@ -203,6 +203,32 @@ def _remap_checkpoint_keys(state_dict: dict) -> dict:
     return new_state_dict
 
 
+def _infer_classifier_dims(state_dict: dict) -> list:
+    """Infer classifier hidden dimensions from checkpoint weight shapes.
+
+    Scans for classifier.N.weight keys (after remapping) and extracts
+    the output dimensions of each hidden Linear layer (excluding final).
+    """
+    classifier_weights = {}
+    for key, value in state_dict.items():
+        # Match classifier.classifier.N.weight or classifier.N.weight
+        for prefix in ("classifier.classifier.", "classifier."):
+            if key.startswith(prefix) and key.endswith(".weight"):
+                idx_str = key[len(prefix):].split(".")[0]
+                if idx_str.isdigit():
+                    classifier_weights[int(idx_str)] = value.shape
+                break
+
+    if not classifier_weights:
+        return None
+
+    # Sort by layer index; hidden layers have out_features != num_classes
+    sorted_indices = sorted(classifier_weights.keys())
+    # All layers except the last are hidden layers
+    hidden_dims = [classifier_weights[i][0] for i in sorted_indices[:-1]]
+    return hidden_dims if hidden_dims else None
+
+
 def load_student_from_checkpoint(
     checkpoint_path: str,
     num_classes: int,
@@ -213,11 +239,12 @@ def load_student_from_checkpoint(
     Load a trained student model from a KD checkpoint file.
     
     Handles key remapping between checkpoint format and model structure.
+    Auto-detects classifier_hidden_dims from checkpoint weights if not provided.
     
     Args:
         checkpoint_path: Path to the .pth checkpoint file.
         num_classes: Number of classes for this leaf type.
-        classifier_hidden_dims: Hidden dims (default: [512, 256]).
+        classifier_hidden_dims: Hidden dims (auto-detected from checkpoint if None).
         device: Target device.
         
     Returns:
@@ -234,6 +261,13 @@ def load_student_from_checkpoint(
     # Remap keys to match our model structure
     raw_state_dict = checkpoint["student_state_dict"]
     remapped_state_dict = _remap_checkpoint_keys(raw_state_dict)
+    
+    # Auto-detect classifier hidden dims from checkpoint if not specified
+    if classifier_hidden_dims is None:
+        detected = _infer_classifier_dims(remapped_state_dict)
+        if detected:
+            logger.info(f"     Auto-detected classifier_hidden_dims: {detected}")
+            classifier_hidden_dims = detected
     
     # Create model and load weights
     model = create_student_model(
