@@ -114,6 +114,7 @@ def generate_config(leaf_type, display_name, class_dirs):
         "num_classes": len(class_dirs_sorted),
         "input_size": [224, 224],
         "input_channels": 3,
+        "input_layout": "NCHW",
         "checkpoint_filename": f"{leaf_type}_student.pth",
         "data_dir": f"data/{leaf_type}",
         "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",

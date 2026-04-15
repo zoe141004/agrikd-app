@@ -1,15 +1,59 @@
 {
-  "leaf_type": "potato_dataset",
-  "display_name": "Potato Leaf Disease",
-  "data_dir": "data/potato_dataset",
-  "num_classes": 7,
-  "class_names": [
-    "Bacteria",
-    "Fungi",
-    "Healthy",
-    "Nematode",
-    "Pest",
-    "Phytopthora",
-    "Virus"
-  ]
+    "leaf_type": "potato_dataset",
+    "display_name": "Potato Leaf Disease",
+    "num_classes": 7,
+    "input_size": [224, 224],
+    "input_channels": 3,
+    "input_layout": "NCHW",
+    "checkpoint_filename": "potato_dataset_student.pth",
+    "data_dir": "data/potato_dataset",
+    "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names (training convention).",
+    "classes": {
+        "0": {
+            "name": "Bacteria",
+            "folder_name": "Bacteria",
+            "display_name": "Vi khuẩn (Bacteria)",
+            "description": "Leaves affected by bacterial disease."
+        },
+        "1": {
+            "name": "Fungi",
+            "folder_name": "Fungi",
+            "display_name": "Nấm (Fungi)",
+            "description": "Leaves affected by fungal disease."
+        },
+        "2": {
+            "name": "Healthy",
+            "folder_name": "Healthy",
+            "display_name": "Khỏe mạnh (Healthy)",
+            "description": "Healthy potato leaves without disease."
+        },
+        "3": {
+            "name": "Nematode",
+            "folder_name": "Nematode",
+            "display_name": "Tuyến trùng (Nematode)",
+            "description": "Leaves affected by nematode damage."
+        },
+        "4": {
+            "name": "Pest",
+            "folder_name": "Pest",
+            "display_name": "Sâu bệnh (Pest)",
+            "description": "Leaves damaged by pest infestation."
+        },
+        "5": {
+            "name": "Phytopthora",
+            "folder_name": "Phytopthora",
+            "display_name": "Phytophthora",
+            "description": "Leaves affected by Phytophthora disease."
+        },
+        "6": {
+            "name": "Virus",
+            "folder_name": "Virus",
+            "display_name": "Virus",
+            "description": "Leaves affected by viral disease."
+        }
+    },
+    "normalization": {
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225]
+    }
 }

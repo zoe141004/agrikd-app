@@ -147,6 +147,7 @@ def main():
             "num_classes": len(class_dirs),
             "input_size": [224, 224],
             "input_channels": 3,
+            "input_layout": "NCHW",
             "checkpoint_filename": f"{args.leaf_type}_student.pth",
             "data_dir": f"data/{args.leaf_type}",
             "class_mapping_note": "Class indices follow ImageFolder alphabetical sort of folder names.",

@@ -170,18 +170,36 @@ jobs:
           leaf = os.environ['LEAF_TYPE']
           display = os.environ.get('DISPLAY_NAME', leaf)
           data_dir = f'data/{leaf}'
-          classes = sorted([d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))])
+          class_dirs = sorted([d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))])
+          classes = {}
+          for idx, folder_name in enumerate(class_dirs):
+              clean_name = folder_name.replace('___', '_').replace('__', '_')
+              classes[str(idx)] = {
+                  'name': clean_name,
+                  'folder_name': folder_name,
+                  'display_name': clean_name.replace('_', ' ').title(),
+                  'description': f'Class: {clean_name}'
+              }
           config = {
               'leaf_type': leaf,
               'display_name': display,
+              'num_classes': len(class_dirs),
+              'input_size': [224, 224],
+              'input_channels': 3,
+              'input_layout': 'NCHW',
+              'checkpoint_filename': f'{leaf}_student.pth',
               'data_dir': data_dir,
-              'num_classes': len(classes),
-              'class_names': classes,
+              'class_mapping_note': 'Class indices follow ImageFolder alphabetical sort of folder names (training convention).',
+              'classes': classes,
+              'normalization': {
+                  'mean': [0.485, 0.456, 0.406],
+                  'std': [0.229, 0.224, 0.225]
+              }
           }
           os.makedirs('mlops_pipeline/configs', exist_ok=True)
           with open(f'mlops_pipeline/configs/{leaf}.json', 'w') as f:
-              json.dump(config, f, indent=2)
-          print(f'Config generated: {len(classes)} classes')
+              json.dump(config, f, indent=4, ensure_ascii=False)
+          print(f'Config generated: {len(class_dirs)} classes')
           "
           fi
         env:
