@@ -44,5 +44,5 @@ class TfliteInferenceService {
     throw UnsupportedError('TFLite inference is not supported on web.');
   }
 
-  void dispose() {}
+  Future<void> dispose() async {}
 }

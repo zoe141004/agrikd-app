@@ -54,7 +54,11 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
 
   @override
   void dispose() {
-    _benchmarkService?.dispose();
+    // Best-effort cleanup — dispose() is async but State.dispose() is sync.
+    // Schedule it as a microtask to avoid leaking native TFLite resources.
+    final service = _benchmarkService;
+    _benchmarkService = null;
+    service?.dispose();
     super.dispose();
   }
 
@@ -65,7 +69,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       _results.clear();
     });
 
-    _benchmarkService?.dispose();
+    final oldService = _benchmarkService;
+    _benchmarkService = null;
+    await oldService?.dispose();
     final service = TfliteInferenceService();
     _benchmarkService = service;
     final dummyInput = _createDummyInput();
@@ -127,7 +133,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         );
 
         // Dispose between models for clean measurement
-        service.dispose();
+        await service.dispose();
       }
 
       setState(() {
@@ -141,7 +147,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         _status = S.get('err_benchmark_failed');
       });
     } finally {
-      service.dispose();
+      await service.dispose();
       _benchmarkService = null;
     }
   }

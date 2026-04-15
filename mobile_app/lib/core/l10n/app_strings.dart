@@ -309,6 +309,7 @@ class S {
     'config_pending': 'Pending',
     'error_loading': 'Failed to load data',
     'retry': 'Retry',
+    'error_timeout': 'Request timed out. Please try again.',
   };
 
   static const _vi = <String, String>{
@@ -587,5 +588,6 @@ class S {
     'config_pending': 'Đang chờ',
     'error_loading': 'Không tải được dữ liệu',
     'retry': 'Thử lại',
+    'error_timeout': 'Yêu cầu hết thời gian chờ. Vui lòng thử lại.',
   };
 }
