@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { logAudit, formatDateTime } from '../lib/helpers'
+import { logAudit } from '../lib/helpers'
 import { useData } from '../lib/DataContext'
 import ConfirmDialog from '../components/ConfirmDialog'
 

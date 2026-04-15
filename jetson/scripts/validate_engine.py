@@ -366,8 +366,8 @@ def main():
         log.error("Model version not specified and not in config")
         sys.exit(1)
 
-    # Import engine_builder helpers for hardware tag and upload
-    from engine_builder import get_hardware_tag
+    # Import hardware tag from shared helpers (no cyclic dependency)
+    from supabase_helpers import get_hardware_tag
     hardware_tag = get_hardware_tag()
 
     data_dir = None
@@ -385,12 +385,12 @@ def main():
         )
         benchmark["hardware_tag"] = hardware_tag
 
-        # Upload to both tables via engine_builder
-        from engine_builder import _upload_engine_benchmark, _upload_model_benchmark
+        # Upload to both tables via shared helpers
+        from supabase_helpers import upload_engine_benchmark, upload_model_benchmark
         base_url = config["sync"]["supabase_url"]
         key = config["sync"]["supabase_key"]
-        _upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark)
-        _upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
+        upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark)
+        upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
 
         log.info("Validation complete for %s v%s", leaf_type, version)
 

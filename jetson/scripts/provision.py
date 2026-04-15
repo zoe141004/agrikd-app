@@ -374,7 +374,7 @@ def provision(token_data, force=False):
         try:
             os.chmod(gcs_key_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
         except OSError:
-            pass
+            print("  [WARN] Could not set GCS key file permissions to 600")
         config["gcs"] = {"credentials_path": gcs_key_path}
         with open(config_path, "w") as f:
             json.dump(config, f, indent=4)

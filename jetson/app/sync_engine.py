@@ -601,15 +601,7 @@ class SyncEngine:
                 compute_metrics,
                 cleanup_dataset,
             )
-            import importlib.util as _ilu
-            _spec = _ilu.spec_from_file_location(
-                "scripts_engine_builder",
-                os.path.join(scripts_dir, "engine_builder.py"),
-            )
-            _seb = _ilu.module_from_spec(_spec)
-            _spec.loader.exec_module(_seb)
-            _upload_engine_benchmark = _seb._upload_engine_benchmark
-            _upload_model_benchmark = _seb._upload_model_benchmark
+            from supabase_helpers import upload_engine_benchmark, upload_model_benchmark
 
             num_classes = self._models_config.get(leaf_type, {}).get("num_classes")
             input_size = config.get("inference", {}).get("input_size", 224)
@@ -639,8 +631,8 @@ class SyncEngine:
                 )
                 benchmark["hardware_tag"] = hw_tag
 
-                _upload_engine_benchmark(base_url, key, leaf_type, version, hw_tag, benchmark)
-                _upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
+                upload_engine_benchmark(base_url, key, leaf_type, version, hw_tag, benchmark)
+                upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
 
                 logger.info(
                     "Validation done: %s v%s — acc=%.2f%% fps=%.1f",
@@ -686,7 +678,7 @@ class SyncEngine:
             try:
                 os.chmod(gcs_path, 0o600)
             except OSError:
-                pass
+                logger.debug("Could not set permissions on %s (non-fatal)", gcs_path)
 
             # Update config.json with GCS path
             config["gcs"] = {"credentials_path": gcs_path}
