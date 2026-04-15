@@ -212,10 +212,18 @@ def build_engine(onnx_path, engine_path):
 
 
 def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
-    """Process a single leaf type: check cache → download/build → validate → upload."""
+    """Process a single leaf type: check cache → download/build → validate → upload.
+
+    Validation flow (when --validate is set):
+      - If engine pulled from cache AND benchmark_json already exists → skip eval
+      - If engine pulled from cache but NO benchmark_json → run eval, upload benchmark
+      - If engine built from ONNX (new) → run eval, upload benchmark
+    After eval, dataset is always deleted to conserve storage.
+    """
     base_url = config["sync"]["supabase_url"]
     key = config["sync"]["supabase_key"]
     models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
+    os.makedirs(models_dir, exist_ok=True)
     engine_path = os.path.join(models_dir, f"{leaf_type}_student.engine")
 
     log.info("=== Processing: %s (hardware: %s) ===", leaf_type, hardware_tag)
@@ -229,6 +237,8 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
     version = onnx_info[0]["version"]
     onnx_url = onnx_info[0]["onnx_url"]
     log.info("Latest version: %s, ONNX URL: %s", version, onnx_url[:80])
+
+    needs_benchmark = validate  # assume we need benchmark if --validate
 
     # Step 2: Check if engine already exists for this hardware on Supabase
     engine_info = supabase_rpc(base_url, key, "get_engine_for_hardware", {
@@ -249,33 +259,159 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
             os.remove(engine_path)
             return False
         log.info("Engine downloaded and verified: %s", engine_path)
-        return True
 
-    # Step 3: No cached engine — download ONNX and build
-    log.info("No cached engine for %s/%s — building from ONNX...", hardware_tag, version)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
-        _validate_storage_url(onnx_url, base_url)
-        size = download_file(onnx_url, onnx_path, key)
-        log.info("Downloaded ONNX: %d bytes", size)
+        # Check if benchmark already exists for this engine
+        if validate and engine_info[0].get("benchmark_json"):
+            log.info("Benchmark already exists for %s/%s/%s — skipping validation",
+                     leaf_type, version, hardware_tag)
+            needs_benchmark = False
+    else:
+        # Step 3: No cached engine — download ONNX and build
+        log.info("No cached engine for %s/%s — building from ONNX...", hardware_tag, version)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
+            _validate_storage_url(onnx_url, base_url)
+            size = download_file(onnx_url, onnx_path, key)
+            log.info("Downloaded ONNX: %d bytes", size)
 
-        # Build engine
-        build_engine(onnx_path, engine_path)
+            # Build engine
+            build_engine(onnx_path, engine_path)
 
-    # Step 4: Upload engine to Supabase
-    engine_sha = sha256_file(engine_path)
-    storage_path = f"{leaf_type}/v{version}/{leaf_type}_{hardware_tag}.engine"
-    engine_url = upload_engine(base_url, key, engine_path, storage_path)
+        # Step 4: Upload engine to Supabase
+        engine_sha = sha256_file(engine_path)
+        storage_path = f"{leaf_type}/v{version}/{leaf_type}_{hardware_tag}.engine"
+        engine_url_remote = upload_engine(base_url, key, engine_path, storage_path)
 
-    # Read device_id from config if available
-    device_id = config.get("device", {}).get("device_id")
+        # Read device_id from config if available
+        device_id = config.get("device", {}).get("device_id")
 
-    # Step 5: Register in model_engines table
-    register_engine(base_url, key, leaf_type, version, hardware_tag,
-                    engine_url, engine_sha, device_id)
+        # Step 5: Register in model_engines table
+        register_engine(base_url, key, leaf_type, version, hardware_tag,
+                        engine_url_remote, engine_sha, device_id)
 
-    log.info("Engine build + upload complete for %s v%s (%s)", leaf_type, version, hardware_tag)
+        log.info("Engine build + upload complete for %s v%s (%s)", leaf_type, version, hardware_tag)
+
+    # Step 6: On-device validation (if --validate and benchmark not yet present)
+    if needs_benchmark:
+        try:
+            _run_validation(config, leaf_type, version, hardware_tag, engine_path)
+        except Exception as e:
+            log.error("Validation failed for %s (non-fatal): %s", leaf_type, e)
+
     return True
+
+
+def _run_validation(config, leaf_type, version, hardware_tag, engine_path):
+    """Pull dataset via DVC, evaluate TensorRT engine, upload benchmark, cleanup."""
+    from validate_engine import (
+        setup_gcs_credentials,
+        dvc_pull_dataset,
+        load_test_images,
+        run_tensorrt_inference,
+        compute_metrics,
+        cleanup_dataset,
+    )
+
+    base_url = config["sync"]["supabase_url"]
+    key = config["sync"]["supabase_key"]
+    num_classes = config.get("models", {}).get(leaf_type, {}).get("num_classes")
+    input_size = config.get("inference", {}).get("input_size", 224)
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    if not num_classes:
+        raise ValueError(f"num_classes not configured for {leaf_type}")
+
+    data_dir = None
+    try:
+        # 6a. Setup GCS credentials and pull dataset
+        setup_gcs_credentials(config)
+        data_dir = dvc_pull_dataset(leaf_type, repo_root)
+
+        # 6b. Load test images (same stratified split as CI pipeline)
+        images, labels, class_names = load_test_images(data_dir, input_size)
+        log.info("Loaded %d test images across %d classes", len(images), len(class_names))
+
+        # 6c. Run TensorRT inference
+        predictions, probs, latencies = run_tensorrt_inference(
+            engine_path, images, num_classes
+        )
+
+        # 6d. Compute metrics
+        benchmark = compute_metrics(
+            predictions, labels, probs, latencies, engine_path, class_names
+        )
+        benchmark["hardware_tag"] = hardware_tag
+
+        # 6e. Upload to model_engines.benchmark_json (device-specific)
+        _upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark)
+
+        # 6f. Upload to model_benchmarks table (dashboard display)
+        _upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
+
+        log.info("Validation complete for %s v%s (%s)", leaf_type, version, hardware_tag)
+
+    finally:
+        # 6g. Always cleanup dataset
+        if data_dir:
+            cleanup_dataset(data_dir)
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+
+
+def _upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark):
+    """Update model_engines record with benchmark_json."""
+    url = (
+        f"{base_url}/rest/v1/model_engines"
+        f"?leaf_type=eq.{leaf_type}"
+        f"&version=eq.{version}"
+        f"&hardware_tag=eq.{hardware_tag}"
+    )
+    resp = requests.patch(
+        url,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        json={"benchmark_json": benchmark},
+        timeout=30,
+        verify=True,
+    )
+    resp.raise_for_status()
+    log.info("Benchmark uploaded to model_engines.benchmark_json")
+
+
+def _upload_model_benchmark(base_url, key, leaf_type, version, benchmark):
+    """Upsert TensorRT benchmark into model_benchmarks table for dashboard display."""
+    url = f"{base_url}/rest/v1/model_benchmarks"
+    payload = {
+        "leaf_type": leaf_type,
+        "version": version,
+        "format": "tensorrt_fp16",
+        "accuracy": benchmark.get("accuracy"),
+        "precision_macro": benchmark.get("precision_macro"),
+        "recall_macro": benchmark.get("recall_macro"),
+        "f1_macro": benchmark.get("f1_macro"),
+        "latency_mean_ms": benchmark.get("latency_mean_ms"),
+        "latency_p99_ms": benchmark.get("latency_p99_ms"),
+        "fps": benchmark.get("fps"),
+        "size_mb": benchmark.get("size_mb"),
+        "is_candidate": False,
+    }
+    resp = requests.post(
+        url,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal,resolution=merge-duplicates",
+        },
+        json=payload,
+        timeout=30,
+        verify=True,
+    )
+    resp.raise_for_status()
+    log.info("Benchmark uploaded to model_benchmarks (format=tensorrt_fp16)")
 
 
 def main():
