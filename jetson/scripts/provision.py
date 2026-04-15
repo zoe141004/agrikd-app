@@ -313,11 +313,31 @@ def provision(token_data, force=False):
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
-    # Protect config.json (contains Supabase anon key)
+    # Protect config.json (contains Supabase anon key and optional GCS key path)
     try:
         os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
     except OSError:
         pass  # Windows or permission issue
+
+    # 3b. Copy GCS credentials if provided via environment
+    gcs_key_data = os.environ.get("AGRIKD_GCS_KEY_DATA")
+    if gcs_key_data:
+        gcs_dir = os.path.join("config", "secrets")
+        os.makedirs(gcs_dir, exist_ok=True)
+        gcs_key_path = os.path.join(gcs_dir, "gcs-readonly.json")
+        with open(gcs_key_path, "w") as f:
+            f.write(gcs_key_data)
+        try:
+            os.chmod(gcs_key_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
+        except OSError:
+            pass
+        # Add GCS config section
+        config["gcs"] = {"credentials_path": gcs_key_path}
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=4)
+        print("  GCS read-only credentials saved (for DVC dataset access)")
+    else:
+        print("  No AGRIKD_GCS_KEY_DATA set — DVC dataset validation will be unavailable")
 
     # 4. Write device_state.json
     print("[4/4] Writing device state...")
