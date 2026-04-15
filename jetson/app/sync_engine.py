@@ -573,9 +573,14 @@ class SyncEngine:
                 config = json.load(f)
 
             gcs_config = config.get("gcs", {})
-            if not gcs_config.get("credentials_path"):
-                logger.info("GCS credentials not configured — skipping engine validation")
-                return
+            gcs_creds_path = gcs_config.get("credentials_path", "")
+
+            # Auto-fetch GCS key from Supabase if not present locally
+            if not gcs_creds_path or not os.path.isfile(gcs_creds_path):
+                gcs_creds_path = self._fetch_and_save_gcs_key(config)
+                if not gcs_creds_path:
+                    logger.info("GCS credentials not available — skipping engine validation")
+                    return
 
             logger.info("Starting engine validation: %s v%s (%s)", leaf_type, version, hw_tag)
 
@@ -642,6 +647,52 @@ class SyncEngine:
 
         except Exception as e:
             logger.error("Engine validation failed (non-fatal) for %s: %s", leaf_type, e)
+
+    def _fetch_and_save_gcs_key(self, config):
+        """Fetch GCS key from Supabase system_secrets and save locally.
+
+        Returns the local file path if successful, None otherwise.
+        """
+        device_state = self._device_state or {}
+        device_token = device_state.get("device_token")
+        if not device_token:
+            return None
+
+        try:
+            result = self._supabase_rpc("get_system_secret", {
+                "p_device_token": device_token,
+                "p_key": "gcs_readonly_key",
+            })
+            # RPC returns the value directly (TEXT), not an array
+            gcs_json = result if isinstance(result, str) else None
+            if not gcs_json:
+                return None
+
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            gcs_dir = os.path.join(base_dir, "config", "secrets")
+            os.makedirs(gcs_dir, exist_ok=True)
+            gcs_path = os.path.join(gcs_dir, "gcs-readonly.json")
+
+            with open(gcs_path, "w") as f:
+                f.write(gcs_json)
+            try:
+                os.chmod(gcs_path, 0o600)
+            except OSError:
+                pass
+
+            # Update config.json with GCS path
+            config["gcs"] = {"credentials_path": gcs_path}
+            if self._config_path:
+                with self._config_lock:
+                    with open(self._config_path, "w") as f:
+                        json.dump(config, f, indent=4)
+
+            logger.info("GCS credentials fetched from Supabase and saved to %s", gcs_path)
+            return gcs_path
+
+        except Exception as e:
+            logger.debug("Could not fetch GCS key from Supabase: %s", e)
+            return None
 
     def _re_report_engine_status(self):
         """Re-send reported_config with current engine_status to dashboard."""

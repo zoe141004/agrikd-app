@@ -436,6 +436,78 @@ else:
 set -e
 echo ""
 
+# ── 8b. GCS credentials for DVC dataset validation ──────────
+echo "  ── GCS credentials (for on-device engine validation) ──"
+GCS_SECRET_DIR="$INSTALL_DIR/config/secrets"
+GCS_KEY_PATH="$GCS_SECRET_DIR/gcs-readonly.json"
+mkdir -p "$GCS_SECRET_DIR"
+
+if [ -n "$AGRIKD_GCS_KEY_DATA" ]; then
+    echo "$AGRIKD_GCS_KEY_DATA" > "$GCS_KEY_PATH"
+    echo "  [OK] GCS key saved from AGRIKD_GCS_KEY_DATA env var"
+elif [ -n "$AGRIKD_GCS_KEY_FILE" ] && [ -f "$AGRIKD_GCS_KEY_FILE" ]; then
+    cp "$AGRIKD_GCS_KEY_FILE" "$GCS_KEY_PATH"
+    echo "  [OK] GCS key copied from $AGRIKD_GCS_KEY_FILE"
+elif [ -f "$GCS_KEY_PATH" ]; then
+    echo "  [OK] GCS key already exists at $GCS_KEY_PATH"
+else
+    # Try fetching from Supabase system_secrets (if device is already provisioned)
+    STATE_FILE="$INSTALL_DIR/data/device_state.json"
+    if [ -f "$STATE_FILE" ] && [ -f "$CFG" ]; then
+        echo "  Attempting to fetch GCS key from Supabase..."
+        python3 -c "
+import json, sys, requests
+
+cfg_path, state_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg_path) as f: cfg = json.load(f)
+with open(state_path) as f: state = json.load(f)
+
+url = cfg.get('sync', {}).get('supabase_url', '')
+key = cfg.get('sync', {}).get('supabase_key', '')
+token = state.get('device_token', '')
+if not (url and key and token):
+    print('  [SKIP] Missing Supabase credentials or device token')
+    sys.exit(1)
+
+resp = requests.post(f'{url}/rest/v1/rpc/get_system_secret',
+    headers={'apikey': key, 'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+    json={'p_device_token': token, 'p_key': 'gcs_readonly_key'}, timeout=15)
+
+if resp.status_code == 200 and resp.json():
+    with open(out_path, 'w') as f: f.write(resp.json())
+    print('  [OK] GCS key fetched from Supabase system_secrets')
+else:
+    print('  [INFO] No GCS key in Supabase yet — admin can upload via Dashboard Settings')
+    sys.exit(1)
+" "$CFG" "$STATE_FILE" "$GCS_KEY_PATH" 2>/dev/null || true
+    else
+        echo "  [INFO] GCS key not available. Will auto-fetch from Supabase on first engine sync."
+        echo "  Admin can upload the key via Dashboard → Settings → Integrations"
+    fi
+fi
+
+# Set permissions if key exists
+if [ -f "$GCS_KEY_PATH" ]; then
+    chmod 600 "$GCS_KEY_PATH"
+    chown "$SERVICE_USER:$SERVICE_USER" "$GCS_KEY_PATH" 2>/dev/null || true
+fi
+
+# Inject gcs config section into config.json
+if [ -f "$GCS_KEY_PATH" ] && [ -f "$CFG" ]; then
+    python3 -c "
+import json, sys
+cfg_path = sys.argv[1]
+gcs_path = sys.argv[2]
+with open(cfg_path) as f:
+    c = json.load(f)
+c['gcs'] = {'credentials_path': gcs_path}
+with open(cfg_path, 'w') as f:
+    json.dump(c, f, indent=4)
+print('  [OK] GCS config added to config.json')
+" "$CFG" "$GCS_KEY_PATH" 2>/dev/null || echo "  [WARN] Could not inject GCS config"
+fi
+echo ""
+
 # ── 9. Download ONNX models from Supabase ───────────────────
 echo "[9/13] Downloading models from Supabase..."
 if [ ! -f "$CFG" ]; then

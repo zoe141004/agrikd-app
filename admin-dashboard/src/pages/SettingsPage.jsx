@@ -32,6 +32,12 @@ export default function SettingsPage() {
   const AUDIT_PAGE_SIZE = 50
   const [ghTesting, setGhTesting] = useState(false)
 
+  // GCS credentials
+  const [gcsKey, setGcsKey] = useState('')
+  const [gcsStatus, setGcsStatus] = useState(null) // null | 'configured' | 'not_configured'
+  const [gcsSaving, setGcsSaving] = useState(false)
+  const [gcsMsg, setGcsMsg] = useState(null)
+
   useEffect(() => {
     const loadSystemInfo = async () => {
       const [modelsRes, predsRes, dvcRes, usersRes] = await Promise.allSettled([
@@ -52,6 +58,9 @@ export default function SettingsPage() {
         userCount,
         modelCount: modelsRes.status === 'fulfilled' ? (modelsRes.value?.data || []).length : 0,
       })
+      // Check GCS key status
+      const { data: gcsRow } = await supabase.from('system_secrets').select('key, updated_at').eq('key', 'gcs_readonly_key').maybeSingle()
+      setGcsStatus(gcsRow ? 'configured' : 'not_configured')
     }
     loadSystemInfo()
     const cfg = getGitHubConfig()
@@ -65,6 +74,54 @@ export default function SettingsPage() {
     loadAuditLogs(controller.signal)
     return () => controller.abort()
   }, [stab])
+
+  // GCS key management
+  const saveGcsKey = async () => {
+    if (!gcsKey.trim()) return
+    try {
+      JSON.parse(gcsKey.trim())
+    } catch {
+      setGcsMsg({ type: 'error', text: 'Invalid JSON — paste the full service account JSON file content' })
+      return
+    }
+    setGcsSaving(true)
+    setGcsMsg(null)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { error } = await supabase.from('system_secrets').upsert({
+        key: 'gcs_readonly_key',
+        value: gcsKey.trim(),
+        description: 'GCS read-only service account for DVC dataset access on Jetson devices',
+        updated_at: new Date().toISOString(),
+        updated_by: user?.id || null,
+      }, { onConflict: 'key' })
+      if (error) throw error
+      await logAudit('update_gcs_key', 'system_secrets', null, { action: 'uploaded GCS service account key' })
+      setGcsStatus('configured')
+      setGcsKey('')
+      setGcsMsg({ type: 'success', text: 'GCS key saved — Jetson devices will auto-fetch on next provisioning or sync' })
+    } catch (err) {
+      setGcsMsg({ type: 'error', text: `Failed to save: ${err.message}` })
+    } finally {
+      setGcsSaving(false)
+    }
+  }
+
+  const deleteGcsKey = async () => {
+    setGcsSaving(true)
+    setGcsMsg(null)
+    try {
+      const { error } = await supabase.from('system_secrets').delete().eq('key', 'gcs_readonly_key')
+      if (error) throw error
+      await logAudit('delete_gcs_key', 'system_secrets', null, { action: 'removed GCS service account key' })
+      setGcsStatus('not_configured')
+      setGcsMsg({ type: 'success', text: 'GCS key removed' })
+    } catch (err) {
+      setGcsMsg({ type: 'error', text: `Failed to delete: ${err.message}` })
+    } finally {
+      setGcsSaving(false)
+    }
+  }
 
   const saveGitHub = () => {
     const owner = (ghForm.ghOwner || '').trim()
@@ -279,6 +336,71 @@ export default function SettingsPage() {
               <div className={`alert ${ghTestMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginTop: 12 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {ghTestMsg.text}
+              </div>
+            )}
+          </div>
+
+          {/* GCS Credentials for Jetson DVC Access */}
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <div className="card-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Google Cloud Storage
+                  {gcsStatus === 'configured'
+                    ? <span className="badge badge-green">Configured</span>
+                    : <span className="badge badge-yellow">Not configured</span>}
+                </div>
+                <div className="card-title">GCS Service Account (Read-Only)</div>
+              </div>
+            </div>
+            <div className="alert alert-info" style={{ marginBottom: 14 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              <div>Used by Jetson devices to pull test datasets via DVC for on-device TensorRT engine validation. Key is stored encrypted in Supabase and auto-distributed to all provisioned devices.</div>
+            </div>
+            {gcsStatus === 'configured' ? (
+              <div>
+                <p style={{ fontSize: 13, color: '#16a34a', marginBottom: 12 }}>✓ GCS service account key is configured. Jetson devices will auto-fetch it during provisioning.</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn" onClick={() => setGcsStatus('editing')} disabled={gcsSaving}>Replace Key</button>
+                  <button className="btn btn-danger" onClick={() => setConfirmAction({
+                    title: 'Remove GCS Key',
+                    message: 'This will prevent Jetson devices from running on-device engine validation until a new key is uploaded.',
+                    danger: true,
+                    confirmLabel: 'Remove Key',
+                    onConfirm: () => { setConfirmAction(null); deleteGcsKey() }
+                  })} disabled={gcsSaving}>Remove Key</button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="form-group">
+                  <label className="form-label">Service Account JSON</label>
+                  <textarea
+                    className="form-input"
+                    rows={6}
+                    value={gcsKey}
+                    onChange={e => setGcsKey(e.target.value)}
+                    placeholder='Paste the full JSON content of the GCS service account key file...'
+                    style={{ fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>
+                    Create a service account with <code>Storage Object Viewer</code> role on the DVC bucket. Download the JSON key and paste it here.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={saveGcsKey} disabled={gcsSaving || !gcsKey.trim()}>
+                    {gcsSaving ? 'Saving…' : 'Save Key'}
+                  </button>
+                  {gcsStatus === 'editing' && (
+                    <button className="btn" onClick={() => { setGcsStatus('configured'); setGcsKey('') }}>Cancel</button>
+                  )}
+                </div>
+              </div>
+            )}
+            {gcsMsg && (
+              <div className={`alert ${gcsMsg.type === 'error' ? 'alert-error' : 'alert-success'}`} style={{ marginTop: 12 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {gcsMsg.text}
               </div>
             )}
           </div>

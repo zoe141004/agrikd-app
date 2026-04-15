@@ -194,6 +194,40 @@ def supabase_post(url, key, path, body):
     return resp
 
 
+def _fetch_gcs_key(base_url, api_key, device_token):
+    """Fetch GCS credentials from Supabase system_secrets via RPC.
+
+    Returns the JSON string or None if not available.
+    """
+    try:
+        resp = requests.post(
+            f"{base_url}/rest/v1/rpc/get_system_secret",
+            headers={
+                "apikey": api_key,
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "p_device_token": str(device_token),
+                "p_key": "gcs_readonly_key",
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            value = resp.json()
+            if value:
+                print("  [OK] GCS key fetched from Supabase system_secrets")
+                return value
+            print("  [INFO] No GCS key configured in system_secrets yet")
+            return None
+        else:
+            print(f"  [WARN] Could not fetch GCS key (HTTP {resp.status_code})")
+            return None
+    except Exception as e:
+        print(f"  [WARN] Failed to fetch GCS key: {e}")
+        return None
+
+
 def supabase_patch(url, key, path, body, params=None, extra_headers=None):
     """PATCH request to Supabase REST API."""
     headers = {
@@ -319,8 +353,16 @@ def provision(token_data, force=False):
     except OSError:
         pass  # Windows or permission issue
 
-    # 3b. Copy GCS credentials if provided via environment
-    gcs_key_data = os.environ.get("AGRIKD_GCS_KEY_DATA")
+    # 3b. Fetch GCS credentials from Supabase system_secrets
+    print("  Fetching GCS credentials from Supabase...")
+    gcs_key_data = _fetch_gcs_key(url, key, device_token)
+
+    if not gcs_key_data:
+        # Fallback: check environment variable
+        gcs_key_data = os.environ.get("AGRIKD_GCS_KEY_DATA")
+        if gcs_key_data:
+            print("  [FALLBACK] Using AGRIKD_GCS_KEY_DATA env var")
+
     if gcs_key_data:
         gcs_dir = os.path.join("config", "secrets")
         os.makedirs(gcs_dir, exist_ok=True)
@@ -331,13 +373,13 @@ def provision(token_data, force=False):
             os.chmod(gcs_key_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
         except OSError:
             pass
-        # Add GCS config section
         config["gcs"] = {"credentials_path": gcs_key_path}
         with open(config_path, "w") as f:
             json.dump(config, f, indent=4)
         print("  GCS read-only credentials saved (for DVC dataset access)")
     else:
-        print("  No AGRIKD_GCS_KEY_DATA set — DVC dataset validation will be unavailable")
+        print("  No GCS credentials available — on-device validation will be unavailable")
+        print("  Admin can upload via Dashboard Settings → the next sync will fetch it")
 
     # 4. Write device_state.json
     print("[4/4] Writing device state...")
