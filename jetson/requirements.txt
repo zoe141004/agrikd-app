@@ -14,3 +14,8 @@ flask==3.1.3
 waitress==3.0.2
 requests==2.33.0
 pycuda
+
+# Engine validation (DVC dataset pull + evaluation)
+dvc
+dvc-gs
+scikit-learn
