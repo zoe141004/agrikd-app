@@ -912,7 +912,8 @@ export default function ModelsPage() {
             const tflite16 = modelBench.find(b => b.format === 'tflite_float16')
             const pytorch = modelBench.find(b => b.format === 'pytorch')
             const onnx = modelBench.find(b => b.format === 'onnx')
-            const formats = [pytorch, onnx, tflite16].filter(Boolean)
+            const tensorrt = modelBench.find(b => b.format === 'tensorrt_fp16')
+            const formats = [pytorch, onnx, tflite16, tensorrt].filter(Boolean)
             const activeTflite = tflite16
 
             return (
@@ -959,7 +960,7 @@ export default function ModelsPage() {
                       <tbody>
                         {formats.map(b => (
                           <tr key={b.format}>
-                            <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
+                            <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tensorrt_fp16' ? 'TensorRT (f16)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
                             <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(4)}%</span> : '—'}</td>
                             <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>

@@ -565,7 +565,13 @@ class SyncEngine:
         Non-fatal: if validation fails, the engine is still usable.
         """
         try:
-            config = self._config
+            # Load full config from file (SyncEngine only stores sync subsection)
+            if not self._config_path or not os.path.isfile(self._config_path):
+                logger.info("Config file not available — skipping engine validation")
+                return
+            with open(self._config_path, "r") as f:
+                config = json.load(f)
+
             gcs_config = config.get("gcs", {})
             if not gcs_config.get("credentials_path"):
                 logger.info("GCS credentials not configured — skipping engine validation")
@@ -582,6 +588,7 @@ class SyncEngine:
                 _sys.path.insert(0, scripts_dir)
 
             from validate_engine import (
+                _find_repo_root,
                 setup_gcs_credentials,
                 dvc_pull_dataset,
                 load_test_images,
@@ -593,11 +600,12 @@ class SyncEngine:
 
             num_classes = self._models_config.get(leaf_type, {}).get("num_classes")
             input_size = config.get("inference", {}).get("input_size", 224)
-            repo_root = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", ".."
-            )
-            base_url = config["sync"]["supabase_url"]
-            key = config["sync"]["supabase_key"]
+            repo_root = _find_repo_root()
+            if not repo_root:
+                logger.warning("Could not find repo root (no dvc/ dir) — skipping validation")
+                return
+            base_url = self.supabase_url
+            key = self.supabase_key
 
             if not num_classes:
                 logger.warning("num_classes unknown for %s — skipping validation", leaf_type)

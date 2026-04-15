@@ -304,6 +304,7 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
 def _run_validation(config, leaf_type, version, hardware_tag, engine_path):
     """Pull dataset via DVC, evaluate TensorRT engine, upload benchmark, cleanup."""
     from validate_engine import (
+        _find_repo_root,
         setup_gcs_credentials,
         dvc_pull_dataset,
         load_test_images,
@@ -316,7 +317,9 @@ def _run_validation(config, leaf_type, version, hardware_tag, engine_path):
     key = config["sync"]["supabase_key"]
     num_classes = config.get("models", {}).get(leaf_type, {}).get("num_classes")
     input_size = config.get("inference", {}).get("input_size", 224)
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    repo_root = _find_repo_root()
+    if not repo_root:
+        raise RuntimeError("Could not find repo root (no dvc/ directory). Pass --repo-root.")
 
     if not num_classes:
         raise ValueError(f"num_classes not configured for {leaf_type}")

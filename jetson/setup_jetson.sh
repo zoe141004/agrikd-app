@@ -128,10 +128,11 @@ echo ""
 
 # ── 3. Create directory structure ────────────────────────────
 echo "[3/13] Creating directories at $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,logs,scripts}
+mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,dvc,logs,scripts}
 echo "  $INSTALL_DIR/"
 echo "  ├── app/        # Python application modules"
 echo "  ├── config/     # config.json (runtime settings)"
+echo "  ├── dvc/        # DVC tracking files for dataset validation"
 echo "  ├── models/     # TensorRT .engine files"
 echo "  ├── data/images/ # Active learning image storage"
 echo "  ├── logs/       # Rotating log files"
@@ -144,6 +145,26 @@ cp -r "$SCRIPT_DIR/app/"* "$INSTALL_DIR/app/"
 cp -r "$SCRIPT_DIR/scripts/"* "$INSTALL_DIR/scripts/" 2>/dev/null || true
 cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
 cp "$SCRIPT_DIR/ruff.toml" "$INSTALL_DIR/ruff.toml" 2>/dev/null || true
+
+# Copy DVC tracking files for on-device dataset validation
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+if [ -d "$REPO_ROOT/dvc" ]; then
+    mkdir -p "$INSTALL_DIR/dvc"
+    cp "$REPO_ROOT"/dvc/*.dvc "$INSTALL_DIR/dvc/" 2>/dev/null || true
+    echo "  [OK] DVC tracking files copied to $INSTALL_DIR/dvc/"
+fi
+# Copy DVC config (remote definition) and init workspace
+if [ -f "$REPO_ROOT/.dvc/config" ]; then
+    mkdir -p "$INSTALL_DIR/.dvc"
+    cp "$REPO_ROOT/.dvc/config" "$INSTALL_DIR/.dvc/config"
+    # Initialize DVC in no-scm mode if not already done
+    if [ ! -f "$INSTALL_DIR/.dvc/.dvc_initialized" ]; then
+        (cd "$INSTALL_DIR" && dvc init --no-scm 2>/dev/null || true)
+        cp "$REPO_ROOT/.dvc/config" "$INSTALL_DIR/.dvc/config"
+        touch "$INSTALL_DIR/.dvc/.dvc_initialized"
+    fi
+    echo "  [OK] DVC workspace initialized at $INSTALL_DIR"
+fi
 
 # Config: copy example if config.json doesn't exist yet
 if [ ! -f "$INSTALL_DIR/config/config.json" ]; then

@@ -65,6 +65,22 @@ LEAF_TYPE_TO_DIR = {
 }
 
 
+def _find_repo_root(start_path=None):
+    """Find the project root by looking for the dvc/ directory.
+
+    Works in both dev context (jetson/scripts/) and Jetson deploy (/opt/agrikd/scripts/).
+    """
+    current = start_path or os.path.dirname(os.path.abspath(__file__))
+    for _ in range(5):
+        if os.path.isdir(os.path.join(current, "dvc")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
 def setup_gcs_credentials(config):
     """Set GOOGLE_APPLICATION_CREDENTIALS from config."""
     gcs_config = config.get("gcs", {})
@@ -319,10 +335,11 @@ def main():
     with open(args.config) as f:
         config = json.load(f)
 
-    # Determine repo root (default: two levels up from this script)
-    repo_root = args.repo_root or os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    )
+    # Determine repo root (auto-detect by looking for dvc/ directory)
+    repo_root = args.repo_root or _find_repo_root()
+    if not repo_root:
+        log.error("Could not find repo root (no dvc/ directory found). Use --repo-root.")
+        sys.exit(1)
 
     leaf_type = args.leaf_type
     input_size = config.get("inference", {}).get("input_size", 224)
