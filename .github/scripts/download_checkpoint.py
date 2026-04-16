@@ -18,7 +18,7 @@ import requests
 # ── Validation helpers ──────────────────────────────────────────────
 
 _LEAF_PATTERN = re.compile(r"^[a-z_]+$")
-_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-fold[1-5])?$")
 
 
 def _env(name: str) -> str:
@@ -104,9 +104,11 @@ def main() -> None:
     print(f"Model URL: {model_url}")
 
     # If URL points to .tflite, derive .pth URL by convention
+    # Strip fold suffix for storage paths (e.g., "1.4.0-fold5" → "1.4.0")
+    base_version = re.sub(r'-fold\d+$', '', version)
     if model_url.endswith(".tflite"):
         base = model_url.rsplit("/", 1)[0]
-        model_url = f"{base}/{leaf_type}_v{version}_checkpoint.pth"
+        model_url = f"{base}/{leaf_type}_v{base_version}_checkpoint.pth"
         _validate_url(model_url, supabase_url)
         print(f"Derived .pth URL: {model_url}")
 
