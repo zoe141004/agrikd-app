@@ -395,34 +395,37 @@ export default function DevicesPage() {
                         </td>
                         <td style={{ fontSize: 11 }}>
                           {(() => {
-                            const mv = d.reported_config?.applied_model_versions || d.desired_config?.model_versions || {}
+                            const desired = d.desired_config?.model_versions || {}
+                            const applied = d.reported_config?.applied_model_versions || {}
                             const es = d.reported_config?.engine_status || {}
-                            const entries = Object.entries(mv)
+                            const entries = Object.entries(desired)
                             if (entries.length === 0) return <span style={{ color: '#94a3b8' }}>—</span>
                             return entries.map(([lt, v]) => {
+                              const appliedVer = applied[lt]
+                              const isPending = !appliedVer || appliedVer !== v
                               const engineInfo = es[lt]
                               let engineLabel = ''
                               let engineColor = '#64748b'
                               if (engineInfo) {
-                                if (engineInfo.status === 'ready') {
-                                  engineLabel = ''
-                                } else if (engineInfo.status === 'building') {
-                                  engineLabel = ' (building)'
+                                if (engineInfo.status === 'building') {
+                                  engineLabel = ' ⟳ building'
                                   engineColor = '#d97706'
                                 } else if (engineInfo.status === 'error') {
-                                  engineLabel = ' (error)'
+                                  engineLabel = ' ✗ error'
                                   engineColor = '#dc2626'
                                 } else if (engineInfo.status === 'downloading') {
-                                  engineLabel = ' (downloading)'
+                                  engineLabel = ' ⟳ downloading'
                                   engineColor = '#0284c7'
                                 }
                               }
                               return (
                                 <div key={lt} style={{ lineHeight: 1.4 }}>
                                   <strong>{lt}</strong>: {v}
+                                  {isPending && !engineLabel && <span style={{ color: '#d97706', fontSize: 10 }}> (pending)</span>}
                                   {engineLabel && <span style={{ color: engineColor, fontSize: 10 }}>{engineLabel}</span>}
                                 </div>
                               )
+                            })
                             })
                           })()}
                         </td>
