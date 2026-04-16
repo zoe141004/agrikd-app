@@ -380,6 +380,8 @@ def main():
     parser.add_argument("--config", required=True, help="Path to config.json")
     parser.add_argument("--leaf-type", required=True, help="Leaf type to validate")
     parser.add_argument("--version", help="Model version (auto-detected if omitted)")
+    parser.add_argument("--engine-path", help="Path to engine file (auto-detected if omitted)")
+    parser.add_argument("--hw-tag", help="Hardware tag (auto-detected if omitted)")
     parser.add_argument("--repo-root", help="Path to repo root containing dvc/ and data/")
     args = parser.parse_args()
 
@@ -396,8 +398,9 @@ def main():
     input_size = config.get("inference", {}).get("input_size", 224)
     model_cfg = config.get("models", {}).get(leaf_type, {})
     num_classes = model_cfg.get("num_classes")
-    engine_path = model_cfg.get("engine_path")
 
+    # Engine path: CLI arg > config > auto-detect
+    engine_path = args.engine_path or model_cfg.get("engine_path")
     if not engine_path or not os.path.isfile(engine_path):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         engine_path = os.path.join(base_dir, "models", f"{leaf_type}_student.engine")
@@ -413,9 +416,9 @@ def main():
         log.error("Model version not specified and not in config")
         sys.exit(1)
 
-    # Import hardware tag from shared helpers (no cyclic dependency)
+    # Hardware tag: CLI arg > auto-detect
     from supabase_helpers import get_hardware_tag
-    hardware_tag = get_hardware_tag()
+    hardware_tag = args.hw_tag or get_hardware_tag()
 
     data_dir = None
     try:
@@ -433,13 +436,15 @@ def main():
         benchmark["hardware_tag"] = hardware_tag
 
         # Upload to both tables via shared helpers
+        # Support env vars for credentials (used when called from sync_engine subprocess)
         from supabase_helpers import upload_engine_benchmark, upload_model_benchmark
-        base_url = config["sync"]["supabase_url"]
-        key = config["sync"]["supabase_key"]
+        base_url = os.environ.get("SUPABASE_URL") or config["sync"]["supabase_url"]
+        key = os.environ.get("SUPABASE_KEY") or config["sync"]["supabase_key"]
         upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark)
         upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
 
-        log.info("Validation complete for %s v%s", leaf_type, version)
+        log.info("Validation done: %s v%s — acc=%.2f%% fps=%.1f",
+                 leaf_type, version, benchmark.get("accuracy", 0), benchmark.get("fps", 0))
 
     except Exception as e:
         log.error("Validation failed for %s: %s", leaf_type, e)

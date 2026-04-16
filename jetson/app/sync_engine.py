@@ -590,88 +590,68 @@ class SyncEngine:
             self._run_engine_validation_locked(leaf_type, version, hw_tag, engine_path)
 
     def _run_engine_validation_locked(self, leaf_type, version, hw_tag, engine_path):
-        """Internal validation logic (must be called with _dvc_lock held)."""
+        """Internal validation logic (must be called with _dvc_lock held).
+
+        Runs validation in a subprocess to avoid CUDA context conflicts
+        with the main inference worker (which holds the primary CUDA context).
+        """
         try:
             # Load full config from file (SyncEngine only stores sync subsection)
             if not self._config_path or not os.path.isfile(self._config_path):
                 logger.info("Config file not available — skipping engine validation")
                 return
-            with open(self._config_path, "r") as f:
-                config = json.load(f)
-
-            gcs_config = config.get("gcs", {})
-            gcs_creds_path = gcs_config.get("credentials_path", "")
-
-            # Auto-fetch GCS key from Supabase if not present locally
-            if not gcs_creds_path or not os.path.isfile(gcs_creds_path):
-                gcs_creds_path = self._fetch_and_save_gcs_key(config)
-                if not gcs_creds_path:
-                    logger.info("GCS credentials not available — skipping engine validation")
-                    return
 
             logger.info("Starting engine validation: %s v%s (%s)", leaf_type, version, hw_tag)
 
-            # Import validation functions
-            import sys as _sys
+            # Run validation in subprocess to avoid CUDA context conflicts
+            import subprocess
             scripts_dir = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "..", "scripts"
             )
-            if scripts_dir not in _sys.path:
-                _sys.path.insert(0, scripts_dir)
+            validate_script = os.path.join(scripts_dir, "validate_engine.py")
 
-            from validate_engine import (
-                _find_repo_root,
-                setup_gcs_credentials,
-                dvc_pull_dataset,
-                load_test_images,
-                run_tensorrt_inference,
-                compute_metrics,
-                cleanup_dataset,
+            if not os.path.isfile(validate_script):
+                logger.warning("validate_engine.py not found — skipping validation")
+                return
+
+            # Pass Supabase credentials via environment for benchmark upload
+            env = os.environ.copy()
+            env["SUPABASE_URL"] = self.supabase_url
+            env["SUPABASE_KEY"] = self.supabase_key
+
+            result = subprocess.run(
+                [
+                    "python3", validate_script,
+                    "--config", self._config_path,
+                    "--leaf-type", leaf_type,
+                    "--engine-path", engine_path,
+                    "--version", version,
+                    "--hw-tag", hw_tag,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30 min timeout
+                env=env,
+                cwd=os.path.dirname(self._config_path),
             )
-            from supabase_helpers import upload_engine_benchmark, upload_model_benchmark
 
-            num_classes = self._models_config.get(leaf_type, {}).get("num_classes")
-            input_size = config.get("inference", {}).get("input_size", 224)
-            repo_root = _find_repo_root()
-            if not repo_root:
-                logger.warning("Could not find repo root (no dvc/ dir) — skipping validation")
-                return
-            base_url = self.supabase_url
-            key = self.supabase_key
-
-            if not num_classes:
-                logger.warning("num_classes unknown for %s — skipping validation", leaf_type)
-                return
-
-            data_dir = None
-            try:
-                setup_gcs_credentials(config)
-                data_dir = dvc_pull_dataset(leaf_type, repo_root)
-                images, labels, class_names = load_test_images(data_dir, input_size)
-                logger.info("Loaded %d test images for validation", len(images))
-
-                predictions, probs, latencies = run_tensorrt_inference(
-                    engine_path, images, num_classes
+            if result.returncode == 0:
+                # Parse last line for summary
+                lines = result.stdout.strip().split("\n")
+                for line in reversed(lines):
+                    if "Validation done" in line or "acc=" in line:
+                        logger.info(line)
+                        break
+                else:
+                    logger.info("Validation completed: %s v%s", leaf_type, version)
+            else:
+                logger.warning(
+                    "Validation subprocess failed for %s: %s",
+                    leaf_type, result.stderr[-500:] if result.stderr else "no error output"
                 )
-                benchmark = compute_metrics(
-                    predictions, labels, probs, latencies, engine_path, class_names
-                )
-                benchmark["hardware_tag"] = hw_tag
 
-                upload_engine_benchmark(base_url, key, leaf_type, version, hw_tag, benchmark)
-                upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
-
-                logger.info(
-                    "Validation done: %s v%s — acc=%.2f%% fps=%.1f",
-                    leaf_type, version,
-                    benchmark.get("accuracy", 0),
-                    benchmark.get("fps", 0),
-                )
-            finally:
-                if data_dir:
-                    cleanup_dataset(data_dir)
-                os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
-
+        except subprocess.TimeoutExpired:
+            logger.error("Validation timeout for %s v%s", leaf_type, version)
         except Exception as e:
             logger.error("Engine validation failed (non-fatal) for %s: %s", leaf_type, e)
 
