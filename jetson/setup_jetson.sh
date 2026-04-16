@@ -127,10 +127,30 @@ fi
 echo ""
 
 # ── 3. Create directory structure ────────────────────────────
-echo "[3/13] Creating directories at $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"/{app,config,models,data/images,dvc,logs,scripts}
+echo "[3/13] Setting up $INSTALL_DIR ..."
+
+# Check if we should clone full repo (for DVC validation) or just copy files
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+GITHUB_REPO_URL="https://github.com/zoe141004/agrikd-app.git"
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+    echo "  [OK] Git repo already exists at $INSTALL_DIR"
+    # Pull latest changes
+    (cd "$INSTALL_DIR" && git pull --ff-only 2>/dev/null || true)
+else
+    # Clone full repo for DVC support
+    echo "  Cloning full repository for DVC validation support..."
+    rm -rf "$INSTALL_DIR" 2>/dev/null || true
+    git clone --depth 1 "$GITHUB_REPO_URL" "$INSTALL_DIR"
+    echo "  [OK] Repository cloned to $INSTALL_DIR"
+fi
+
+# Create additional directories not in repo
+mkdir -p "$INSTALL_DIR/models" "$INSTALL_DIR/data/images" "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/config/secrets"
+
 echo "  $INSTALL_DIR/"
-echo "  ├── app/        # Python application modules"
+echo "  ├── app/        # Python application (from jetson/app/)"
 echo "  ├── config/     # config.json (runtime settings)"
 echo "  ├── dvc/        # DVC tracking files for dataset validation"
 echo "  ├── models/     # TensorRT .engine files"
@@ -139,41 +159,41 @@ echo "  ├── logs/       # Rotating log files"
 echo "  └── scripts/    # Provisioning + engine builder"
 echo ""
 
-# ── 4. Copy application files from repo ─────────────────────
-echo "[4/13] Copying files from $SCRIPT_DIR → $INSTALL_DIR ..."
-cp -r "$SCRIPT_DIR/app/"* "$INSTALL_DIR/app/"
-cp -r "$SCRIPT_DIR/scripts/"* "$INSTALL_DIR/scripts/" 2>/dev/null || true
-cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
-cp "$SCRIPT_DIR/ruff.toml" "$INSTALL_DIR/ruff.toml" 2>/dev/null || true
+# ── 4. Setup application files ──────────────────────────────
+echo "[4/13] Setting up application files..."
 
-# Copy DVC tracking files for on-device dataset validation
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-if [ -d "$REPO_ROOT/dvc" ]; then
-    mkdir -p "$INSTALL_DIR/dvc"
-    cp "$REPO_ROOT"/dvc/*.dvc "$INSTALL_DIR/dvc/" 2>/dev/null || true
-    echo "  [OK] DVC tracking files copied to $INSTALL_DIR/dvc/"
-fi
-# Copy DVC config (remote definition) and init workspace
-if [ -f "$REPO_ROOT/.dvc/config" ]; then
-    mkdir -p "$INSTALL_DIR/.dvc"
-    cp "$REPO_ROOT/.dvc/config" "$INSTALL_DIR/.dvc/config"
-    # Initialize DVC in no-scm mode if not already done
-    if [ ! -f "$INSTALL_DIR/.dvc/.dvc_initialized" ]; then
-        (cd "$INSTALL_DIR" && dvc init --no-scm 2>/dev/null || true)
-        cp "$REPO_ROOT/.dvc/config" "$INSTALL_DIR/.dvc/config"
-        touch "$INSTALL_DIR/.dvc/.dvc_initialized"
-    fi
-    echo "  [OK] DVC workspace initialized at $INSTALL_DIR"
+# The repo is cloned, but app files are in jetson/ subdirectory
+# Create symlinks or copy to expected locations
+APP_SRC="$INSTALL_DIR/jetson/app"
+APP_DST="$INSTALL_DIR/app"
+SCRIPTS_SRC="$INSTALL_DIR/jetson/scripts"
+SCRIPTS_DST="$INSTALL_DIR/scripts"
+
+# Remove existing and create symlinks to jetson/ subdirectory
+rm -rf "$APP_DST" "$SCRIPTS_DST" 2>/dev/null || true
+ln -sf "$APP_SRC" "$APP_DST"
+ln -sf "$SCRIPTS_SRC" "$SCRIPTS_DST"
+echo "  [OK] Symlinked app/ and scripts/ to jetson/ subdirectory"
+
+# Copy requirements.txt
+cp "$INSTALL_DIR/jetson/requirements.txt" "$INSTALL_DIR/requirements.txt" 2>/dev/null || true
+
+# DVC is already in the cloned repo - just verify
+if [ -d "$INSTALL_DIR/.dvc" ] && [ -d "$INSTALL_DIR/dvc" ]; then
+    echo "  [OK] DVC already configured in cloned repo"
+else
+    echo "  [WARN] DVC not found in repo - on-device validation may not work"
 fi
 
 # Config: copy example if config.json doesn't exist yet
-if [ ! -f "$INSTALL_DIR/config/config.json" ]; then
-    if [ -f "$SCRIPT_DIR/config/config.json" ]; then
-        cp "$SCRIPT_DIR/config/config.json" "$INSTALL_DIR/config/config.json"
-    elif [ -f "$SCRIPT_DIR/config/config.example.json" ]; then
-        cp "$SCRIPT_DIR/config/config.example.json" "$INSTALL_DIR/config/config.json"
+CONFIG_DIR="$INSTALL_DIR/config"
+mkdir -p "$CONFIG_DIR/secrets"
+if [ ! -f "$CONFIG_DIR/config.json" ]; then
+    if [ -f "$INSTALL_DIR/jetson/config/config.json" ]; then
+        cp "$INSTALL_DIR/jetson/config/config.json" "$CONFIG_DIR/config.json"
+    elif [ -f "$INSTALL_DIR/jetson/config/config.example.json" ]; then
+        cp "$INSTALL_DIR/jetson/config/config.example.json" "$CONFIG_DIR/config.json"
         echo "  [INFO] Created config.json from config.example.json."
-        echo "  Edit $INSTALL_DIR/config/config.json to set Supabase credentials."
     fi
 else
     echo "  [OK] config.json already exists — not overwriting."
@@ -182,8 +202,8 @@ fi
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 # Standard permissions: user read-write, others read-only
-chmod 755 "$INSTALL_DIR/config" "$INSTALL_DIR/models"
-find "$INSTALL_DIR/config" "$INSTALL_DIR/models" -type f -exec chmod 644 {} + 2>/dev/null || true
+chmod 755 "$CONFIG_DIR" "$INSTALL_DIR/models"
+find "$CONFIG_DIR" "$INSTALL_DIR/models" -type f -exec chmod 644 {} + 2>/dev/null || true
 # Data and logs: user read-write
 chmod 755 "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
 find "$INSTALL_DIR/data" -type d -exec chmod 755 {} + 2>/dev/null || true
