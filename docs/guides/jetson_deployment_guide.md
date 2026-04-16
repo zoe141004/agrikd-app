@@ -73,12 +73,15 @@ manually at `$INSTALL_DIR/models/<leaf_type>_student.onnx`
 git clone https://github.com/zoe141004/agrikd-app.git
 cd agrikd-app/jetson
 
-# Create config.json from the template (config.json is gitignored)
-cp config/config.example.json config/config.json
-# Edit config/config.json to fill in Supabase credentials if desired
+# PREREQUISITE: Generate a provisioning token from Admin Dashboard
+# Dashboard → Devices → Provisioning Tokens → Generate Token
+# Copy the agrikd://... token string
 
-# Run the automated setup (requires root for systemd)
+# Run the automated setup with token
 chmod +x setup_jetson.sh
+sudo AGRIKD_PROVISION_TOKEN="agrikd://..." ./setup_jetson.sh
+
+# Or run interactively (will prompt for token)
 sudo ./setup_jetson.sh
 ```
 
@@ -210,36 +213,91 @@ Installs pip packages not available via apt:
 > **Why pin numpy < 2?** PyCUDA's C extension is compiled against numpy 1.x ABI.
 > Installing numpy 2.x causes `AttributeError: _ARRAY_API not found` at runtime.
 
-### Step 8 -- Configure Supabase Credentials
+### Step 8 -- Device Provisioning (MANDATORY)
 
-Supabase credentials are needed for model download (step 9) and runtime data sync.
-The script checks for credentials in this order:
+> **⚠ IMPORTANT:** Provisioning is **REQUIRED** for Jetson setup. Without a valid
+> provisioning token, the setup script will exit with an error. This ensures all
+> devices are registered in the cloud management system for:
+> - Cloud sync of predictions to Supabase
+> - OTA (Over-The-Air) model updates from Admin Dashboard
+> - Device visibility and management in the Dashboard
+> - GCS credentials for on-device engine validation
 
-1. **Already in config.json** — if `sync_env.py` was run on a dev machine and the
-   config was copied, credentials are already present.
-2. **Environment variables** — pass `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the
-   script for CI/CD or scripted installs:
+**Step 8a -- Provisioning Token:**
+
+The script checks for an existing provisioning (`device_state.json`) or prompts
+for a token:
+
+1. **Environment variable** (CI/CD or scripted installs):
    ```bash
-   sudo SUPABASE_URL=https://... SUPABASE_ANON_KEY=sb_... ./setup_jetson.sh
+   sudo AGRIKD_PROVISION_TOKEN="agrikd://..." ./setup_jetson.sh
    ```
-3. **Interactive prompt** — the script offers three options:
-   - **(1) Provisioning token** (recommended) — paste a token from the Admin
-     Dashboard (Devices → Provisioning Tokens → Generate Token). This registers
-     the device AND injects credentials.
-   - **(2) Manual entry** — enter Supabase URL and anon key directly.
-   - **(3) Skip** — configure later; models must be placed manually.
+2. **Interactive prompt** — paste the token when prompted.
+
+To generate a token:
+1. Open Admin Dashboard → **Devices** → **Provisioning Tokens** tab
+2. Click **Generate Token** (tokens expire in 24 hours)
+3. Copy the `agrikd://...` token string
+
+The provisioning script (`provision.py`) performs:
+- Token validation (not used, not expired)
+- Hardware ID detection (MAC + serial hash)
+- Device registration via `provision_device` RPC
+- Creates `config.json` with embedded Supabase credentials
+- Creates `device_state.json` with device token
+
+**Step 8b -- GCS Credentials (Optional):**
+
+After successful provisioning, the script fetches GCS read-only credentials from
+Supabase `system_secrets` table. These credentials enable:
+- DVC dataset access for on-device model validation
+- Engine hash verification against training data
+
+If no GCS key is configured in the Dashboard (Settings → Integrations), this
+step is skipped with a warning. The device will still function, but validation
+features will be unavailable.
 
 ### Step 9 -- Download ONNX Models
 
-ONNX models are downloaded from Supabase Storage using the credentials configured
-in step 8. If no credentials are configured, this step is skipped and you can
-place ONNX files manually:
+Models are downloaded based on the device's **assigned configuration** from the
+Admin Dashboard:
+
+**Priority 1 -- Assigned Models:**
+If the device has been assigned specific model versions via the Dashboard
+(Devices → Edit → Model Versions), those exact versions are downloaded:
+
+```
+Fetching assigned model versions from device config...
+Assigned models: tomato:1.2.0 burmese_grape_leaf:1.3.0
+```
+
+**Priority 2 -- Fallback to Active:**
+If no specific version is assigned, or the assigned version has no ONNX file,
+the script falls back to the latest **active** model:
+
+```
+[WARN] No ONNX for tomato v1.3.0 — trying latest active...
+Fallback to active: tomato v1.2.0
+```
+
+**Model Download Process:**
+1. Try pre-built TensorRT engine matching device hardware tag
+2. If no cached engine, download ONNX file
+3. Update `config.json` with versioned model paths
 
 ```bash
-# Manual placement
-cp tomato_student.onnx /opt/agrikd/models/
-cp burmese_grape_leaf_student.onnx /opt/agrikd/models/
+# Example output
+Device tag: jetson-orin-nx-engineering-reference_trt10.3.0.30
+Querying ONNX for tomato v1.2.0...
+Trying pre-built engine for tomato v1.2.0 (jetson-orin-nx...)...
+No pre-built engine available — falling back to ONNX download
+Downloading ONNX: tomato v1.2.0...
+[OK] Downloaded ONNX for tomato v1.2.0 (1964668 bytes)
 ```
+
+> **Version Consistency:** Engine filenames include the version
+> (e.g., `tomato_student_v1.2.0.engine`) matching the ONNX content. This
+> prevents version mismatch when fallback occurs.
 
 ### Step 10 -- Convert ONNX → TensorRT Engines
 
@@ -290,26 +348,46 @@ application appears in the desktop environment's application menu as
 Verifies the `agrikd` user is in the `video` group for `/dev/video*` access.
 Lists connected cameras using `v4l2-ctl` if available.
 
-Supabase sync is optional; the system operates fully offline without it.
-
 ---
 
 ## Zero-Touch Provisioning
 
+> **Note:** Provisioning is now **MANDATORY** in setup_jetson.sh. The device
+> cannot complete setup without a valid token.
+
 ### Prerequisites
-- Admin creates a provisioning token on the Dashboard: **Devices -> Provisioning Tokens -> Generate Token**
+- Admin creates a provisioning token on the Dashboard: **Devices → Provisioning Tokens → Generate Token**
 - Token format: `agrikd://<base64url encoded JSON>` (contains Supabase URL, anon key, token ID, expiry)
+- Tokens expire after **24 hours**
 
 ### Provisioning Flow
-1. Run `setup_jetson.sh` -- it prompts for token at step 8
-2. Or manually: `python3 /opt/agrikd/scripts/provision.py agrikd://...`
-3. Script validates token -> detects hardware -> registers device -> writes `config/config.json` and `data/device_state.json`
-4. Device starts in `unassigned` status, running Local-First (capture + inference + SQLite)
-5. Admin assigns user on Dashboard -> next poll cycle syncs all backlog
+1. Run `setup_jetson.sh` with token via env var or interactive prompt
+2. Script validates token → detects hardware → registers device → writes `config.json` and `device_state.json`
+3. GCS credentials are fetched (if configured in Dashboard Settings)
+4. Device appears in Dashboard with `unassigned` status
+5. Admin assigns user and model versions on Dashboard
+6. Next sync cycle applies configuration and syncs backlog
+
+### Token Management (Dashboard)
+
+| Action | Description |
+|--------|-------------|
+| **Generate** | Create new token (24h expiry) |
+| **Copy** | Copy token string to clipboard |
+| **Delete** | Remove unused/used/expired tokens |
+| **Revoke** | Same as delete for active tokens |
+
+### Device Actions (Dashboard)
+
+| Status | Available Actions |
+|--------|-------------------|
+| **Online/Assigned** | Edit config, Decommission |
+| **Offline/Unassigned** | Edit config, Decommission |
+| **Decommissioned** | **Reactivate**, **Delete permanently** |
 
 ### Hardware Identity
-- `hw_id = SHA-256(MAC:serial)` -- unique per physical device
-- Serial fallback chain: device-tree -> DBUS machine-id -> disk UUID
+- `hw_id = SHA-256(MAC:serial)` — unique per physical device
+- Serial fallback chain: device-tree → DBUS machine-id → disk UUID
 - Re-register blocked for active devices (use `--force` or decommission first)
 
 ### device_state.json (single-writer: sync_engine only)

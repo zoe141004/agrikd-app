@@ -219,6 +219,9 @@ User-submitted feedback on incorrect predictions.
 
 Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
 
+> **Note:** Device provisioning is now **MANDATORY** for Jetson setup. All
+> devices must be provisioned via token before they can sync with the cloud.
+
 #### Device Fleet Tab
 - View all registered Jetson devices with status, owner, config sync status,
   and assigned model versions with engine build status.
@@ -247,13 +250,25 @@ Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
   4. Engine is hot-swapped without service restart.
   5. Device status updates engine build progress (`building` → `ready` or
      `error`).
-- Decommission: marks device inactive, unlinks user.
+- **Device Actions by Status**:
+
+  | Status | Available Actions |
+  |--------|-------------------|
+  | Online/Assigned | Edit, Decommission |
+  | Offline/Unassigned | Edit, Decommission |
+  | Decommissioned | **Reactivate** (restore to active), **Delete** (permanent removal) |
 
 #### Provisioning Tokens Tab
 - Generate one-time `agrikd://` provisioning tokens (24h expiry).
 - Copy token to send to field technician.
 - View token history: status (Active/Used/Expired), used_by hw_id.
-- Revoke unused tokens.
+- **Token Actions**:
+
+  | Token Status | Available Actions |
+  |--------------|-------------------|
+  | Active (unused) | Copy, Delete |
+  | Used | Delete (with warning about re-provisioning) |
+  | Expired | Delete |
 
 #### Dashboard Stat Card
 - "Active Devices" card on main dashboard (counts online + assigned + offline
