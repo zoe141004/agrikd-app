@@ -247,79 +247,92 @@ def run_tensorrt_inference(engine_path, images, num_classes, input_size=224):
 
     Returns (predictions, latencies_ms) where predictions is an array of
     predicted class indices and latencies_ms is a list of per-image latencies.
+
+    Note: Explicitly creates CUDA context to work from background threads.
     """
     import pycuda.driver as cuda
-    import pycuda.autoinit  # noqa: F401 — initialises CUDA context
-    import tensorrt as trt
 
-    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    runtime = trt.Runtime(TRT_LOGGER)
+    # Initialize CUDA driver (required when called from background thread)
+    cuda.init()
+    device = cuda.Device(0)
+    cuda_ctx = device.make_context()
 
-    with open(engine_path, "rb") as f:
-        engine = runtime.deserialize_cuda_engine(f.read())
-    context = engine.create_execution_context()
+    try:
+        import tensorrt as trt
 
-    # Allocate buffers (use configurable input_size, not hardcoded 224)
-    input_shape = (1, 3, input_size, input_size)
-    output_shape = (1, num_classes)
-    h_input = cuda.pagelocked_empty(input_shape, dtype=np.float32)
-    h_output = cuda.pagelocked_empty(output_shape, dtype=np.float32)
-    d_input = cuda.mem_alloc(h_input.nbytes)
-    d_output = cuda.mem_alloc(h_output.nbytes)
-    stream = cuda.Stream()
+        TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+        runtime = trt.Runtime(TRT_LOGGER)
 
-    # Detect TensorRT version for correct execution API
-    trt_major = int(trt.__version__.split(".")[0])
+        with open(engine_path, "rb") as f:
+            engine = runtime.deserialize_cuda_engine(f.read())
+        context = engine.create_execution_context()
 
-    if trt_major >= 10:
-        input_name = engine.get_tensor_name(0)
-        output_name = engine.get_tensor_name(1)
-        context.set_tensor_address(input_name, int(d_input))
-        context.set_tensor_address(output_name, int(d_output))
+        # Allocate buffers (use configurable input_size, not hardcoded 224)
+        input_shape = (1, 3, input_size, input_size)
+        output_shape = (1, num_classes)
+        h_input = cuda.pagelocked_empty(input_shape, dtype=np.float32)
+        h_output = cuda.pagelocked_empty(output_shape, dtype=np.float32)
+        d_input = cuda.mem_alloc(h_input.nbytes)
+        d_output = cuda.mem_alloc(h_output.nbytes)
+        stream = cuda.Stream()
 
-    predictions = []
-    all_probs = []
-    latencies_ms = []
+        # Detect TensorRT version for correct execution API
+        trt_major = int(trt.__version__.split(".")[0])
 
-    # Warmup (5 iterations)
-    for _ in range(5):
-        np.copyto(h_input, images[0])
-        cuda.memcpy_htod_async(d_input, h_input, stream)
         if trt_major >= 10:
-            context.execute_async_v3(stream_handle=stream.handle)
-        else:
-            context.execute_async_v2(bindings=[int(d_input), int(d_output)],
-                                     stream_handle=stream.handle)
-        cuda.memcpy_dtoh_async(h_output, d_output, stream)
-        stream.synchronize()
+            input_name = engine.get_tensor_name(0)
+            output_name = engine.get_tensor_name(1)
+            context.set_tensor_address(input_name, int(d_input))
+            context.set_tensor_address(output_name, int(d_output))
 
-    for img in images:
-        np.copyto(h_input, img)
+        predictions = []
+        all_probs = []
+        latencies_ms = []
 
-        start = time.perf_counter()
-        cuda.memcpy_htod_async(d_input, h_input, stream)
-        if trt_major >= 10:
-            context.execute_async_v3(stream_handle=stream.handle)
-        else:
-            context.execute_async_v2(bindings=[int(d_input), int(d_output)],
-                                     stream_handle=stream.handle)
-        cuda.memcpy_dtoh_async(h_output, d_output, stream)
-        stream.synchronize()
-        elapsed_ms = (time.perf_counter() - start) * 1000
+        # Warmup (5 iterations)
+        for _ in range(5):
+            np.copyto(h_input, images[0])
+            cuda.memcpy_htod_async(d_input, h_input, stream)
+            if trt_major >= 10:
+                context.execute_async_v3(stream_handle=stream.handle)
+            else:
+                context.execute_async_v2(bindings=[int(d_input), int(d_output)],
+                                         stream_handle=stream.handle)
+            cuda.memcpy_dtoh_async(h_output, d_output, stream)
+            stream.synchronize()
 
-        logits = h_output.flatten()
-        exp_logits = np.exp(logits - np.max(logits))
-        probs = exp_logits / exp_logits.sum()
+        for img in images:
+            np.copyto(h_input, img)
 
-        predictions.append(int(np.argmax(probs)))
-        all_probs.append(probs.copy())
-        latencies_ms.append(elapsed_ms)
+            start = time.perf_counter()
+            cuda.memcpy_htod_async(d_input, h_input, stream)
+            if trt_major >= 10:
+                context.execute_async_v3(stream_handle=stream.handle)
+            else:
+                context.execute_async_v2(bindings=[int(d_input), int(d_output)],
+                                         stream_handle=stream.handle)
+            cuda.memcpy_dtoh_async(h_output, d_output, stream)
+            stream.synchronize()
+            elapsed_ms = (time.perf_counter() - start) * 1000
 
-    # Cleanup GPU memory
-    d_input.free()
-    d_output.free()
+            logits = h_output.flatten()
+            exp_logits = np.exp(logits - np.max(logits))
+            probs = exp_logits / exp_logits.sum()
 
-    return np.array(predictions), np.array(all_probs), latencies_ms
+            predictions.append(int(np.argmax(probs)))
+            all_probs.append(probs.copy())
+            latencies_ms.append(elapsed_ms)
+
+        # Cleanup GPU memory
+        d_input.free()
+        d_output.free()
+
+        return np.array(predictions), np.array(all_probs), latencies_ms
+
+    finally:
+        # Always cleanup CUDA context to avoid resource leaks
+        cuda_ctx.pop()
+        cuda_ctx.detach()
 
 
 def compute_metrics(predictions, labels, probs, latencies_ms,
