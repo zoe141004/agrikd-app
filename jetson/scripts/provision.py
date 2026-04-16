@@ -136,29 +136,48 @@ def parse_token(raw):
         sys.exit(1)
 
     encoded = raw[len(prefix):]
+    # base64url to base64: replace - with +, _ with /
+    encoded = encoded.replace('-', '+').replace('_', '/')
     # Add padding if needed
     padding = 4 - len(encoded) % 4
     if padding != 4:
         encoded += "=" * padding
 
     try:
-        decoded = base64.urlsafe_b64decode(encoded)
+        decoded = base64.b64decode(encoded)
         data = json.loads(decoded)
     except Exception as e:
         print(f"ERROR: Cannot decode token: {e}")
         sys.exit(1)
 
+    # Support both old format (url/key/tid) and new format (sub_url/key/token_id)
+    if "sub_url" in data:
+        data["url"] = data.pop("sub_url")
+    if "token_id" in data:
+        data["tid"] = data.pop("token_id")
+    
     required = ("url", "key", "tid")
     for key in required:
         if key not in data:
             print(f"ERROR: Token missing required field: {key}")
             sys.exit(1)
 
-    # Check expiry
-    exp = data.get("exp", 0)
-    if exp and time.time() > exp:
-        print("ERROR: Provisioning token has expired. Ask Admin for a new one.")
-        sys.exit(1)
+    # Check expiry (support both epoch timestamp and ISO string)
+    exp = data.get("exp")
+    if exp:
+        if isinstance(exp, str):
+            # ISO format: "2024-04-16T10:00:00.000Z"
+            try:
+                from datetime import datetime
+                exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                exp_ts = exp_dt.timestamp()
+            except:
+                exp_ts = 0
+        else:
+            exp_ts = exp
+        if exp_ts and time.time() > exp_ts:
+            print("ERROR: Provisioning token has expired. Ask Admin for a new one.")
+            sys.exit(1)
 
     return data
 

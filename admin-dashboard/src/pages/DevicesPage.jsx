@@ -277,8 +277,22 @@ export default function DevicesPage() {
       })
       if (err) throw err
 
+      // Build the full agrikd:// token URL
+      // Token format: base64url(JSON{sub_url, key, token_id, exp})
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const tokenPayload = {
+        sub_url: supabaseUrl,
+        key: supabaseKey,
+        token_id: id,
+        exp: expiresAt,
+      }
+      const encodedPayload = btoa(JSON.stringify(tokenPayload))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') // base64url
+      const fullToken = `agrikd://${encodedPayload}`
+
       await logAudit(supabase, 'token_create', 'provisioning_token', id, { label: tokenLabel, expires_at: expiresAt })
-      setGeneratedToken(id)
+      setGeneratedToken(fullToken)
       setTokenLabel('')
       loadData()
       triggerRefresh()
