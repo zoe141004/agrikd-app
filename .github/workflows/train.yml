@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install dvc dvc-gs
+          pip install "dvc>=3,<4" "dvc-gs>=3,<4"
           pip install -r mlops_pipeline/requirements-evaluate.txt
           pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu --force-reinstall
 
@@ -73,7 +73,7 @@ jobs:
           LEAF_TYPE: ${{ inputs.leaf_type }}
 
       - name: Upload trained models
-        if: always()
+        if: success()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: trained-models

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
+import { getGitHubConfig } from '../lib/helpers'
 
 export default function SystemHealthPage() {
   const { refreshKey } = useData()
@@ -63,9 +64,7 @@ export default function SystemHealthPage() {
 
     // GitHub API check
     try {
-      const ghToken = sessionStorage.getItem('gh_token')
-      const ghOwner = sessionStorage.getItem('gh_owner')
-      const ghRepo = sessionStorage.getItem('gh_repo')
+      const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
       if (ghToken && ghOwner && ghRepo) {
         const ghCtrl = new AbortController()
         const ghTimeout = setTimeout(() => ghCtrl.abort(), 10000)

@@ -27,7 +27,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install dvc dvc-gs requests
+        run: pip install "dvc>=3,<4" "dvc-gs>=3,<4" "requests>=2.32,<3"
 
       - name: Setup GCS credentials
         run: |

@@ -211,6 +211,30 @@ export default function SettingsPage() {
     }
   }
 
+  async function loadAuditLogs(signal, page = 0) {
+    const safePage = Math.max(0, page || 0)
+    setAuditLoading(true)
+    setAuditError(null)
+    try {
+      const from = safePage * AUDIT_PAGE_SIZE
+      const to = from + AUDIT_PAGE_SIZE - 1
+      const { data, error: err } = await supabase
+        .from('audit_log').select('*')
+        .order('created_at', { ascending: false }).range(from, to)
+      if (signal?.aborted) return
+      if (err) throw err
+      setAuditLogs(data || [])
+      setAuditHasMore((data || []).length >= AUDIT_PAGE_SIZE)
+      setAuditPage(safePage)
+    } catch (err) {
+      if (err.name !== 'AbortError' && !signal?.aborted) {
+        setAuditError(err.message || 'Failed to load audit logs')
+        setAuditHasMore(false)
+      }
+    }
+    if (!signal?.aborted) setAuditLoading(false)
+  }
+
   const { ghToken, ghOwner, ghRepo } = getGitHubConfig()
   const ghConfigured = !!(ghToken && ghOwner && ghRepo)
 
@@ -598,28 +622,4 @@ export default function SettingsPage() {
       <ConfirmDialog open={!!confirmAction} {...(confirmAction || {})} onCancel={() => setConfirmAction(null)} />
     </>
   )
-
-  async function loadAuditLogs(signal, page = 0) {
-    const safePage = Math.max(0, page || 0)
-    setAuditLoading(true)
-    setAuditError(null)
-    try {
-      const from = safePage * AUDIT_PAGE_SIZE
-      const to = from + AUDIT_PAGE_SIZE - 1
-      const { data, error: err } = await supabase
-        .from('audit_log').select('*')
-        .order('created_at', { ascending: false }).range(from, to)
-      if (signal?.aborted) return
-      if (err) throw err
-      setAuditLogs(data || [])
-      setAuditHasMore((data || []).length >= AUDIT_PAGE_SIZE)
-      setAuditPage(safePage)
-    } catch (err) {
-      if (err.name !== 'AbortError' && !signal?.aborted) {
-        setAuditError(err.message || 'Failed to load audit logs')
-        setAuditHasMore(false)
-      }
-    }
-    if (!signal?.aborted) setAuditLoading(false)
-  }
 }

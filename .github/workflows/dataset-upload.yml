@@ -53,7 +53,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install dvc dvc-gs gdown kaggle
+        run: pip install "dvc>=3,<4" "dvc-gs>=3,<4" "gdown>=5,<7" "kaggle>=1.6,<2"
 
       - name: Setup GCS credentials
         run: |
