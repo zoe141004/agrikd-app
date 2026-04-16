@@ -81,8 +81,14 @@ def _find_repo_root(start_path=None):
     return None
 
 
-def setup_gcs_credentials(config):
-    """Set GOOGLE_APPLICATION_CREDENTIALS from config."""
+def setup_gcs_credentials(config, repo_root=None):
+    """Set GOOGLE_APPLICATION_CREDENTIALS from config.
+
+    Args:
+        config: Config dict containing gcs.credentials_path
+        repo_root: Optional repo root for resolving relative paths.
+                   If not provided, uses parent of script directory.
+    """
     gcs_config = config.get("gcs", {})
     creds_path = gcs_config.get("credentials_path")
     if not creds_path:
@@ -91,8 +97,12 @@ def setup_gcs_credentials(config):
             "Set config.gcs.credentials_path to the service account JSON file."
         )
     if not os.path.isabs(creds_path):
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        creds_path = os.path.join(base, creds_path)
+        # Resolve relative to repo_root or fallback to script parent
+        if repo_root:
+            creds_path = os.path.join(repo_root, creds_path)
+        else:
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            creds_path = os.path.join(base, creds_path)
     if not os.path.isfile(creds_path):
         raise FileNotFoundError(f"GCS credentials not found: {creds_path}")
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
@@ -422,7 +432,7 @@ def main():
 
     data_dir = None
     try:
-        setup_gcs_credentials(config)
+        setup_gcs_credentials(config, repo_root)
         data_dir = dvc_pull_dataset(leaf_type, repo_root)
         images, labels, class_names = load_test_images(data_dir, input_size)
         log.info("Loaded %d test images across %d classes", len(images), len(class_names))
