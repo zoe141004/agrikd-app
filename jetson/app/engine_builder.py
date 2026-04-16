@@ -48,16 +48,18 @@ def find_trtexec() -> str | None:
 
 
 def build_engine(onnx_path: str, engine_path: str, *,
-                 timeout: int = 1800) -> None:
+                 timeout: int = 1800, workspace_mb: int = 1024) -> None:
     """Convert an ONNX model to a TensorRT engine using trtexec.
 
-    Uses the same flags as setup_jetson.sh (--fp16 only, no --workspace)
-    to ensure consistent behaviour across initial setup and runtime rebuilds.
+    Uses --fp16 with sufficient workspace for optimal layer fusion and
+    kernel selection.  Matches the flags in convert_onnx_to_tensorrt.py
+    to ensure consistent accuracy across CI and on-device builds.
 
     Args:
-        onnx_path:   Path to the source .onnx file.
-        engine_path: Destination path for the .engine file.
-        timeout:     Max seconds to wait for trtexec (default 30 min).
+        onnx_path:    Path to the source .onnx file.
+        engine_path:  Destination path for the .engine file.
+        timeout:      Max seconds to wait for trtexec (default 30 min).
+        workspace_mb: Max workspace size in MB for TRT builder (default 1024).
 
     Raises:
         FileNotFoundError: trtexec binary not found.
@@ -75,7 +77,8 @@ def build_engine(onnx_path: str, engine_path: str, *,
         [trtexec_bin,
          f"--onnx={onnx_path}",
          f"--saveEngine={engine_path}",
-         "--fp16"],
+         "--fp16",
+         f"--workspace={workspace_mb}"],
         capture_output=True, text=True, timeout=timeout,
     )
     if result.returncode != 0:

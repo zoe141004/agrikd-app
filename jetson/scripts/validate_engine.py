@@ -226,7 +226,6 @@ def load_test_images(data_dir, input_size=224, cv_fold=None, cv_n_splits=5):
         raise RuntimeError(f"No class subdirectories found in {data_dir}")
 
     # Collect all image paths and labels
-    import cv2
     all_paths = []
     all_labels = []
     for cls_idx, cls_name in enumerate(class_names):
@@ -268,17 +267,20 @@ def load_test_images(data_dir, input_size=224, cv_fold=None, cv_n_splits=5):
 
     log.info("Test split: %d images out of %d total", len(test_idx), len(all_labels))
 
-    # Preprocess test images — track valid labels to stay aligned
+    # Preprocess test images using PIL (matching evaluate_models.py pipeline)
+    # PIL and OpenCV use different interpolation, causing accuracy differences.
+    from PIL import Image
+
     images = []
     valid_labels = []
     for idx in test_idx:
-        img = cv2.imread(all_paths[idx])
-        if img is None:
+        try:
+            pil_img = Image.open(all_paths[idx]).convert("RGB")
+        except Exception:
             log.warning("Could not read image: %s", all_paths[idx])
             continue
-        img = cv2.resize(img, (input_size, input_size))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32) / 255.0
+        pil_img = pil_img.resize((input_size, input_size), Image.BILINEAR)
+        img = np.array(pil_img, dtype=np.float32) / 255.0
         img = (img - IMAGENET_MEAN) / IMAGENET_STD
         img = np.transpose(img, (2, 0, 1))  # HWC → CHW
         images.append(img[np.newaxis, ...])  # Add batch dim: (1,3,H,W)

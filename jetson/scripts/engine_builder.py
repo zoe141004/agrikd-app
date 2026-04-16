@@ -162,13 +162,20 @@ def register_engine(base_url, key, leaf_type, version, hardware_tag,
     log.info("Registered engine in model_engines table")
 
 
-def build_engine(onnx_path, engine_path):
-    """Build TensorRT engine from ONNX using trtexec."""
+def build_engine(onnx_path, engine_path, workspace_mb=1024):
+    """Build TensorRT engine from ONNX using trtexec.
+
+    Args:
+        onnx_path:    Path to the source .onnx file.
+        engine_path:  Destination path for the .engine file.
+        workspace_mb: Max workspace size in MB for TRT builder (default 1024).
+    """
     cmd = [
         "trtexec",
         f"--onnx={onnx_path}",
         f"--saveEngine={engine_path}",
         "--fp16",
+        f"--workspace={workspace_mb}",
     ]
     log.info("Building engine: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
