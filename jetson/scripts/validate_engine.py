@@ -152,12 +152,17 @@ def dvc_pull_dataset(leaf_type, repo_root):
     return data_dir
 
 
-def cleanup_dataset(data_dir):
+def cleanup_dataset(data_dir, repo_root=None):
     """Remove downloaded dataset and DVC cache to conserve storage.
 
     On Jetson edge devices, storage is limited. After validation:
     1. Remove the extracted dataset directory
     2. Clear DVC cache (~/.dvc/cache or .dvc/cache) to free space
+
+    Args:
+        data_dir: Path to downloaded dataset directory
+        repo_root: Optional repo root for locating local DVC cache.
+                   If not provided, uses _find_repo_root().
     """
     if os.path.isdir(data_dir):
         shutil.rmtree(data_dir, ignore_errors=True)
@@ -165,9 +170,10 @@ def cleanup_dataset(data_dir):
 
     # Clear DVC cache to free storage
     # DVC stores downloaded files in cache before linking to workspace
+    effective_repo_root = repo_root or _find_repo_root() or "."
     dvc_cache_paths = [
         os.path.expanduser("~/.dvc/cache"),  # Global cache
-        os.path.join(_find_repo_root() or ".", ".dvc", "cache"),  # Local cache
+        os.path.join(effective_repo_root, ".dvc", "cache"),  # Local cache
     ]
     for cache_path in dvc_cache_paths:
         if os.path.isdir(cache_path):
@@ -461,7 +467,7 @@ def main():
         sys.exit(1)
     finally:
         if data_dir:
-            cleanup_dataset(data_dir)
+            cleanup_dataset(data_dir, repo_root)
         os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
 

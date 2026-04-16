@@ -624,6 +624,11 @@ class SyncEngine:
             config_abs = os.path.abspath(self._config_path)
             repo_root = os.path.dirname(os.path.dirname(config_abs))
 
+            # Validate repo_root contains dvc/ directory
+            if not os.path.isdir(os.path.join(repo_root, "dvc")):
+                logger.warning("Repo root %s has no dvc/ directory — skipping validation", repo_root)
+                return
+
             result = subprocess.run(
                 [
                     "python3", validate_script,
@@ -632,6 +637,7 @@ class SyncEngine:
                     "--engine-path", os.path.abspath(engine_path),
                     "--version", version,
                     "--hw-tag", hw_tag,
+                    "--repo-root", repo_root,
                 ],
                 capture_output=True,
                 text=True,
