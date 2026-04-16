@@ -100,7 +100,10 @@ def setup_gcs_credentials(config):
 
 
 def dvc_pull_dataset(leaf_type, repo_root):
-    """Pull test dataset via DVC. Returns path to dataset directory."""
+    """Pull test dataset via DVC. Returns path to dataset directory.
+
+    Cleans up stale DVC lock files before pulling to avoid lock conflicts.
+    """
     dvc_file = LEAF_TYPE_TO_DVC.get(leaf_type)
     if not dvc_file:
         raise ValueError(f"Unknown leaf_type for DVC: {leaf_type}")
@@ -111,6 +114,15 @@ def dvc_pull_dataset(leaf_type, repo_root):
 
     data_dir_name = LEAF_TYPE_TO_DIR.get(leaf_type, leaf_type)
     data_dir = os.path.join(repo_root, "data", data_dir_name)
+
+    # Clean up stale DVC lock files (from aborted processes)
+    dvc_lock_file = os.path.join(repo_root, ".dvc", "tmp", "lock")
+    if os.path.isfile(dvc_lock_file):
+        try:
+            os.remove(dvc_lock_file)
+            log.info("Removed stale DVC lock file: %s", dvc_lock_file)
+        except OSError:
+            pass  # Race condition or permission issue - DVC will handle
 
     log.info("Pulling dataset via DVC: %s", dvc_file)
     result = subprocess.run(

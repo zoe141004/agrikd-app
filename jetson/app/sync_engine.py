@@ -77,6 +77,9 @@ class SyncEngine:
         )
         self._config_lock = threading.Lock()
 
+        # DVC lock: serialize validation to prevent concurrent DVC pulls
+        self._dvc_lock = threading.Lock()
+
         # Engine build status per leaf_type: 'ready' | 'building' | 'error'
         self._engine_status = {}
         # Applied model versions (track what's actually loaded)
@@ -580,7 +583,14 @@ class SyncEngine:
         """Run on-device TensorRT validation: DVC pull → eval → upload → cleanup.
 
         Non-fatal: if validation fails, the engine is still usable.
+        Uses _dvc_lock to serialize DVC pulls (avoid lock conflicts).
         """
+        # Acquire DVC lock to prevent concurrent pulls (DVC uses file locks)
+        with self._dvc_lock:
+            self._run_engine_validation_locked(leaf_type, version, hw_tag, engine_path)
+
+    def _run_engine_validation_locked(self, leaf_type, version, hw_tag, engine_path):
+        """Internal validation logic (must be called with _dvc_lock held)."""
         try:
             # Load full config from file (SyncEngine only stores sync subsection)
             if not self._config_path or not os.path.isfile(self._config_path):
