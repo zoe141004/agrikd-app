@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,30 @@ log = logging.getLogger("engine_builder")
 
 
 # get_hardware_tag and sha256_file are imported from supabase_helpers above
+
+
+# Known JetPack / system locations for trtexec
+_TRTEXEC_CANDIDATES = [
+    "/usr/src/tensorrt/bin/trtexec",
+    "/usr/local/cuda/bin/trtexec",
+    "/usr/lib/tensorrt/bin/trtexec",
+    "/opt/tensorrt/bin/trtexec",
+    "/usr/local/bin/trtexec",
+]
+
+
+def _find_trtexec():
+    """Locate trtexec binary (PATH → known JetPack locations → ~/trtexec)."""
+    path = shutil.which("trtexec")
+    if path:
+        return path
+    for candidate in _TRTEXEC_CANDIDATES:
+        if os.path.isfile(candidate):
+            return candidate
+    home = os.path.expanduser("~/trtexec")
+    if os.path.isfile(home):
+        return home
+    return None
 
 
 def supabase_rpc(base_url, key, function_name, params):
@@ -170,8 +195,13 @@ def build_engine(onnx_path, engine_path, workspace_mb=1024):
         engine_path:  Destination path for the .engine file.
         workspace_mb: Max workspace size in MB for TRT builder (default 1024).
     """
+    trtexec_bin = _find_trtexec()
+    if not trtexec_bin:
+        raise FileNotFoundError(
+            "trtexec not found in PATH or known JetPack locations"
+        )
     cmd = [
-        "trtexec",
+        trtexec_bin,
         f"--onnx={onnx_path}",
         f"--saveEngine={engine_path}",
         "--fp16",
@@ -198,7 +228,16 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
     key = config["sync"]["supabase_key"]
     models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
     os.makedirs(models_dir, exist_ok=True)
-    engine_path = os.path.join(models_dir, f"{leaf_type}_student.engine")
+
+    # Read locally configured version and engine_path from config.json
+    model_cfg = config.get("models", {}).get(leaf_type, {})
+    local_version = model_cfg.get("version", "")
+    local_engine_rel = model_cfg.get("engine_path", "")
+    local_engine_path = ""
+    if local_engine_rel:
+        # Resolve relative to install root (parent of scripts/)
+        install_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local_engine_path = os.path.join(install_root, local_engine_rel)
 
     log.info("=== Processing: %s (hardware: %s) ===", leaf_type, hardware_tag)
 
@@ -212,62 +251,84 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
     onnx_url = onnx_info[0]["onnx_url"]
     log.info("Latest version: %s, ONNX URL: %s", version, onnx_url[:80])
 
-    needs_benchmark = validate  # assume we need benchmark if --validate
+    # Use versioned engine path
+    engine_path = os.path.join(models_dir, f"{leaf_type}_student_v{version}.engine")
 
-    # Step 2: Check if engine already exists for this hardware on Supabase
-    engine_info = supabase_rpc(base_url, key, "get_engine_for_hardware", {
-        "p_leaf_type": leaf_type,
-        "p_version": version,
-        "p_hardware_tag": hardware_tag,
-    })
+    # Check if local engine already exists for this version (or a compatible one)
+    if local_engine_path and os.path.isfile(local_engine_path) and local_version == version:
+        log.info("Engine already exists locally: %s (v%s) — skipping build",
+                 local_engine_path, local_version)
+        engine_path = local_engine_path
+    elif os.path.isfile(engine_path):
+        log.info("Engine already exists locally: %s — skipping build", engine_path)
+    else:
+        needs_benchmark = validate
 
-    if engine_info:
-        # Engine exists — download directly
-        log.info("Pre-built engine found for %s/%s/%s, downloading...", leaf_type, version, hardware_tag)
-        _validate_storage_url(engine_info[0]["engine_url"], base_url)
-        download_file(engine_info[0]["engine_url"], engine_path, key)
-        expected_sha = engine_info[0]["engine_sha256"]
-        actual_sha = sha256_file(engine_path)
-        if expected_sha and actual_sha != expected_sha:
-            log.error("SHA-256 mismatch! Expected %s, got %s", expected_sha, actual_sha)
-            os.remove(engine_path)
-            return False
-        log.info("Engine downloaded and verified: %s", engine_path)
+        # Step 2: Check if engine already exists for this hardware on Supabase
+        engine_info = supabase_rpc(base_url, key, "get_engine_for_hardware", {
+            "p_leaf_type": leaf_type,
+            "p_version": version,
+            "p_hardware_tag": hardware_tag,
+        })
 
-        # Check if benchmark already exists for this engine
-        if validate and engine_info[0].get("benchmark_json"):
+        if engine_info:
+            # Engine exists on Supabase — download directly
+            log.info("Pre-built engine found for %s/%s/%s, downloading...", leaf_type, version, hardware_tag)
+            _validate_storage_url(engine_info[0]["engine_url"], base_url)
+            download_file(engine_info[0]["engine_url"], engine_path, key)
+            expected_sha = engine_info[0]["engine_sha256"]
+            actual_sha = sha256_file(engine_path)
+            if expected_sha and actual_sha != expected_sha:
+                log.error("SHA-256 mismatch! Expected %s, got %s", expected_sha, actual_sha)
+                os.remove(engine_path)
+                return False
+            log.info("Engine downloaded and verified: %s", engine_path)
+
+            # Check if benchmark already exists for this engine
+            if validate and engine_info[0].get("benchmark_json"):
+                log.info("Benchmark already exists for %s/%s/%s — skipping validation",
+                         leaf_type, version, hardware_tag)
+                needs_benchmark = False
+        else:
+            # Step 3: No cached engine — download ONNX and build
+            log.info("No cached engine for %s/%s — building from ONNX...", hardware_tag, version)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
+                _validate_storage_url(onnx_url, base_url)
+                size = download_file(onnx_url, onnx_path, key)
+                log.info("Downloaded ONNX: %d bytes", size)
+
+                # Build engine
+                build_engine(onnx_path, engine_path)
+
+            # Step 4: Upload engine to Supabase
+            engine_sha = sha256_file(engine_path)
+            storage_path = f"engines/{leaf_type}/{version}/{hardware_tag}.engine"
+            engine_url_remote = upload_engine(base_url, key, engine_path, storage_path)
+
+            # Read device_id from config if available
+            device_id = config.get("device", {}).get("device_id")
+
+            # Step 5: Register in model_engines table
+            register_engine(base_url, key, leaf_type, version, hardware_tag,
+                            engine_url_remote, engine_sha, device_id)
+
+            log.info("Engine build + upload complete for %s v%s (%s)", leaf_type, version, hardware_tag)
+
+    # Step 6: On-device validation (if --validate)
+    needs_benchmark = validate
+    if needs_benchmark:
+        # Check Supabase for existing benchmark before running expensive eval
+        engine_info = supabase_rpc(base_url, key, "get_engine_for_hardware", {
+            "p_leaf_type": leaf_type,
+            "p_version": version,
+            "p_hardware_tag": hardware_tag,
+        })
+        if engine_info and engine_info[0].get("benchmark_json"):
             log.info("Benchmark already exists for %s/%s/%s — skipping validation",
                      leaf_type, version, hardware_tag)
             needs_benchmark = False
-    else:
-        # Step 3: No cached engine — download ONNX and build
-        log.info("No cached engine for %s/%s — building from ONNX...", hardware_tag, version)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            onnx_path = os.path.join(tmpdir, f"{leaf_type}_student.onnx")
-            _validate_storage_url(onnx_url, base_url)
-            size = download_file(onnx_url, onnx_path, key)
-            log.info("Downloaded ONNX: %d bytes", size)
 
-            # Build engine
-            build_engine(onnx_path, engine_path)
-
-        # Step 4: Upload engine to Supabase
-        engine_sha = sha256_file(engine_path)
-        # Path must match sync_engine._upload_engine_cache and setup_jetson.sh:
-        #   engines/{leaf_type}/{version}/{hardware_tag}.engine
-        storage_path = f"engines/{leaf_type}/{version}/{hardware_tag}.engine"
-        engine_url_remote = upload_engine(base_url, key, engine_path, storage_path)
-
-        # Read device_id from config if available
-        device_id = config.get("device", {}).get("device_id")
-
-        # Step 5: Register in model_engines table
-        register_engine(base_url, key, leaf_type, version, hardware_tag,
-                        engine_url_remote, engine_sha, device_id)
-
-        log.info("Engine build + upload complete for %s v%s (%s)", leaf_type, version, hardware_tag)
-
-    # Step 6: On-device validation (if --validate and benchmark not yet present)
     if needs_benchmark:
         try:
             _run_validation(config, leaf_type, version, hardware_tag, engine_path)
