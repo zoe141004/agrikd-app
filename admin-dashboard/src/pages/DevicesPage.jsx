@@ -426,7 +426,6 @@ export default function DevicesPage() {
                                 </div>
                               )
                             })
-                            })
                           })()}
                         </td>
                         <td>
