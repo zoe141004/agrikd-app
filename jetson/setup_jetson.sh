@@ -469,6 +469,64 @@ else
         DEVICE_TAG="${HW_MODEL}_trt${TRT_VER}"
         echo "  Device tag: $DEVICE_TAG"
 
+        # Helper function to fetch model metadata and update config
+        update_model_config() {
+            local leaf_type="$1"
+            local version="$2"
+            local model_path="$3"
+            local path_key="$4"  # engine_path or onnx_path
+            
+            python3 << PYEOF
+import json, sys, requests
+
+cfg_path = "$CFG"
+leaf_type = "$leaf_type"
+version = "$version"
+model_path = "$model_path"
+path_key = "$path_key"
+supa_url = "$CFG_SUPA_URL"
+supa_key = "$CFG_SUPA_KEY"
+
+# Fetch model metadata from registry
+try:
+    resp = requests.get(
+        f"{supa_url}/rest/v1/model_registry",
+        params={"leaf_type": f"eq.{leaf_type}", "version": f"eq.{version}", 
+                "select": "num_classes,class_labels,display_name"},
+        headers={"apikey": supa_key, "Authorization": f"Bearer {supa_key}"},
+        timeout=10
+    )
+    meta = resp.json()[0] if resp.status_code == 200 and resp.json() else {}
+except:
+    meta = {}
+
+# Load and update config
+with open(cfg_path) as f:
+    c = json.load(f)
+
+if 'models' not in c:
+    c['models'] = {}
+if leaf_type not in c['models']:
+    c['models'][leaf_type] = {}
+
+c['models'][leaf_type][path_key] = model_path
+c['models'][leaf_type]['version'] = version
+
+# Add metadata if available
+if meta.get('num_classes'):
+    c['models'][leaf_type]['num_classes'] = meta['num_classes']
+if meta.get('class_labels'):
+    c['models'][leaf_type]['class_labels'] = meta['class_labels']
+if meta.get('display_name'):
+    c['models'][leaf_type]['display_name'] = meta['display_name']
+
+with open(cfg_path, 'w') as f:
+    json.dump(c, f, indent=4)
+
+print(f"  Updated config: {leaf_type} v{version} (classes: {meta.get('num_classes', 'N/A')})")
+PYEOF
+        }
+
         # Fetch assigned model versions from device config (if provisioned)
         ASSIGNED_MODELS=""
         if [ -n "$DEVICE_TOKEN" ]; then
