@@ -327,6 +327,12 @@ MobileNetV2 Student (.pth checkpoint)
 All scripts accept a `--config` flag pointing to a per-leaf JSON configuration file.
 `convert_pth_to_tflite.py` (ai-edge-torch) only works on Linux.
 
+**Evaluation test split modes:**
+- **Standard (no fold):** Stratified split with seed=42: 70% train / 10% val / 20% test
+- **Fold-aware (`--fold N`):** StratifiedKFold(n_splits=5, seed=42), fold N as test set (~20%)
+- Fold is encoded in version string: `v1.2.3-fold5`. Jetson parses this to use the same split.
+- Both CI pipeline (`evaluate_models.py`) and Jetson (`validate_engine.py`) support fold-aware evaluation.
+
 ### 7.3 Mobile Inference (Flutter)
 
 ```

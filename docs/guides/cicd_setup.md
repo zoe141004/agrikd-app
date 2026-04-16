@@ -118,16 +118,23 @@ Full MLOps pipeline triggered manually with inputs:
 - `leaf_type`: tomato or burmese_grape_leaf
 - `version`: semantic version (e.g., 1.2.0)
 - `model_url`: Supabase Storage URL of the .pth checkpoint
+- `fold` (optional): CV fold number (1-5) for StratifiedKFold test set. If empty, uses standard 70/10/20 split.
 
 Steps:
 1. Download checkpoint from Supabase Storage
 2. Convert PTH → ONNX → TFLite (float16 + float32)
 3. Validate cross-format consistency
 4. Evaluate on test dataset (quality gate: configurable min accuracy)
+   - Standard mode: Stratified split 70% train / 10% val / 20% test (seed=42)
+   - Fold mode: StratifiedKFold(5), fold N as test set (~20%), matching CV research setup
 5. Compute SHA-256 hashes
 6. Upload TFLite model + benchmark results to Supabase
 7. **Auto-activate**: If fewer than 2 active models exist for the leaf_type, the new model is promoted to `active` **before** archiving existing active models to `model_versions`. This activate-first order prevents a window where no model is active if a network failure interrupts the process.
 8. Update pipeline_runs table status (converting → evaluating → completed/failed)
+
+**Fold-aware versioning:** When a fold is specified in the Dashboard, the version is
+suffixed with `-foldN` (e.g., `1.2.0-fold5`). The Jetson edge device parses this
+suffix and uses the same StratifiedKFold split for on-device TensorRT evaluation.
 
 ## 6. DVC Workflows
 
