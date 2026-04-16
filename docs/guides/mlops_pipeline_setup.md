@@ -105,7 +105,7 @@ python run_pipeline.py --config ../configs/tomato.json --skip-validate
 | 1 | `convert_pth_to_onnx.py` | PTH to ONNX conversion (required) |
 | 2 | `convert_onnx_to_tflite.py` | ONNX to TFLite (float16 + float32) |
 | 3 | `validate_models.py` | Cross-format validation (optional) |
-| 4 | `evaluate_models.py` | Full benchmark on test dataset (optional) |
+| 4 | `evaluate_models.py` | Full benchmark on test dataset (supports fold-aware CV split) |
 
 ## 6. Run Individual Scripts
 
@@ -119,8 +119,11 @@ python convert_onnx_to_tflite.py --config ../configs/tomato.json
 # Validate cross-format consistency:
 python validate_models.py --config ../configs/tomato.json
 
-# Evaluate on test set:
+# Evaluate on test set (standard 70/10/20 split):
 python evaluate_models.py --config ../configs/tomato.json
+
+# Evaluate with fold-aware CV split (fold 1-5):
+python evaluate_models.py --config ../configs/tomato.json --fold 5
 ```
 
 ## 7. Adding a New Dataset

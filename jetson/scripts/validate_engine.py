@@ -80,6 +80,9 @@ def parse_fold_from_version(version_str):
             log.warning("Fold %d out of expected range [1,5], using anyway", fold)
         return fold
     return None
+
+
+def _find_repo_root(start_path=None):
     """Find the project root by looking for the dvc/ directory.
 
     Works in both dev context (jetson/scripts/) and Jetson deploy (/opt/agrikd/scripts/).

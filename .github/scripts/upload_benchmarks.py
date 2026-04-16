@@ -69,14 +69,16 @@ def upload_file_to_storage(supabase_url, service_key, local_path, storage_path):
 
 def upload_all_models(supabase_url, service_key, leaf_type, version):
     """Upload PTH, ONNX, and TFLite float16 to Supabase Storage. Returns dict of URLs."""
-    prefix = f"{leaf_type}/v{version}"
+    # Strip fold suffix for clean storage paths (e.g., "1.2.3-fold5" → "1.2.3")
+    base_version = re.sub(r'-fold\d+$', '', version)
+    prefix = f"{leaf_type}/v{base_version}"
     models_dir = f"models/{leaf_type}"
     checkpoint_dir = "model_checkpoints_student"
 
     files = [
-        (f"{checkpoint_dir}/{leaf_type}_student.pth",           f"{prefix}/{leaf_type}_v{version}_checkpoint.pth", "pth"),
-        (f"{models_dir}/{leaf_type}_student.onnx",              f"{prefix}/{leaf_type}_v{version}.onnx",           "onnx"),
-        (f"{models_dir}/{leaf_type}_student_float16.tflite",    f"{prefix}/{leaf_type}_v{version}_float16.tflite", "tflite_float16"),
+        (f"{checkpoint_dir}/{leaf_type}_student.pth",           f"{prefix}/{leaf_type}_v{base_version}_checkpoint.pth", "pth"),
+        (f"{models_dir}/{leaf_type}_student.onnx",              f"{prefix}/{leaf_type}_v{base_version}.onnx",           "onnx"),
+        (f"{models_dir}/{leaf_type}_student_float16.tflite",    f"{prefix}/{leaf_type}_v{base_version}_float16.tflite", "tflite_float16"),
     ]
 
     urls = {}

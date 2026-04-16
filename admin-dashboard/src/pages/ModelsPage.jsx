@@ -450,7 +450,8 @@ export default function ModelsPage() {
       setUploadProgress(20)
 
       const ext = uploadFile.name.split('.').pop()
-      const storagePath = `${leaf_type}/v${effectiveVersion}/${leaf_type}_v${effectiveVersion}_checkpoint.${ext}`
+      // Use base version (without fold suffix) for clean storage paths
+      const storagePath = `${leaf_type}/v${version}/${leaf_type}_v${version}_checkpoint.${ext}`
       setUploadProgress(40)
 
       const publicUrl = await uploadToStorage(supabase, 'models', storagePath, uploadFile)

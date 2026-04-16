@@ -118,6 +118,8 @@ Full MLOps pipeline triggered manually with inputs:
 - `leaf_type`: tomato or burmese_grape_leaf
 - `version`: semantic version (e.g., 1.2.0)
 - `model_url`: Supabase Storage URL of the .pth checkpoint
+- `min_accuracy` (optional, default: 80): Minimum accuracy threshold (%) for quality gate
+- `pipeline_run_id` (optional): Pipeline run ID for status tracking (from pipeline_runs table)
 - `fold` (optional): CV fold number (1-5) for StratifiedKFold test set. If empty, uses standard 70/10/20 split.
 
 Steps:
