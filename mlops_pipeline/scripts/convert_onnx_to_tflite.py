@@ -21,6 +21,7 @@ import sys
 import shutil
 import glob
 import time
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,8 @@ def convert_onnx_to_tflite(input_path, output_path):
 
     output_dir = os.path.dirname(output_path) or '.'
     os.makedirs(output_dir, exist_ok=True)
-    temp_dir = os.path.join(output_dir, f"temp_onnx2tf_{int(time.time())}")
-    os.makedirs(temp_dir, exist_ok=True)
+    # Use tempfile.mkdtemp for unique temporary directory (avoids race conditions)
+    temp_dir = tempfile.mkdtemp(prefix="onnx2tf_", dir=output_dir)
 
     logger.info(f"[...] Converting ONNX -> TFLite using onnx2tf Python API...")
 

@@ -1,7 +1,7 @@
 # AgriKD — System Technical Reference
 
 > Single source of truth for all technical details.
-> Last verified: 2026-04-15.
+> Last verified: 2026-04-16.
 
 ---
 

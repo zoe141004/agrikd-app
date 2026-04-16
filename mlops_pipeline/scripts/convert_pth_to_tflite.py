@@ -89,7 +89,7 @@ def convert_pth_to_tflite_aiedge(
         logger.info(f"    Conversion took {time.time() - start_time:.2f} seconds.")
     except Exception as e:
         logger.error(f"\n[!] AI-Edge-Torch Conversion Failed:\n{e}")
-        return
+        raise RuntimeError(f"AI-Edge-Torch conversion failed: {e}") from e
 
     # 5. Export to disk
     edge_model.export(output_path)

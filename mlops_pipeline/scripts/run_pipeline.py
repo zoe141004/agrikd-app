@@ -40,10 +40,19 @@ def run_step(step_name, cmd):
     logger.info(f"  CMD:  {' '.join(cmd)}\n")
 
     start = time.perf_counter()
-    result = subprocess.run(cmd, cwd=SCRIPTS_DIR)
+    result = subprocess.run(cmd, cwd=SCRIPTS_DIR, capture_output=True, text=True)
     elapsed = time.perf_counter() - start
 
+    # Always log stdout
+    if result.stdout:
+        for line in result.stdout.strip().split('\n'):
+            logger.info(f"  {line}")
+
     if result.returncode != 0:
+        # Log stderr on failure
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                logger.error(f"  {line}")
         logger.error(f"\n[FAIL] {step_name} failed (exit code {result.returncode})")
         return False
 
