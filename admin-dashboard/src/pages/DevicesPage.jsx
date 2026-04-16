@@ -586,19 +586,19 @@ export default function DevicesPage() {
                         </td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{tok.used_by_hw_id || '—'}</td>
                         <td>
-                          {!isUsed && (
-                            <button
-                              className="btn btn-sm"
-                              style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
-                              onClick={() => setConfirmAction({
-                                title: 'Delete Token',
-                                message: `Delete token "${tok.label || tok.id.slice(0,8)}"? This cannot be undone.`,
-                                danger: true,
-                                confirmLabel: 'Delete',
-                                onConfirm: () => { setConfirmAction(null); deleteToken(tok) },
-                              })}
-                            >Del</button>
-                          )}
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
+                            onClick={() => setConfirmAction({
+                              title: 'Delete Token',
+                              message: isUsed
+                                ? `Delete used token "${tok.label || tok.id.slice(0,8)}"? The device that used this token will NOT be affected.`
+                                : `Delete token "${tok.label || tok.id.slice(0,8)}"? This cannot be undone.`,
+                              danger: true,
+                              confirmLabel: 'Delete',
+                              onConfirm: () => { setConfirmAction(null); deleteToken(tok) },
+                            })}
+                          >Del</button>
                         </td>
                       </tr>
                     )
