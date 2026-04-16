@@ -799,7 +799,7 @@ else
             --onnx="$onnx_file" \
             --saveEngine="$engine_file" \
             --fp16 \
-            --memPoolSize=workspace:1024MiB
+            --memPoolSize=workspace:1024M
         TRT_EXIT=$?
         set -e
 

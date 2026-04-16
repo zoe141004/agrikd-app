@@ -74,7 +74,7 @@ def convert_with_trtexec(
         "trtexec",
         f"--onnx={input_path}",
         f"--saveEngine={output_path}",
-        f"--memPoolSize=workspace:{workspace_mb}MiB",
+        f"--memPoolSize=workspace:{workspace_mb}M",
         "--explicitBatch",
     ]
     
