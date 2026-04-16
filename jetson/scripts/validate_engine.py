@@ -65,7 +65,21 @@ LEAF_TYPE_TO_DIR = {
 }
 
 
-def _find_repo_root(start_path=None):
+def parse_fold_from_version(version_str):
+    """Extract fold number from a version string like 'v1.2.3-fold5'.
+
+    Returns fold number (int, 1-indexed) or None if not present.
+    """
+    import re
+    if not version_str:
+        return None
+    m = re.search(r'-fold(\d+)', version_str)
+    if m:
+        fold = int(m.group(1))
+        if fold < 1 or fold > 5:
+            log.warning("Fold %d out of expected range [1,5], using anyway", fold)
+        return fold
+    return None
     """Find the project root by looking for the dvc/ directory.
 
     Works in both dev context (jetson/scripts/) and Jetson deploy (/opt/agrikd/scripts/).
@@ -187,8 +201,13 @@ def cleanup_dataset(data_dir, repo_root=None):
                      cache_path, cache_size / 1024 / 1024)
 
 
-def load_test_images(data_dir, input_size=224):
+def load_test_images(data_dir, input_size=224, cv_fold=None, cv_n_splits=5):
     """Load test split images using the same stratified split as CI pipeline.
+
+    Two modes:
+    - cv_fold=None: Standard stratified split (seed=42, 70/10/20).
+    - cv_fold=N: Use StratifiedKFold(n_splits=cv_n_splits) and take fold N
+      as test set (1-indexed), matching cross-validation research setup.
 
     Returns (images, labels, class_names) where images is a list of
     preprocessed numpy arrays in NCHW format.
@@ -217,22 +236,32 @@ def load_test_images(data_dir, input_size=224):
     all_labels = np.array(all_labels)
     indices = np.arange(len(all_labels))
 
-    # Stage 1: train (70%) vs temp (30%)
-    _, temp_idx = train_test_split(
-        indices,
-        test_size=(VAL_RATIO + TEST_RATIO),
-        stratify=all_labels,
-        random_state=SEED,
-    )
-    # Stage 2: val (1/3 of 30% = 10%) vs test (2/3 of 30% = 20%)
-    temp_labels = all_labels[temp_idx]
-    val_ratio_adj = VAL_RATIO / (VAL_RATIO + TEST_RATIO)
-    _, test_idx = train_test_split(
-        temp_idx,
-        test_size=(1 - val_ratio_adj),
-        stratify=temp_labels,
-        random_state=SEED,
-    )
+    if cv_fold is not None:
+        # StratifiedKFold mode: fold N as test set
+        from sklearn.model_selection import StratifiedKFold
+        skf = StratifiedKFold(n_splits=cv_n_splits, shuffle=True, random_state=SEED)
+        fold_iter = list(skf.split(indices, all_labels))
+        fold_0idx = cv_fold - 1
+        if fold_0idx < 0 or fold_0idx >= len(fold_iter):
+            raise ValueError(f"cv_fold={cv_fold} out of range [1, {cv_n_splits}]")
+        _, test_idx = fold_iter[fold_0idx]
+        log.info("Using StratifiedKFold: fold %d/%d as test set", cv_fold, cv_n_splits)
+    else:
+        # Standard 70/10/20 stratified split
+        _, temp_idx = train_test_split(
+            indices,
+            test_size=(VAL_RATIO + TEST_RATIO),
+            stratify=all_labels,
+            random_state=SEED,
+        )
+        temp_labels = all_labels[temp_idx]
+        val_ratio_adj = VAL_RATIO / (VAL_RATIO + TEST_RATIO)
+        _, test_idx = train_test_split(
+            temp_idx,
+            test_size=(1 - val_ratio_adj),
+            stratify=temp_labels,
+            random_state=SEED,
+        )
 
     log.info("Test split: %d images out of %d total", len(test_idx), len(all_labels))
 
@@ -431,6 +460,9 @@ def main():
         log.error("Model version not specified and not in config")
         sys.exit(1)
 
+    # Parse fold from version string (e.g., "v1.2.3-fold5" → fold=5)
+    cv_fold = parse_fold_from_version(version)
+
     # Hardware tag: CLI arg > auto-detect
     from supabase_helpers import get_hardware_tag
     hardware_tag = args.hw_tag or get_hardware_tag()
@@ -439,7 +471,7 @@ def main():
     try:
         setup_gcs_credentials(config, repo_root)
         data_dir = dvc_pull_dataset(leaf_type, repo_root)
-        images, labels, class_names = load_test_images(data_dir, input_size)
+        images, labels, class_names = load_test_images(data_dir, input_size, cv_fold=cv_fold)
         log.info("Loaded %d test images across %d classes", len(images), len(class_names))
 
         predictions, probs, latencies = run_tensorrt_inference(

@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: ''
+      fold:
+        description: 'CV fold number (1-5) for test set. Leave empty for standard 70/10/20 split.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -181,9 +186,15 @@ jobs:
             exit 1
           fi
           echo "Test data: $(ls "$DATA_DIR" | wc -l) class folders"
-          python mlops_pipeline/scripts/evaluate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json"
+          FOLD_ARG=""
+          if [ -n "$FOLD" ]; then
+            FOLD_ARG="--fold $FOLD"
+            echo "Using StratifiedKFold: fold $FOLD as test set"
+          fi
+          python mlops_pipeline/scripts/evaluate_models.py --config "mlops_pipeline/configs/${LEAF_TYPE}.json" $FOLD_ARG
         env:
           LEAF_TYPE: ${{ inputs.leaf_type }}
+          FOLD: ${{ inputs.fold }}
 
       - name: Quality Gate
         id: quality_gate

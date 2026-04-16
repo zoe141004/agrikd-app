@@ -51,10 +51,15 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
-                      seed=42, train_ratio=0.70, val_ratio=0.10, test_ratio=0.20):
+                      seed=42, train_ratio=0.70, val_ratio=0.10, test_ratio=0.20,
+                      cv_fold=None, cv_n_splits=5):
     """
-    Load test split from an ImageFolder dataset, reproducing the exact
-    KD training split (sklearn stratified, seed=42, 70/10/20).
+    Load test split from an ImageFolder dataset.
+
+    Two modes:
+    - cv_fold=None: Standard stratified split (seed=42, 70/10/20).
+    - cv_fold=N: Use StratifiedKFold(n_splits=cv_n_splits) and take fold N
+      as test set (1-indexed). Default fold=5 (last fold).
     """
     from torchvision import datasets, transforms
     from sklearn.model_selection import train_test_split
@@ -72,18 +77,29 @@ def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
     targets = np.array(dataset.targets)
     indices = np.arange(len(dataset))
 
-    # Stage 1: train (70%) vs temp (30%)
-    train_idx, temp_idx = train_test_split(
-        indices, test_size=(val_ratio + test_ratio),
-        stratify=targets, random_state=seed
-    )
-    # Stage 2: val (1/3 of 30% = 10%) vs test (2/3 of 30% = 20%)
-    temp_targets = targets[temp_idx]
-    val_ratio_adj = val_ratio / (val_ratio + test_ratio)
-    _, test_idx = train_test_split(
-        temp_idx, test_size=(1 - val_ratio_adj),
-        stratify=temp_targets, random_state=seed
-    )
+    if cv_fold is not None:
+        # StratifiedKFold mode: fold N as test set
+        from sklearn.model_selection import StratifiedKFold
+        skf = StratifiedKFold(n_splits=cv_n_splits, shuffle=True, random_state=seed)
+        fold_iter = list(skf.split(indices, targets))
+        fold_0idx = cv_fold - 1  # convert 1-indexed to 0-indexed
+        if fold_0idx < 0 or fold_0idx >= len(fold_iter):
+            raise ValueError(f"cv_fold={cv_fold} out of range [1, {cv_n_splits}]")
+        _, test_idx = fold_iter[fold_0idx]
+        logger.info(f"Using StratifiedKFold: fold {cv_fold}/{cv_n_splits} as test set")
+    else:
+        # Standard 70/10/20 stratified split
+        train_idx, temp_idx = train_test_split(
+            indices, test_size=(val_ratio + test_ratio),
+            stratify=targets, random_state=seed
+        )
+        # Stage 2: val (1/3 of 30% = 10%) vs test (2/3 of 30% = 20%)
+        temp_targets = targets[temp_idx]
+        val_ratio_adj = val_ratio / (val_ratio + test_ratio)
+        _, test_idx = train_test_split(
+            temp_idx, test_size=(1 - val_ratio_adj),
+            stratify=temp_targets, random_state=seed
+        )
 
     test_labels = targets[test_idx]
     test_subset = torch.utils.data.Subset(dataset, test_idx)
@@ -95,12 +111,13 @@ def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
 class ModelEvaluator:
     def __init__(self, pth_path, onnx_path, tflite_path, num_classes,
                  data_dir=None, output_dir=None, input_size=224,
-                 norm_mean=None, norm_std=None):
+                 norm_mean=None, norm_std=None, cv_fold=None):
         self.pth_path = pth_path
         self.onnx_path = onnx_path
         self.tflite_path = tflite_path  # float16 (deploy format)
         self.num_classes = num_classes
         self.input_size = input_size
+        self.cv_fold = cv_fold
         self.output_dir = output_dir or os.path.dirname(pth_path)
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -113,7 +130,8 @@ class ModelEvaluator:
         if data_dir and os.path.isdir(data_dir):
             logger.info(f"[*] Loading real test data from: {data_dir}")
             test_subset, test_labels, class_names = load_test_dataset(
-                data_dir, input_size=input_size, mean=norm_mean, std=norm_std
+                data_dir, input_size=input_size, mean=norm_mean, std=norm_std,
+                cv_fold=cv_fold
             )
             self.class_names = class_names
             self.test_labels = test_labels
@@ -410,6 +428,10 @@ class ModelEvaluator:
             f"**Date:** {time.strftime('%Y-%m-%d %H:%M')}",
             f"**Test Samples:** {self.num_samples}",
         ]
+        if self.cv_fold is not None:
+            report_parts.append(f"**Test Split:** StratifiedKFold(5) — Fold {self.cv_fold}")
+        else:
+            report_parts.append("**Test Split:** Stratified 70/10/20 (seed=42)")
         if self.class_names:
             report_parts.append(f"**Dataset:** {len(self.class_names)} classes")
         report_parts.extend(["", "### Benchmark Summary", "", md_table, ""])
@@ -464,6 +486,8 @@ class ModelEvaluator:
             "class_names": list(self.class_names) if self.class_names else None,
             "test_samples": self.num_samples,
             "input_size": self.input_size,
+            "cv_fold": self.cv_fold,
+            "test_split": f"fold{self.cv_fold}/5" if self.cv_fold else "70/10/20",
             "models": {
                 "pytorch": {
                     "path": self.pth_path,
@@ -544,6 +568,10 @@ def main():
                              "If provided, uses real test split for evaluation.")
     parser.add_argument("--output-dir", default=None,
                         help="Output directory for reports and charts")
+    parser.add_argument("--fold", type=int, default=None,
+                        help="CV fold number (1-indexed) for test set. "
+                             "Uses StratifiedKFold(5) and takes fold N as test. "
+                             "If omitted, uses standard 70/10/20 split.")
 
     args = parser.parse_args()
     _set_global_seeds(42)
@@ -577,7 +605,8 @@ def main():
     evaluator = ModelEvaluator(
         args.checkpoint, args.onnx, args.tflite, args.num_classes,
         data_dir=args.data_dir, output_dir=args.output_dir,
-        input_size=input_size, norm_mean=norm_mean, norm_std=norm_std
+        input_size=input_size, norm_mean=norm_mean, norm_std=norm_std,
+        cv_fold=args.fold
     )
     evaluator.run_all()
 

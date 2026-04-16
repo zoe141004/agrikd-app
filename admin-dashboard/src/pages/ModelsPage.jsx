@@ -19,7 +19,7 @@ export default function ModelsPage() {
   const [expandedId, setExpandedId] = useState(null)
 
   // Upload state
-  const [uploadForm, setUploadForm] = useState({ leaf_type: '', display_name: '', version: '1.0.0', description: '', num_classes: '', class_labels_raw: '', is_new_leaf: false })
+  const [uploadForm, setUploadForm] = useState({ leaf_type: '', display_name: '', version: '1.0.0', description: '', num_classes: '', class_labels_raw: '', is_new_leaf: false, fold: '' })
   const [uploadFile, setUploadFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -411,10 +411,12 @@ export default function ModelsPage() {
   const handleUpload = async (e) => {
     e.preventDefault()
     if (!uploadFile) { setUploadMsg({ type: 'error', text: 'Please select a model file.' }); return }
-    const { leaf_type, display_name, description, num_classes, class_labels_raw } = uploadForm
+    const { leaf_type, display_name, description, num_classes, class_labels_raw, fold } = uploadForm
     const version = uploadForm.version?.trim()
     if (!leaf_type || !version) { setUploadMsg({ type: 'error', text: 'Leaf type and version are required.' }); return }
     if (!/^\d+\.\d+\.\d+$/.test(version)) { setUploadMsg({ type: 'error', text: 'Version must be in semver format (e.g. 1.0.0).' }); return }
+    // Append fold suffix to version for DB and pipeline (e.g., "1.2.3-fold5")
+    const effectiveVersion = fold ? `${version}-fold${fold}` : version
 
     setUploading(true); setUploadProgress(10); setUploadMsg(null)
 
@@ -424,7 +426,7 @@ export default function ModelsPage() {
 
     try {
       // 1. Archive current model if exists (match exact leaf_type + version being uploaded)
-      const existing = models.find(m => m.leaf_type === leaf_type && m.version === version)
+      const existing = models.find(m => m.leaf_type === leaf_type && m.version === effectiveVersion)
       if (existing) {
         await supabase.from('model_versions').upsert({
           leaf_type: existing.leaf_type,
@@ -440,7 +442,7 @@ export default function ModelsPage() {
 
       // 1b. Clear stale benchmarks for this leaf_type+version (prevent UNIQUE conflict)
       await supabase.from('model_benchmarks').delete()
-        .eq('leaf_type', leaf_type).eq('version', version)
+        .eq('leaf_type', leaf_type).eq('version', effectiveVersion)
       setUploadProgress(15)
 
       // 2. Upload .pth checkpoint to Supabase Storage
@@ -448,7 +450,7 @@ export default function ModelsPage() {
       setUploadProgress(20)
 
       const ext = uploadFile.name.split('.').pop()
-      const storagePath = `${leaf_type}/v${version}/${leaf_type}_v${version}_checkpoint.${ext}`
+      const storagePath = `${leaf_type}/v${effectiveVersion}/${leaf_type}_v${effectiveVersion}_checkpoint.${ext}`
       setUploadProgress(40)
 
       const publicUrl = await uploadToStorage(supabase, 'models', storagePath, uploadFile)
@@ -464,7 +466,7 @@ export default function ModelsPage() {
       const payload = {
         leaf_type,
         display_name: display_name || existing?.display_name || leaf_type,
-        version,
+        version: effectiveVersion,
         model_url: publicUrl,
         sha256_checksum: 'pending',
         description: description || existing?.description || null,
@@ -479,7 +481,7 @@ export default function ModelsPage() {
       setUploadProgress(80)
       if (error) throw new Error(error.message)
 
-      logAudit(supabase, 'model_uploaded', 'model', leaf_type, { version, display_name: display_name || leaf_type })
+      logAudit(supabase, 'model_uploaded', 'model', leaf_type, { version: effectiveVersion, display_name: display_name || leaf_type })
 
       // 5. Auto-trigger full pipeline
       let pipelineMsg = ''
@@ -491,7 +493,7 @@ export default function ModelsPage() {
           try {
             const { data: { user } } = await supabase.auth.getUser()
             const { data: run, error: runErr } = await supabase.from('pipeline_runs').insert({
-              leaf_type, version, status: 'pending', triggered_by: user?.id
+              leaf_type, version: effectiveVersion, status: 'pending', triggered_by: user?.id
             }).select().single()
             if (runErr) {
               console.warn('pipeline_runs insert failed:', runErr.message)
@@ -503,7 +505,8 @@ export default function ModelsPage() {
           }
 
           await triggerGitHubWorkflow('model-pipeline.yml', {
-            leaf_type, version, model_url: publicUrl,
+            leaf_type, version: effectiveVersion, model_url: publicUrl,
+            ...(fold ? { fold } : {}),
             ...(runId ? { pipeline_run_id: runId } : {})
           })
           pipelineMsg += ' Full pipeline triggered — track progress in the Validate tab.'
@@ -511,7 +514,7 @@ export default function ModelsPage() {
           else startGitHubPolling()
           setPipelineStatus('pending')
           setPipelineDismissed(false)
-          logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version, workflow: 'model-pipeline.yml' })
+          logAudit(supabase, 'pipeline_triggered', 'model', leaf_type, { version: effectiveVersion, workflow: 'model-pipeline.yml' })
         } else {
           pipelineMsg = ' Configure GitHub in Settings to auto-trigger the pipeline.'
         }
@@ -520,7 +523,7 @@ export default function ModelsPage() {
       }
 
       setUploadProgress(100)
-      setUploadMsg({ type: 'success', text: `Checkpoint "${display_name || leaf_type}" v${version} uploaded as staging. Pipeline will convert to ONNX + TFLite, validate, and evaluate.${pipelineMsg}` })
+      setUploadMsg({ type: 'success', text: `Checkpoint "${display_name || leaf_type}" v${effectiveVersion} uploaded as staging. Pipeline will convert to ONNX + TFLite, validate, and evaluate.${pipelineMsg}` })
       setUploadFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadModels()
@@ -564,9 +567,14 @@ export default function ModelsPage() {
         console.warn('pipeline_runs insert error:', prErr.message)
       }
 
+      // Parse fold from version string if present (e.g., "1.2.3-fold5")
+      const foldMatch = targetModel.version?.match(/-fold(\d+)/)
+      const foldParam = foldMatch ? foldMatch[1] : ''
+
       await triggerGitHubWorkflow('model-pipeline.yml', {
         leaf_type: valTarget, version: targetModel.version,
         model_url: targetModel.model_url || '',
+        ...(foldParam ? { fold: foldParam } : {}),
         ...(runId ? { pipeline_run_id: runId } : {})
       })
       setValMsg({ type: 'success', text: `Pipeline dispatched for "${valTarget}" v${targetModel.version}. Track progress in the status banner.` })
@@ -1085,6 +1093,19 @@ export default function ModelsPage() {
               <div className="form-group">
                 <label className="form-label">Version *</label>
                 <input className="form-input" value={uploadForm.version} onChange={e => setUploadForm(f => ({ ...f, version: e.target.value }))} placeholder="1.0.0" required />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">CV Fold (optional)</label>
+                <select className="form-input" value={uploadForm.fold} onChange={e => setUploadForm(f => ({ ...f, fold: e.target.value }))}>
+                  <option value="">None — standard 70/10/20 split</option>
+                  <option value="1">Fold 1</option>
+                  <option value="2">Fold 2</option>
+                  <option value="3">Fold 3</option>
+                  <option value="4">Fold 4</option>
+                  <option value="5">Fold 5 (default CV test set)</option>
+                </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>Select a fold to use StratifiedKFold(5) test split for evaluation. Leave empty for standard split.</div>
               </div>
 
               <div className="form-group">
