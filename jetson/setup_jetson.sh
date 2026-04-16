@@ -612,16 +612,7 @@ except: pass
                         chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
                         chmod 644 "$engine_file"
                         echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION (${ENGINE_SIZE} bytes)"
-                        python3 -c "
-import json, sys
-cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(cfg_path) as f: c = json.load(f)
-if 'models' not in c: c['models'] = {}
-if leaf not in c['models']: c['models'][leaf] = {}
-c['models'][leaf]['engine_path'] = eng_path
-c['models'][leaf]['version'] = ver
-with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
-" "$CFG" "$leaf_type" "models/$(basename $engine_file)" "$MODEL_VERSION" 2>/dev/null || true
+                        update_model_config "$leaf_type" "$MODEL_VERSION" "models/$(basename $engine_file)" "engine_path"
                         continue
                     fi
                 fi
@@ -636,16 +627,7 @@ with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
                     chown "$SERVICE_USER:$SERVICE_USER" "$onnx_file"
                     chmod 644 "$onnx_file"
                     echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION (${ONNX_SIZE} bytes)"
-                    python3 -c "
-import json, sys
-cfg_path, leaf, onnx_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(cfg_path) as f: c = json.load(f)
-if 'models' not in c: c['models'] = {}
-if leaf not in c['models']: c['models'][leaf] = {}
-c['models'][leaf]['onnx_path'] = onnx_path
-c['models'][leaf]['version'] = ver
-with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
-" "$CFG" "$leaf_type" "models/$(basename $onnx_file)" "$MODEL_VERSION" 2>/dev/null || true
+                    update_model_config "$leaf_type" "$MODEL_VERSION" "models/$(basename $onnx_file)" "onnx_path"
                 else
                     echo "  [WARN] Failed to download ONNX for $leaf_type (HTTP $HTTP_CODE)"
                 fi
@@ -694,16 +676,7 @@ with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
                         chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
                         chmod 644 "$engine_file"
                         echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION"
-                        python3 -c "
-import json, sys
-cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(cfg_path) as f: c = json.load(f)
-if 'models' not in c: c['models'] = {}
-if leaf not in c['models']: c['models'][leaf] = {}
-c['models'][leaf]['engine_path'] = eng_path
-c['models'][leaf]['version'] = ver
-with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
-" "$CFG" "$leaf_type" "models/$(basename $engine_file)" "$MODEL_VERSION" 2>/dev/null || true
+                        update_model_config "$leaf_type" "$MODEL_VERSION" "models/$(basename $engine_file)" "engine_path"
                         continue
                     fi
                 fi
@@ -717,16 +690,7 @@ with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
                     chown "$SERVICE_USER:$SERVICE_USER" "$onnx_file"
                     chmod 644 "$onnx_file"
                     echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION (${ONNX_SIZE} bytes)"
-                    python3 -c "
-import json, sys
-cfg_path, leaf, onnx_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(cfg_path) as f: c = json.load(f)
-if 'models' not in c: c['models'] = {}
-if leaf not in c['models']: c['models'][leaf] = {}
-c['models'][leaf]['onnx_path'] = onnx_path
-c['models'][leaf]['version'] = ver
-with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
-" "$CFG" "$leaf_type" "models/$(basename $onnx_file)" "$MODEL_VERSION" 2>/dev/null || true
+                    update_model_config "$leaf_type" "$MODEL_VERSION" "models/$(basename $onnx_file)" "onnx_path"
                 else
                     echo "  [WARN] Failed to download ONNX for $leaf_type (HTTP $HTTP_CODE)"
                 fi
@@ -734,6 +698,7 @@ with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
         fi
     fi
 fi
+echo ""
 # ── 10. Convert ONNX → TensorRT engines ─────────────────────
 echo "[10/13] Converting ONNX models to TensorRT FP16 engines..."
 
