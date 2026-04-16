@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAudit } from '../lib/helpers'
 import { useData } from '../lib/DataContext'
@@ -15,19 +15,25 @@ export default function UsersPage() {
   const [useProfiles, setUseProfiles] = useState(true)
   const [error, setError] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
+  const mountedRef = useRef(true)
 
-  useEffect(() => { loadUsers() }, [refreshKey])
+  useEffect(() => {
+    mountedRef.current = true
+    loadUsers()
+    return () => { mountedRef.current = false }
+  }, [refreshKey])
 
   const loadUsers = async () => {
     setLoading(true)
     try {
       const { data, error: err } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(500)
+      if (!mountedRef.current) return
       if (!err && data) {
         setUseProfiles(true); setUsers(data)
       } else {
         setUseProfiles(false)
         const { data: predData } = await supabase.from('predictions').select('user_id, created_at').order('created_at', { ascending: false }).limit(5000)
-        if (predData) {
+        if (predData && mountedRef.current) {
           const map = {}
           predData.forEach(p => {
             if (!map[p.user_id]) map[p.user_id] = { id: p.user_id, email: p.user_id, role: 'user', is_active: true, created_at: p.created_at, prediction_count: 0 }
@@ -36,8 +42,8 @@ export default function UsersPage() {
           setUsers(Object.values(map))
         }
       }
-    } catch (err) { setError(err.message) }
-    setLoading(false)
+    } catch (err) { if (mountedRef.current) setError(err.message) }
+    if (mountedRef.current) setLoading(false)
   }
 
   const openEdit = (u) => { setForm({ role: u.role || 'user', is_active: u.is_active !== false }); setEditUser(u) }

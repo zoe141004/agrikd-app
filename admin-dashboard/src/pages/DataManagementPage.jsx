@@ -41,7 +41,6 @@ export default function DataManagementPage() {
   const [dvcLog, setDvcLog] = useState([])
 
   // CSV import state
-  const [, setCsvFile] = useState(null)
   const [csvParsed, setCsvParsed] = useState(null)
   const [csvImporting, setCsvImporting] = useState(false)
   const [csvProgress, setCsvProgress] = useState(0)
@@ -720,7 +719,7 @@ export default function DataManagementPage() {
         imported += batch.length; setCsvProgress(Math.round(imported / all.length * 100))
       }
       setCsvMsg({ type: 'success', text: `Imported ${imported.toLocaleString()} records.` })
-      setCsvParsed(null); setCsvFile(null); if (csvRef.current) csvRef.current.value = ''
+      setCsvParsed(null); if (csvRef.current) csvRef.current.value = ''
       loadData(); refreshLeafTypes(); triggerRefresh()
     } catch (err) { setCsvMsg({ type: 'error', text: err.message }) }
     finally { setCsvImporting(false) }
@@ -1339,7 +1338,7 @@ export default function DataManagementPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">CSV File</label>
-                  <input ref={csvRef} type="file" accept=".csv,text/csv" className="form-input" style={{ padding: '7px 10px' }} onChange={e => { setCsvFile(e.target.files[0]); setCsvParsed(null); setCsvMsg(null); if (e.target.files[0]) parseCSV(e.target.files[0]) }} />
+                  <input ref={csvRef} type="file" accept=".csv,text/csv" className="form-input" style={{ padding: '7px 10px' }} onChange={e => { setCsvParsed(null); setCsvMsg(null); if (e.target.files[0]) parseCSV(e.target.files[0]) }} />
                 </div>
                 {csvParsed && (
                   <div style={{ marginBottom: 16 }}>

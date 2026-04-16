@@ -387,7 +387,7 @@ Device Config Poll → Device Shadow (desired_config / reported_config)
 - If no user is assigned (`user_id = NULL`), predictions queue in SQLite. On assignment, the full backlog is synced.
 - **Device Shadow**: Admin sets `desired_config` (mode, interval, leaf type, model versions) via the dashboard. The Jetson polls for config changes, applies them, reports `reported_config`. `config_version` auto-increments on each change.
 - **Config Flow (Single-Writer)**: `SyncEngine` is the single writer for `device_state.json` and `config.json`; `main.py` reads config via `sync.get_active_config()` (thread-safe, no network call).
-- **Model Version Management**: Admin assigns specific model versions per leaf_type to each device. The sync engine automatically downloads cached TensorRT engine (if available for the same hardware tag) or downloads ONNX + builds engine with `trtexec --fp16`. Engine files use versioned naming: `{leaf_type}_student_v{version}.engine`. Engines are hot-swapped without service restart. Build status (`building`/`ready`/`error`) reported in `reported_config`.
+- **Model Version Management**: Admin assigns specific model versions per leaf_type to each device. The sync engine automatically downloads cached TensorRT engine (if available for the same hardware tag) or downloads ONNX + builds engine with `trtexec --fp16`. Engine files use versioned naming: `{leaf_type}_student_v{version}.engine`. Hardware tag format: `{hw_model}_trt{trt_version}` (e.g., `jetson-orin-nx-8gb_trt10.3.0.30`); derived from `/proc/device-tree/model` + `dpkg -l tensorrt`. Cloud storage path (in `models` bucket): `engines/{leaf_type}/{version}/{hw_tag}.engine`. Engines are hot-swapped without service restart. Build status (`building`/`ready`/`error`) reported in `reported_config`.
 - **trtexec discovery**: `PATH` → `/usr/src/tensorrt/bin/trtexec` → `/usr/local/bin/trtexec` → `~/trtexec`.
 - **Model Version Logging**: Versions logged at startup, on hot-swap, and with each prediction using `[model=leaf_type vX.Y.Z]`.
 
@@ -397,6 +397,7 @@ The Flask API (`health_server.py`) enforces:
 
 | Measure | Detail |
 |---|---|
+| Server bind | `host=0.0.0.0` (all interfaces, LAN accessible), port 8080 |
 | Rate limiting | 30 req/min per IP (in-memory sliding window) |
 | Upload size | 10 MB maximum |
 | MIME validation | jpg, jpeg, png, bmp, tiff only |
@@ -418,8 +419,10 @@ Both Flutter and Jetson maintain local queues of unsynchronized predictions. Whe
 connectivity is detected, the queue is flushed to Supabase REST. Conflict resolution
 uses last-write-wins with server-side timestamps.
 
-Jetson sync uploads prediction images to `prediction-images` Storage bucket using
-signed URLs (365-day expiry). After successful sync, local images are deleted.
+Jetson sync uploads prediction images to `prediction-images` Storage bucket.
+The stored `image_url` field contains a plain storage path (e.g., `prediction-images/{userId}/{ts}_{id}.jpg`) —
+NOT a signed URL. The admin dashboard re-signs on demand via `createSignedUrl()`.
+After successful sync, local images are deleted.
 
 ### 7.8 Environment Variable Distribution
 
@@ -803,6 +806,6 @@ flutter build apk --release \
 2. **Google OAuth**: Create OAuth 2.0 Client ID → set `GOOGLE_WEB_CLIENT_ID`
 3. **GitHub Secrets**: Configure all 9 secrets listed in Section 12.3
 4. **DVC**: Google Drive folder ID in `.dvc/config` (already configured)
-5. **Migrations**: Run 001-020 in order in Supabase SQL Editor
+5. **Migrations**: Run 001-022 in order in Supabase SQL Editor
 6. **Realtime**: Automated in migration 011 (falls back to manual)
 7. **Release**: APK distributed via GitHub Releases (no Play Store)
