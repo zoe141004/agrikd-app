@@ -80,6 +80,11 @@ class SyncEngine:
         # DVC lock: serialize validation to prevent concurrent DVC pulls
         self._dvc_lock = threading.Lock()
 
+        # Engine build queue: serialize builds to prevent OOM on Jetson
+        self._engine_build_queue = []
+        self._engine_build_lock = threading.Lock()
+        self._engine_build_thread = None
+
         # Engine build status per leaf_type: 'ready' | 'building' | 'error'
         self._engine_status = {}
         # Applied model versions (track what's actually loaded)
@@ -398,32 +403,61 @@ class SyncEngine:
     def _check_model_versions(self, desired_config):
         """Check if model_versions in desired_config differ from applied.
 
-        If a version changed, trigger engine build/download in background.
+        If versions changed, queue engine builds and process them
+        sequentially in a single background thread to avoid OOM on Jetson.
         """
         desired_mv = desired_config.get("model_versions", {})
         if not desired_mv:
             return
 
+        new_builds = []
         for leaf_type, desired_ver in desired_mv.items():
             current_ver = self._applied_model_versions.get(leaf_type)
             if current_ver == desired_ver:
                 continue
             if self._engine_status.get(leaf_type) == "building":
-                continue  # Already building
+                continue  # Already queued or building
 
             logger.info(
-                "Model version change: %s %s -> %s, triggering engine build",
+                "Model version change: %s %s -> %s, queuing engine build",
                 leaf_type, current_ver, desired_ver,
             )
             self._engine_status[leaf_type] = "building"
-            # Run build in background thread to avoid blocking sync loop
-            t = threading.Thread(
-                target=self._build_engine,
-                args=(leaf_type, desired_ver),
+            new_builds.append((leaf_type, desired_ver))
+
+        if not new_builds:
+            return
+
+        # Append to queue (thread-safe)
+        with self._engine_build_lock:
+            self._engine_build_queue.extend(new_builds)
+
+        # Start the sequential build worker if not already running
+        if (self._engine_build_thread is None
+                or not self._engine_build_thread.is_alive()):
+            self._engine_build_thread = threading.Thread(
+                target=self._engine_build_worker,
                 daemon=True,
-                name=f"engine-build-{leaf_type}",
+                name="engine-build-worker",
             )
-            t.start()
+            self._engine_build_thread.start()
+
+    def _engine_build_worker(self):
+        """Process engine build queue sequentially (one at a time).
+
+        Prevents concurrent trtexec processes that cause OOM/timeout on Jetson.
+        """
+        while True:
+            with self._engine_build_lock:
+                if not self._engine_build_queue:
+                    return  # Queue empty, thread exits
+                leaf_type, version = self._engine_build_queue.pop(0)
+
+            logger.info(
+                "Building engine sequentially: %s v%s (%d remaining in queue)",
+                leaf_type, version, len(self._engine_build_queue),
+            )
+            self._build_engine(leaf_type, version)
 
     def _build_engine(self, leaf_type, version):
         """Download ONNX and build TensorRT engine for a specific version.
