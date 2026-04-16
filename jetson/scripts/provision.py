@@ -155,7 +155,7 @@ def parse_token(raw):
         data["url"] = data.pop("sub_url")
     if "token_id" in data:
         data["tid"] = data.pop("token_id")
-    
+
     required = ("url", "key", "tid")
     for key in required:
         if key not in data:
@@ -171,7 +171,7 @@ def parse_token(raw):
                 from datetime import datetime
                 exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
                 exp_ts = exp_dt.timestamp()
-            except:
+            except (ValueError, TypeError):
                 exp_ts = 0
         else:
             exp_ts = exp
