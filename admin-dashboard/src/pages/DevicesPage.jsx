@@ -227,12 +227,16 @@ export default function DevicesPage() {
 
   const createToken = async () => {
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+      
       const id = crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       const { error: err } = await supabase.from('provisioning_tokens').insert({
         id,
         label: tokenLabel || 'Unnamed token',
         expires_at: expiresAt,
+        created_by: user.id,
       })
       if (err) throw err
 
