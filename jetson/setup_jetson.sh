@@ -270,7 +270,7 @@ echo "  ┌───────────────────────
 echo "  │  MANDATORY: Provisioning token required                     │"
 echo "  │                                                             │"
 echo "  │  Get token from: Admin Dashboard → Devices → Provisioning   │"
-echo "  │  Tokens → Generate Token → Copy the Token ID                │"
+echo "  │  Tokens → Generate Token → Copy (the full agrikd:// URL)    │"
 echo "  └─────────────────────────────────────────────────────────────┘"
 echo ""
 
@@ -295,7 +295,10 @@ if [ -z "$PROVISION_OK" ]; then
     PROVISION_TOKEN="${AGRIKD_PROVISION_TOKEN:-}"
     
     if [ -z "$PROVISION_TOKEN" ]; then
-        echo "  Enter provisioning token (UUID format, e.g., 0808d1c9-1b9f-4722-...):"
+        echo ""
+        echo "  Enter provisioning token (full token starting with agrikd://):"
+        echo "  Example: agrikd://eyJzdWJfaWQiOiJ1cGRrcHZrYmpxc3pzd3VxdW5..."
+        echo ""
         read -rp "  Token: " PROVISION_TOKEN
     fi
     
@@ -310,6 +313,7 @@ if [ -z "$PROVISION_OK" ]; then
         echo "  │    - No remote configuration                                │"
         echo "  │                                                             │"
         echo "  │  Get token: Admin Dashboard → Devices → Provisioning Tokens │"
+        echo "  │  Click 'Generate Token' then 'Copy' the full agrikd:// URL  │"
         echo "  └─────────────────────────────────────────────────────────────┘"
         echo ""
         exit 1
