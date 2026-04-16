@@ -475,18 +475,35 @@ class SyncEngine:
                 # Step 2: Get ONNX URL for this specific version
                 # First try exact version match via REST query
                 onnx_url = self._get_onnx_url_for_version(leaf_type, version)
+                actual_onnx_version = version  # Track which version we actually download
+
                 if not onnx_url:
-                    # Fallback: get_latest_onnx_url RPC (may return different version)
+                    # Fallback: get_latest_onnx_url RPC — WARNING: may return different version!
+                    # This ensures device has SOME model, but version must be updated accordingly
                     onnx_info = self._supabase_rpc("get_latest_onnx_url", {
                         "p_leaf_type": leaf_type,
                     })
                     if onnx_info and len(onnx_info) > 0:
                         onnx_url = onnx_info[0].get("onnx_url")
+                        fallback_version = onnx_info[0].get("version")
+                        if fallback_version and fallback_version != version:
+                            logger.warning(
+                                "Requested %s v%s not found, falling back to v%s (active)",
+                                leaf_type, version, fallback_version
+                            )
+                            actual_onnx_version = fallback_version
+                            # Update the engine path to match actual version
+                            new_engine_path = os.path.join(
+                                models_dir, f"{leaf_type}_student_v{actual_onnx_version}.engine"
+                            )
 
                 if not onnx_url:
                     logger.error("No ONNX URL for %s v%s", leaf_type, version)
                     self._engine_status[leaf_type] = "error"
                     return
+
+                # Use actual_onnx_version for all subsequent operations
+                version = actual_onnx_version
 
                 # Step 3: Download ONNX and build engine
                 from engine_builder import build_engine

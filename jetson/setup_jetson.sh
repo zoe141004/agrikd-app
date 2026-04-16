@@ -473,16 +473,21 @@ resp = requests.post(f'{url}/rest/v1/rpc/get_system_secret',
     headers={'apikey': key, 'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
     json={'p_device_token': token, 'p_key': 'gcs_readonly_key'}, timeout=15)
 
-if resp.status_code == 200 and resp.json():
-    with open(out_path, 'w') as f: f.write(resp.json())
-    print('  [OK] GCS key fetched from Supabase system_secrets')
+if resp.status_code == 200:
+    data = resp.json()
+    if data:
+        with open(out_path, 'w') as f: f.write(data)
+        print('  [OK] GCS key fetched from Supabase system_secrets')
+    else:
+        print('  [INFO] No GCS key in Supabase yet — admin can upload via Dashboard Settings')
+        sys.exit(1)
 else:
-    print('  [INFO] No GCS key in Supabase yet — admin can upload via Dashboard Settings')
+    print(f'  [WARN] RPC failed with HTTP {resp.status_code}: {resp.text[:200]}')
     sys.exit(1)
-" "$CFG" "$STATE_FILE" "$GCS_KEY_PATH" 2>/dev/null || true
+" "$CFG" "$STATE_FILE" "$GCS_KEY_PATH" 2>&1 || true
     else
-        echo "  [INFO] GCS key not available. Will auto-fetch from Supabase on first engine sync."
-        echo "  Admin can upload the key via Dashboard → Settings → Integrations"
+        echo "  [INFO] Device not provisioned yet — GCS key will auto-fetch after provisioning."
+        echo "         Run: python3 /opt/agrikd/scripts/provision.py --token <TOKEN>"
     fi
 fi
 
