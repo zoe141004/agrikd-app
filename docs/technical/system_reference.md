@@ -155,7 +155,7 @@ agrikd/
 │   └── requirements*.txt              # Separate requirement files per stage
 │
 ├── database/                          # Infrastructure-as-Code DB scripts
-│   ├── migrations/                    # 20 SQL migration files (001-020)
+│   ├── migrations/                    # 22 SQL migration files (001-022)
 │   │   ├── 001_tables.sql
 │   │   ├── 002_functions_triggers.sql
 │   │   ├── 003_rls_policies.sql
@@ -175,7 +175,9 @@ agrikd/
 │   │   ├── 017_dataset_delete.sql     # Extend dvc_operations for dataset deletion
 │   │   ├── 018_provision_device_rpc.sql # Atomic provision_device RPC
 │   │   ├── 019_engine_upload_policy.sql # Storage policy for TensorRT engine uploads
-│   │   └── 020_device_sync_rpcs.sql   # Device sync RPCs: poll, ack, heartbeat, push
+│   │   ├── 020_device_sync_rpcs.sql   # Device sync RPCs: poll, ack, heartbeat, push
+│   │   ├── 021_tensorrt_benchmark_format.sql # Add tensorrt_fp16 to benchmarks format CHECK
+│   │   └── 022_system_secrets.sql     # system_secrets table + get_system_secret RPC
 │   ├── verify_all_migrations.sql
 │   └── verify_rls_policies.sql        # RLS audit
 │
@@ -425,7 +427,7 @@ Root `.env` is the single source of truth. `python sync_env.py` distributes:
 
 | Target | Output Path | Notes |
 |---|---|---|
-| Flutter app | `mobile_app/.env` | Direct copy |
+| Flutter app | `mobile_app/.env` | Filtered copy (mobile-safe keys only: SUPABASE_URL, SUPABASE_ANON_KEY, GOOGLE_WEB_CLIENT_ID, SENTRY_DSN) |
 | Admin dashboard | `admin-dashboard/.env` | Re-prefixed as `VITE_SUPABASE_URL`, etc. |
 | Jetson config | `jetson/config/config.json` | Injects into `sync` block |
 
@@ -552,7 +554,7 @@ ModelReportsPage, DevicesPage.
 - Models: Model registry with lifecycle management (staging/active/backup)
 - Data Management: 5-tab DVC operations (stage/push/pull/export/delete)
 - Devices: Fleet management + provisioning token generation
-- Security headers: CSP, X-Frame-Options, HSTS, etc. in `vite.config.js`
+- Security headers: CSP and HSTS in `vercel.json` (production); X-Frame-Options + X-Content-Type-Options in `vite.config.js` (dev)
 - Error tracking: `@sentry/react`
 
 ### 9.3 Tests (113 tests across 6 files)
@@ -633,7 +635,7 @@ Default preferences seeded on first run: `default_leaf_type=tomato`, `auto_sync=
 
 Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 
-### 11.3 Supabase PostgreSQL (12 tables)
+### 11.3 Supabase PostgreSQL (13 tables)
 
 | Table | Key Columns | Purpose |
 |---|---|---|
@@ -649,6 +651,7 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 | `provisioning_tokens` | id, created_by, expires_at, used_at, used_by_hw_id, device_id, label | One-time tokens for Zero-Touch Provisioning (24h expiry) |
 | `devices` | id, hw_id, hostname, device_name, status, user_id, device_token, desired_config, reported_config, config_version, last_seen_at, hw_info | Jetson device registry with Device Shadow pattern |
 | `model_engines` | id, leaf_type, version, hw_tag, engine_url, sha256, created_at | Cached TensorRT engines per hardware type |
+| `system_secrets` | key, value, description, updated_at, updated_by | Admin-managed secrets (e.g., GCS key for DVC). Devices read via `get_system_secret` RPC |
 
 ### 11.4 RLS Audit (IaC)
 

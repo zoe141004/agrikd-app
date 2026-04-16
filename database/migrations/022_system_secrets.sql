@@ -50,17 +50,17 @@ CREATE OR REPLACE FUNCTION public.get_system_secret(
 RETURNS TEXT
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     v_device_id BIGINT;
     v_value TEXT;
 BEGIN
-    -- Validate device token
+    -- Validate device token (devices table uses 'status' column, not 'is_active')
     SELECT id INTO v_device_id
     FROM public.devices
     WHERE device_token = p_device_token
-      AND is_active = true;
+      AND status NOT IN ('decommissioned');
 
     IF v_device_id IS NULL THEN
         RAISE EXCEPTION 'Invalid or inactive device token';

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { logAudit } from '../lib/helpers'
+import { logAudit, deepEqual } from '../lib/helpers'
 import { useData } from '../lib/DataContext'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -369,7 +369,7 @@ export default function DevicesPage() {
                       if (!d.desired_config || !d.reported_config) return false
                       // Compare ignoring engine_status and applied_model_versions (Jetson-added fields)
                       const { engine_status, applied_model_versions, ...repCore } = d.reported_config
-                      return JSON.stringify(d.desired_config) === JSON.stringify(repCore)
+                      return deepEqual(d.desired_config, repCore)
                     })()
                     const hasDesired = !!d.desired_config
                     const configLabel = !hasDesired ? 'N/A' : synced ? 'Synced' : 'Pending'

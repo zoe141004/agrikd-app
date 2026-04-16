@@ -208,7 +208,7 @@ def load_test_images(data_dir, input_size=224):
     return images, np.array(valid_labels), class_names
 
 
-def run_tensorrt_inference(engine_path, images, num_classes):
+def run_tensorrt_inference(engine_path, images, num_classes, input_size=224):
     """Run TensorRT FP16 inference on a list of preprocessed images.
 
     Returns (predictions, latencies_ms) where predictions is an array of
@@ -225,8 +225,8 @@ def run_tensorrt_inference(engine_path, images, num_classes):
         engine = runtime.deserialize_cuda_engine(f.read())
     context = engine.create_execution_context()
 
-    # Allocate buffers
-    input_shape = (1, 3, 224, 224)
+    # Allocate buffers (use configurable input_size, not hardcoded 224)
+    input_shape = (1, 3, input_size, input_size)
     output_shape = (1, num_classes)
     h_input = cuda.pagelocked_empty(input_shape, dtype=np.float32)
     h_output = cuda.pagelocked_empty(output_shape, dtype=np.float32)

@@ -71,12 +71,24 @@ class Device {
     );
   }
 
-  /// Shallow JSON comparison for config sync detection.
-  static bool _jsonEquals(Map<String, dynamic> a, Map<String, dynamic> b) {
-    if (a.length != b.length) return false;
-    for (final key in a.keys) {
-      if (a[key] != b[key]) return false;
+  /// Deep JSON comparison for config sync detection.
+  /// Handles nested maps and lists correctly (Dart's == only does
+  /// reference equality for collections).
+  static bool _jsonEquals(dynamic a, dynamic b) {
+    if (a is Map && b is Map) {
+      if (a.length != b.length) return false;
+      for (final key in a.keys) {
+        if (!b.containsKey(key) || !_jsonEquals(a[key], b[key])) return false;
+      }
+      return true;
     }
-    return true;
+    if (a is List && b is List) {
+      if (a.length != b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!_jsonEquals(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    return a == b;
   }
 }

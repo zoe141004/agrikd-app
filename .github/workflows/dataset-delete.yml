@@ -124,7 +124,6 @@ jobs:
           git add -A "$DVC_FILE" 2>/dev/null || true
           [ -f "data/.gitignore" ] && git add "data/.gitignore"
           [ -d "$DATA_DIR" ] || git rm -r --cached "$DATA_DIR" 2>/dev/null || true
-          git add -A
 
           if git diff --cached --quiet; then
             echo "No tracked changes to commit (DVC file may already have been removed)"

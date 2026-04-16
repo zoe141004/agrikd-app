@@ -12,6 +12,7 @@
 --   models/engines/{jetson-orin-nano_trt10.3}/{leaf_type}_student.engine
 
 -- Allow anon to upload .engine files into engines/ folder
+DROP POLICY IF EXISTS "jetson_engine_upload" ON storage.objects;
 CREATE POLICY "jetson_engine_upload"
 ON storage.objects FOR INSERT
 TO anon
@@ -22,6 +23,7 @@ WITH CHECK (
 
 -- Allow anon to overwrite (upsert) existing .engine files
 -- x-upsert: true in the upload request triggers UPDATE, not just INSERT
+DROP POLICY IF EXISTS "jetson_engine_upsert" ON storage.objects;
 CREATE POLICY "jetson_engine_upsert"
 ON storage.objects FOR UPDATE
 TO anon
@@ -35,6 +37,7 @@ WITH CHECK (
 );
 
 -- Allow anon to read .engine files (for re-download on fresh setup)
+DROP POLICY IF EXISTS "jetson_engine_read" ON storage.objects;
 CREATE POLICY "jetson_engine_read"
 ON storage.objects FOR SELECT
 TO anon

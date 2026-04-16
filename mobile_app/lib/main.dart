@@ -82,6 +82,10 @@ Future<void> _startApp() async {
   SupabaseConfig.initialize().catchError((e) {
     debugPrint('[Main] Supabase init failed (offline?): $e');
     _showOfflineNotification = true;
+    // Report to Sentry for production debugging
+    if (const bool.fromEnvironment('dart.vm.product')) {
+      Sentry.captureException(e, stackTrace: StackTrace.current);
+    }
   });
 
   // 3. Seed bundled models + load settings in parallel (both need DB, independent of each other)

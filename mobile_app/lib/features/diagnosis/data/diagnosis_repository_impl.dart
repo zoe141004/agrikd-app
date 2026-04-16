@@ -232,6 +232,8 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
   void dispose() {
     _cachedLeafType = null;
     _cachedSelectedModel = null;
+    // Fire-and-forget: async TFLite interpreter cleanup.
+    // Native resources will also be reclaimed on GC if dispose doesn't complete.
     _inferenceService.dispose();
   }
 }

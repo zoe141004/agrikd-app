@@ -163,3 +163,23 @@ export async function logAudit(supabase, action, entityType, entityId, details =
     console.warn('Audit log failed:', err.message)
   }
 }
+
+// ── Deep equality ────────────────────────────────────────────────────────
+
+/** Deep equality comparison for JSON-serializable objects.
+ *  Used for config sync detection (avoids JSON.stringify key-order sensitivity). */
+export function deepEqual(a, b) {
+  if (a === b) return true
+  if (a == null || b == null) return false
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    return a.every((v, i) => deepEqual(v, b[i]))
+  }
+  if (typeof a === 'object') {
+    const ka = Object.keys(a), kb = Object.keys(b)
+    if (ka.length !== kb.length) return false
+    return ka.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]))
+  }
+  return false
+}
