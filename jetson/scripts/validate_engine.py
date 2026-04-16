@@ -131,10 +131,32 @@ def dvc_pull_dataset(leaf_type, repo_root):
 
 
 def cleanup_dataset(data_dir):
-    """Remove downloaded dataset to conserve storage."""
+    """Remove downloaded dataset and DVC cache to conserve storage.
+
+    On Jetson edge devices, storage is limited. After validation:
+    1. Remove the extracted dataset directory
+    2. Clear DVC cache (~/.dvc/cache or .dvc/cache) to free space
+    """
     if os.path.isdir(data_dir):
         shutil.rmtree(data_dir, ignore_errors=True)
         log.info("Cleaned up dataset: %s", data_dir)
+
+    # Clear DVC cache to free storage
+    # DVC stores downloaded files in cache before linking to workspace
+    dvc_cache_paths = [
+        os.path.expanduser("~/.dvc/cache"),  # Global cache
+        os.path.join(_find_repo_root() or ".", ".dvc", "cache"),  # Local cache
+    ]
+    for cache_path in dvc_cache_paths:
+        if os.path.isdir(cache_path):
+            cache_size = sum(
+                os.path.getsize(os.path.join(dp, f))
+                for dp, _, fns in os.walk(cache_path)
+                for f in fns
+            )
+            shutil.rmtree(cache_path, ignore_errors=True)
+            log.info("Cleared DVC cache: %s (%.1f MB freed)",
+                     cache_path, cache_size / 1024 / 1024)
 
 
 def load_test_images(data_dir, input_size=224):
