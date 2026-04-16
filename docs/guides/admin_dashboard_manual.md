@@ -246,7 +246,8 @@ Device fleet management and Zero-Touch Provisioning for Jetson edge devices.
   1. Admin saves device config → resolved versions are stored in
      `devices.desired_config.model_versions` in Supabase.
   2. Jetson polls every 5 minutes and detects the version change.
-  3. Jetson downloads cached engine or builds from ONNX (10–30 min).
+  3. Jetson downloads cached engine or builds from ONNX sequentially (~1-2 min
+     per model on Orin NX with `--memPoolSize=workspace:1024M`).
   4. Engine is hot-swapped without service restart.
   5. Device status updates engine build progress (`building` → `ready` or
      `error`).

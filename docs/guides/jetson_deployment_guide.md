@@ -306,12 +306,12 @@ trtexec \
     --onnx=<model>.onnx \
     --saveEngine=<model>.engine \
     --fp16 \
-    --workspace=1024
+    --memPoolSize=workspace:1024M
 ```
 
 Iterates over all `*_student.onnx` files in `/opt/agrikd/models/` and converts
-each to a TensorRT FP16 engine. The SHA-256 hash is injected into `config.json`.
-ONNX files are deleted after successful conversion.
+each **sequentially** (one at a time) to a TensorRT FP16 engine. The SHA-256 hash
+is injected into `config.json`. ONNX files are deleted after successful conversion.
 
 Engines are hardware-specific and must be built on the target Jetson device.
 
@@ -999,17 +999,22 @@ cp new_model.onnx /opt/agrikd/models/
 trtexec --onnx=/opt/agrikd/models/new_model.onnx \
         --saveEngine=/opt/agrikd/models/new_model.engine \
         --fp16 \
-        --workspace=1024
+        --memPoolSize=workspace:1024M
 ```
 
-**`trtexec` Path Discovery:** `sync_engine.py` `_build_engine()` searches for
-`trtexec` in the following order (fixes "No such file or directory: 'trtexec'"
-when running as a systemd service with limited PATH):
+**`trtexec` Path Discovery:** Both `sync_engine.py` and `scripts/engine_builder.py`
+search for `trtexec` in the following order (fixes "No such file or directory:
+'trtexec'" when running as a systemd service with limited PATH):
 
 1. `shutil.which("trtexec")` — system PATH
-2. `/usr/src/tensorrt/bin/trtexec` — JetPack default location
+2. `/usr/src/tensorrt/bin/trtexec` — JetPack 6.x default location
 3. `/usr/local/bin/trtexec`
 4. `~/trtexec`
+
+> **TensorRT 10.x Note:** The `--workspace` flag was removed in TRT 10.x.
+> Use `--memPoolSize=workspace:1024M` instead. Only single-character suffixes
+> are accepted (`M`, `G`, `K`, `B`). Multi-char suffixes like `MiB` are
+> silently ignored.
 
 **Engine File Naming Convention:** Engine files built by the sync engine are
 named `{leaf_type}_student_v{version}.engine`, e.g.,
@@ -1039,6 +1044,36 @@ TensorRT engines are **not portable** between different Jetson hardware variants
 or TensorRT versions. An engine built on a Jetson Nano will not load on a Jetson
 Xavier. Always rebuild engines on the target device using the `trtexec` command
 shown above.
+
+### 8.4 Engine Builder CLI
+
+The `scripts/engine_builder.py` tool automates engine management: checking local
+engines, downloading from Supabase cache, building from ONNX, and on-device
+validation. It checks local engines first before querying Supabase.
+
+```bash
+cd /opt/agrikd
+
+# Build/sync all engines (skip if local engine already matches latest version)
+sudo -u agrikd python3 scripts/engine_builder.py --config config/config.json
+
+# Build + validate (run DVC evaluation, upload benchmark to Supabase)
+sudo -u agrikd python3 scripts/engine_builder.py --config config/config.json --validate
+
+# Force re-validate (overwrite existing benchmarks)
+sudo -u agrikd python3 scripts/engine_builder.py --config config/config.json --validate --force
+
+# Process a specific leaf type only
+sudo -u agrikd python3 scripts/engine_builder.py --config config/config.json --leaf-type tomato --validate --force
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--config` | Path to `config.json` (required) |
+| `--leaf-type` | Process a single leaf type (default: all from config) |
+| `--validate` | Run on-device DVC evaluation after build |
+| `--force` | Re-run validation even if benchmark already exists on Supabase |
 
 ---
 
@@ -1174,19 +1209,25 @@ is the semantic version string (matching `model_registry.version`).  Only
 
 **Jetson Side** (Automatic):
 1. Sync engine polls `desired_config` and detects version change
-2. Checks for cached engine in `model_engines` table (same hardware tag)
-   - **Hardware tag**: a string like `sm53` (Nano), `sm72` (Xavier), `sm87`
-     (Orin) derived from `nvidia-smi --query-gpu=compute_cap` or
-     `/proc/device-tree/model`. Engines built on one GPU architecture cannot
-     run on another, so caching is per hardware tag.
-3. If cached: downloads pre-built engine (fast)
-4. If not cached: downloads ONNX from Storage → builds engine with
-   `trtexec --fp16` (10–30 min on Jetson) → uploads to cache for others
-5. Hot-swaps the engine in `InferenceWorkerPool` without service restart
-6. Updates local `config.json` with new version, path, class labels
-7. Deletes old engine file to free storage
-8. Reports `engine_status` (building/ready/error) + `applied_model_versions`
+2. Checks local engine file on disk first (matches version from config)
+3. If not local: checks for cached engine in `model_engines` table (same hardware tag)
+   - **Hardware tag**: a string like `jetson-orin-nx-8gb_trt10.3.0.30`
+     derived from `/proc/device-tree/model` + `dpkg -l tensorrt`. Engines
+     built on one GPU architecture / TRT version cannot run on another, so
+     caching is per hardware tag.
+4. If cached: downloads pre-built engine (fast)
+5. If not cached: downloads ONNX from Storage → builds engine **sequentially**
+   with `trtexec --fp16 --memPoolSize=workspace:1024M` (~1-2 min per model
+   on Orin NX) → uploads to cache for others
+6. Hot-swaps the engine in `InferenceWorkerPool` without service restart
+7. Updates local `config.json` with new version, path, class labels
+8. Deletes old engine file to free storage
+9. Reports `engine_status` (building/ready/error) + `applied_model_versions`
    in `reported_config`
+
+> **Sequential Build Queue:** When multiple models need updating, they are
+> built one at a time via a queue to prevent GPU OOM on memory-constrained
+> Jetson devices. Concurrent builds caused timeout failures on 8GB devices.
 
 **Pre-build on Startup:** When `SyncEngine.run()` starts, it immediately
 compares `desired_config.model_versions` against loaded engines. If a version
@@ -1394,14 +1435,14 @@ issued by a trusted CA (e.g., Let's Encrypt).
 | **TensorRT engine fails to load** | TensorRT engines are hardware-specific. Rebuild the engine on the target Jetson device using `trtexec`. An engine built on one Jetson variant (e.g., Nano) will not load on another (e.g., Xavier). |
 | **Camera not found** | Run `v4l2-ctl --list-devices` to list connected cameras. Verify the USB cable is securely connected. For CSI cameras, check the ribbon cable and ensure it is properly seated in the connector. |
 | **GUI does not display** | Ensure the `DISPLAY` environment variable is set: `export DISPLAY=:0`. Verify the X server is running with `xdpyinfo`. If using SSH, enable X forwarding with `ssh -X`. |
-| **Out of memory during inference** | Reduce the `--workspace` value when building the TensorRT engine. Check `MemoryMax` in the systemd service file and increase if necessary. Run `tegrastats` to monitor real-time memory usage. |
+| **Out of memory during inference** | Reduce `--memPoolSize=workspace:` value (e.g., `512M`) when building the TensorRT engine. Check `MemoryMax` in the systemd service file and increase if necessary. Run `tegrastats` to monitor real-time memory usage. |
 | **Sync failing silently** | Verify that `supabase_url` and `supabase_key` are correctly set in `config.json`. Test connectivity with `curl <supabase_url>/rest/v1/` from the Jetson. Check logs for HTTP status codes. |
 | **Permission denied on `/dev/video*`** | Run `sudo usermod -aG video $USER` and then log out and log back in for the group change to take effect. Verify with `groups $USER`. |
 | **Slow or laggy camera preview** | Lower the camera resolution in `config.json` (e.g., 640x480 instead of 1920x1080). Check that no other application is using the camera device. Use a USB 3.0 port if available. |
 | **"No Frame" dialog when clicking Capture** | The camera has not been started. Click "Start Camera" first, or use "Load Image File" to analyze a static image. |
 | **Database locked errors** | The SQLite database uses WAL mode and a 5-second busy timeout. If errors persist, ensure only one instance of the application (headless or GUI) is running at a time. |
 | **"Frame rejected: low entropy"** | Camera auto-exposure/white-balance not stabilized. `capture_single()` warmup handles this automatically (`warmup_delay=3.0`, `warmup_frames=5`). Increase `warmup_delay` in `config.json` if the issue persists with slow-starting cameras. |
-| **"No such file or directory: 'trtexec'"** | Occurs when running as systemd service with limited PATH. `sync_engine.py` now searches multiple paths automatically. If `trtexec` is in a non-standard location, symlink it to `/usr/local/bin/trtexec`. |
+| **"No such file or directory: 'trtexec'"** | Occurs when running as systemd service with limited PATH. Both `sync_engine.py` and `scripts/engine_builder.py` now search multiple paths automatically (PATH → `/usr/src/tensorrt/bin/` → `/usr/local/bin/`). If `trtexec` is in a non-standard location, symlink it to `/usr/local/bin/trtexec`. |
 | **Engine conversion fails with `trtexec`** | Ensure JetPack SDK is fully installed. Run `dpkg -l \| grep tensorrt` to verify TensorRT packages. Check that the ONNX model was exported with opset 11 or higher. |
 | **HTTP 413 on `/predict`** | The uploaded file exceeds the 10 MB limit. Resize or compress the image before uploading. |
 | **HTTP 429 on `/predict`** | The client IP has exceeded 30 requests per minute. Wait 60 seconds before retrying or reduce request frequency. |
