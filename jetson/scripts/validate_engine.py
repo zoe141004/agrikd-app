@@ -417,9 +417,12 @@ def main():
 
     # Engine path: CLI arg > config > auto-detect
     engine_path = args.engine_path or model_cfg.get("engine_path")
+    if engine_path and not os.path.isabs(engine_path):
+        # Resolve relative path against repo_root
+        engine_path = os.path.join(repo_root, engine_path)
     if not engine_path or not os.path.isfile(engine_path):
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        engine_path = os.path.join(base_dir, "models", f"{leaf_type}_student.engine")
+        # Auto-detect from repo_root/models/
+        engine_path = os.path.join(repo_root, "models", f"{leaf_type}_student.engine")
     if not os.path.isfile(engine_path):
         log.error("Engine file not found: %s", engine_path)
         sys.exit(1)
