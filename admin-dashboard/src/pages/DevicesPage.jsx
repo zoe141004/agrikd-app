@@ -225,6 +225,43 @@ export default function DevicesPage() {
     }
   }
 
+  const reactivateDevice = async (device) => {
+    try {
+      const { error: err } = await supabase.from('devices').update({
+        status: 'unassigned',
+      }).eq('id', device.id)
+      if (err) throw err
+
+      await logAudit(supabase, 'device_reactivate', 'device', String(device.id), {
+        hostname: device.hostname,
+        hw_id: device.hw_id,
+      })
+      setSuccessMsg(`Device "${device.device_name || device.hostname}" reactivated.`)
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const deleteDevice = async (device) => {
+    try {
+      const { error: err } = await supabase.from('devices').delete().eq('id', device.id)
+      if (err) throw err
+
+      await logAudit(supabase, 'device_delete', 'device', String(device.id), {
+        hostname: device.hostname,
+        hw_id: device.hw_id,
+        device_name: device.device_name,
+      })
+      setSuccessMsg(`Device "${device.device_name || device.hostname}" permanently deleted.`)
+      loadData()
+      triggerRefresh()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const createToken = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -433,7 +470,7 @@ export default function DevicesPage() {
                           })()}
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <button className="btn btn-sm" onClick={() => openEdit(d)}>Edit</button>
                             {d.status !== 'decommissioned' && (
                               <button
@@ -447,6 +484,32 @@ export default function DevicesPage() {
                                   onConfirm: () => { setConfirmAction(null); decommissionDevice(d) },
                                 })}
                               >Decom</button>
+                            )}
+                            {d.status === 'decommissioned' && (
+                              <>
+                                <button
+                                  className="btn btn-sm"
+                                  style={{ background: '#dcfce7', color: '#16a34a', border: '1px solid #bbf7d0' }}
+                                  onClick={() => setConfirmAction({
+                                    title: 'Reactivate Device',
+                                    message: `Reactivate "${d.device_name || d.hostname}"? It will be set to unassigned status.`,
+                                    danger: false,
+                                    confirmLabel: 'Reactivate',
+                                    onConfirm: () => { setConfirmAction(null); reactivateDevice(d) },
+                                  })}
+                                >Activate</button>
+                                <button
+                                  className="btn btn-sm"
+                                  style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
+                                  onClick={() => setConfirmAction({
+                                    title: 'Delete Device Permanently',
+                                    message: `Permanently delete "${d.device_name || d.hostname}"? This action cannot be undone. All device history and predictions will be lost.`,
+                                    danger: true,
+                                    confirmLabel: 'Delete Forever',
+                                    onConfirm: () => { setConfirmAction(null); deleteDevice(d) },
+                                  })}
+                                >Delete</button>
+                              </>
                             )}
                           </div>
                         </td>
