@@ -78,7 +78,7 @@ def build_engine(onnx_path: str, engine_path: str, *,
          f"--onnx={onnx_path}",
          f"--saveEngine={engine_path}",
          "--fp16",
-         f"--workspace={workspace_mb}"],
+         f"--memPoolSize=workspace:{workspace_mb}MiB"],
         capture_output=True, text=True, timeout=timeout,
     )
     if result.returncode != 0:

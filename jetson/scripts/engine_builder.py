@@ -175,7 +175,7 @@ def build_engine(onnx_path, engine_path, workspace_mb=1024):
         f"--onnx={onnx_path}",
         f"--saveEngine={engine_path}",
         "--fp16",
-        f"--workspace={workspace_mb}",
+        f"--memPoolSize=workspace:{workspace_mb}MiB",
     ]
     log.info("Building engine: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
