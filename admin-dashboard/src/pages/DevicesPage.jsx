@@ -301,6 +301,31 @@ export default function DevicesPage() {
     }
   }
 
+  // Build full agrikd:// token URL from token ID
+  const buildTokenUrl = (tokenId, expiresAt) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    const tokenPayload = {
+      sub_url: supabaseUrl,
+      key: supabaseKey,
+      token_id: tokenId,
+      exp: expiresAt,
+    }
+    const encodedPayload = btoa(JSON.stringify(tokenPayload))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return `agrikd://${encodedPayload}`
+  }
+
+  const copyTokenToClipboard = async (tok) => {
+    try {
+      const fullToken = buildTokenUrl(tok.id, tok.expires_at)
+      await navigator.clipboard.writeText(fullToken)
+      setSuccessMsg(`Token copied to clipboard!`)
+    } catch (err) {
+      setError('Failed to copy token')
+    }
+  }
+
   const deleteToken = async (tok) => {
     try {
       const { error: err } = await supabase.from('provisioning_tokens').delete().eq('id', tok.id)
@@ -599,7 +624,15 @@ export default function DevicesPage() {
                           <span className="badge" style={{ background: isUsed ? '#dcfce7' : isExpired ? '#fee2e2' : '#e0f2fe', color: statusColor }}>{statusLabel}</span>
                         </td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{tok.used_by_hw_id || '—'}</td>
-                        <td>
+                        <td style={{ display: 'flex', gap: 4 }}>
+                          {!isUsed && !isExpired && (
+                            <button
+                              className="btn btn-sm"
+                              style={{ background: '#e0f2fe', color: '#0284c7', border: '1px solid #bae6fd' }}
+                              onClick={() => copyTokenToClipboard(tok)}
+                              title="Copy full token to clipboard"
+                            >Copy</button>
+                          )}
                           <button
                             className="btn btn-sm"
                             style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}
