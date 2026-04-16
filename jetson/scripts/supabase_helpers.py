@@ -111,6 +111,7 @@ def upload_model_benchmark(base_url, key, leaf_type, version, benchmark):
             "Content-Type": "application/json",
             "Prefer": "return=minimal,resolution=merge-duplicates",
         },
+        params={"on_conflict": "leaf_type,version,format"},
         json=payload,
         timeout=30,
         verify=True,
