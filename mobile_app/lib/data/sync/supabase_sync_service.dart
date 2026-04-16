@@ -198,11 +198,10 @@ class SupabaseSyncService {
             fileOptions: const FileOptions(contentType: 'image/jpeg'),
           );
 
-      // prediction-images bucket is private — use signed URL (valid 365 days)
-      final signedUrl = await _client.storage
-          .from('prediction-images')
-          .createSignedUrl(path, 365 * 24 * 3600);
-      return signedUrl;
+      // Store the storage path (bucket + object path) rather than a signed URL.
+      // The admin dashboard re-signs on demand, so a permanent path reference
+      // is cleaner and never expires.
+      return 'prediction-images/$path';
     } catch (e) {
       // Image upload failure is logged but does not block prediction sync.
       // The prediction will be synced without an image URL.

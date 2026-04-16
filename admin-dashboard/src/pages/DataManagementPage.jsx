@@ -630,7 +630,7 @@ export default function DataManagementPage() {
       try {
         const match = r.image_url.match(/prediction-images\/(.+)$/)
         if (!match) return { ...r, signedUrl: null }
-        const storagePath = match[1]
+        const storagePath = match[1].split('?')[0] // strip query string from legacy signed URLs
         const { data: signed } = await supabase.storage.from('prediction-images').createSignedUrl(storagePath, 3600)
         return { ...r, signedUrl: signed?.signedUrl || null }
       } catch { return { ...r, signedUrl: null } }
@@ -660,7 +660,8 @@ export default function DataManagementPage() {
     } else if (pred.image_url) {
       const match = pred.image_url.match(/prediction-images\/(.+)$/)
       if (match) {
-        const { data: signed } = await supabase.storage.from('prediction-images').createSignedUrl(match[1], 3600)
+        const storagePath = match[1].split('?')[0] // strip query string from legacy signed URLs
+        const { data: signed } = await supabase.storage.from('prediction-images').createSignedUrl(storagePath, 3600)
         setPreviewImg({ url: signed?.signedUrl || pred.image_url, prediction: pred })
       }
     }

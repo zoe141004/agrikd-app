@@ -917,7 +917,9 @@ class SyncEngine:
         Mirrors mobile app flow:
           - Bucket: prediction-images
           - Path: {user_id}/{timestamp}_{local_id}.jpg
-          - Returns signed URL (365 days) or None on failure.
+          - Returns storage path 'prediction-images/{path}' or None on failure.
+            The admin dashboard re-signs on demand, so a permanent path reference
+            is cleaner and never expires.
         """
         try:
             ts = int(time.time() * 1000)
@@ -946,35 +948,9 @@ class SyncEngine:
                 )
                 return None
 
-            # Create signed URL (365 days)
-            sign_url = f"{self.supabase_url}/storage/v1/object/sign/prediction-images/{storage_path}"
-            sign_headers = {
-                "apikey": self.supabase_key,
-                "Authorization": f"Bearer {self.supabase_key}",
-                "Content-Type": "application/json",
-            }
-            sign_resp = self._session.post(
-                sign_url, headers=sign_headers,
-                json={"expiresIn": 365 * 24 * 3600},
-                timeout=10, verify=True,
-            )
-            if sign_resp.status_code == 200:
-                signed_data = sign_resp.json()
-                # Supabase v1: signedURL, v2+: signedUrl
-                signed_path = (
-                    signed_data.get("signedURL")
-                    or signed_data.get("signedUrl")
-                    or ""
-                )
-                if signed_path:
-                    # signedURL already includes /object/sign/ prefix
-                    full_url = f"{self.supabase_url}/storage/v1{signed_path}"
-                    logger.debug("Image uploaded: %s", storage_path)
-                    return full_url
-
-            logger.warning("Signed URL creation failed: HTTP %d %s",
-                          sign_resp.status_code, sign_resp.text[:200])
-            return None
+            logger.debug("Image uploaded: %s", storage_path)
+            # Return storage path — admin dashboard re-signs on demand
+            return f"prediction-images/{storage_path}"
         except (requests.RequestException, OSError) as e:
             logger.warning("Image upload error: %s", e)
             return None
@@ -986,7 +962,7 @@ class SyncEngine:
 
         Flow per prediction:
           1. Upload image to Supabase Storage (if image_path exists)
-          2. Get signed URL (365 days)
+          2. Store permanent storage path in image_url (admin dashboard re-signs on demand)
           3. Push prediction metadata + image_url via RPC
           4. Mark synced locally
           5. Delete local image file
