@@ -103,24 +103,26 @@ def download_file(url, dest_path, key=None):
 
 
 def upload_engine(base_url, key, local_path, storage_path):
-    """Upload .engine file to Supabase Storage bucket 'models'."""
+    """Upload .engine file to Supabase Storage bucket 'models' (streamed)."""
     upload_url = f"{base_url}/storage/v1/object/models/{storage_path}"
+    file_size = os.path.getsize(local_path)
 
+    # Stream the file in chunks to avoid loading the full engine (~100-500 MB)
+    # into RAM on memory-constrained Jetson devices.
     with open(local_path, "rb") as f:
-        file_data = f.read()
-
-    resp = requests.post(
-        upload_url,
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/octet-stream",
-            "x-upsert": "true",
-        },
-        data=file_data,
-        timeout=300,
-        verify=True,
-    )
+        resp = requests.post(
+            upload_url,
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(file_size),
+                "x-upsert": "true",
+            },
+            data=f,
+            timeout=300,
+            verify=True,
+        )
     resp.raise_for_status()
 
     public_url = f"{base_url}/storage/v1/object/public/models/{storage_path}"
@@ -244,7 +246,9 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
 
         # Step 4: Upload engine to Supabase
         engine_sha = sha256_file(engine_path)
-        storage_path = f"{leaf_type}/v{version}/{leaf_type}_{hardware_tag}.engine"
+        # Path must match sync_engine._upload_engine_cache and setup_jetson.sh:
+        #   engines/{leaf_type}/{version}/{hardware_tag}.engine
+        storage_path = f"engines/{leaf_type}/{version}/{hardware_tag}.engine"
         engine_url_remote = upload_engine(base_url, key, engine_path, storage_path)
 
         # Read device_id from config if available
@@ -301,7 +305,7 @@ def _run_validation(config, leaf_type, version, hardware_tag, engine_path):
 
         # 6c. Run TensorRT inference
         predictions, probs, latencies = run_tensorrt_inference(
-            engine_path, images, num_classes
+            engine_path, images, num_classes, input_size=input_size
         )
 
         # 6d. Compute metrics

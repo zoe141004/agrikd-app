@@ -15,34 +15,40 @@ log = logging.getLogger(__name__)
 
 
 def get_hardware_tag():
-    """Detect NVIDIA GPU SM architecture for engine compatibility tagging."""
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            cap = result.stdout.strip().split("\n")[0].replace(".", "")
-            return f"sm{cap}"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    """Detect device hardware tag for engine cache matching.
 
+    Format: {hw_model}_trt{trt_version}
+    Example: jetson-orin-nx-8gb_trt10.3.0.30
+
+    Mirrors sync_engine._get_hardware_tag() and setup_jetson.sh so that engines
+    built/downloaded by any code path use the same Storage path and DB key.
+    """
+    hw_model = "unknown"
+    trt_ver = "unknown"
     try:
         with open("/proc/device-tree/model", "r") as f:
-            model = f.read().strip().lower()
-        if "orin" in model:
-            return "sm87"
-        elif "xavier" in model:
-            return "sm72"
-        elif "nano" in model or "tx1" in model:
-            return "sm53"
-        elif "tx2" in model:
-            return "sm62"
+            hw_model = f.read().strip().rstrip("\x00")
+        hw_model = (hw_model.lower()
+                    .replace("nvidia ", "")
+                    .replace(" developer kit", "")
+                    .replace(" ", "-"))
     except FileNotFoundError:
         pass
-
-    log.warning("Could not detect GPU architecture, using 'unknown'")
-    return "unknown"
+    try:
+        result = subprocess.run(
+            ["dpkg", "-l", "tensorrt"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("ii"):
+                trt_ver = line.split()[2].split("-")[0]
+                break
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    if hw_model == "unknown" and trt_ver == "unknown":
+        log.warning("Could not detect hardware tag, using 'unknown'")
+        return "unknown"
+    return f"{hw_model}_trt{trt_ver}"
 
 
 def sha256_file(filepath):
