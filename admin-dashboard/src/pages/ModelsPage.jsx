@@ -954,7 +954,7 @@ export default function ModelsPage() {
                       <thead>
                         <tr>
                           <th>Format</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th>
-                          <th>Latency</th><th>FPS</th><th>Size</th><th>Memory</th><th>KL Div</th>
+                          <th>Latency</th><th>FPS</th><th>Size</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -968,8 +968,6 @@ export default function ModelsPage() {
                             <td>{b.latency_mean_ms != null ? `${b.latency_mean_ms.toFixed(1)} ms` : '—'}</td>
                             <td>{b.fps != null ? b.fps.toFixed(0) : '—'}</td>
                             <td>{b.size_mb != null ? `${b.size_mb.toFixed(2)} MB` : '—'}</td>
-                            <td>{b.memory_mb != null ? `${b.memory_mb.toFixed(1)} MB` : '—'}</td>
-                            <td className="font-mono" style={{ fontSize: 11 }}>{b.kl_divergence != null ? b.kl_divergence.toFixed(6) : '—'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1177,7 +1175,7 @@ export default function ModelsPage() {
             <div style={{ fontSize: 13, color: '#3d4f62', marginBottom: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, lineHeight: 1.8 }}>
               <strong>1. Format conversion</strong> — Converts .pth checkpoint to ONNX (opset 17) and TFLite (via onnx2tf).<br />
               <strong>2. Cross-format validation</strong> — Checks ONNX and TFLite produce consistent outputs vs PyTorch (tolerance: 1e-4, using 5 random inputs).<br />
-              <strong>3. Full evaluation</strong> — Runs all 3 formats on the real test dataset (15% stratified split). Measures accuracy, precision, recall, F1, latency, FPS, memory, model size, KL divergence.<br />
+              <strong>3. Full evaluation</strong> — Runs all 3 formats on the real test dataset (20% stratified split). Measures accuracy, precision, recall, F1, latency, FPS, model size.<br />
               <strong>4. Upload results</strong> — Uploads converted .tflite to Supabase Storage, writes metrics to database. View in Benchmarks tab.
             </div>
 

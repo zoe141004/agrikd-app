@@ -129,9 +129,7 @@ def parse_benchmark_report(report_path):
             "flops_m": safe_float(row_dict.get("FLOPs (M)")),
             "latency_mean_ms": safe_float(row_dict.get("ms/img")),
             "fps": safe_float(row_dict.get("FPS")),
-            "memory_mb": safe_float(row_dict.get("Runtime Mem (MB)")),
             "accuracy": safe_float(row_dict.get("Accuracy (%)") or row_dict.get("Top-1 %")),
-            "kl_divergence": safe_float(row_dict.get("KL Div")),
         })
 
     # Parse latency details table for P99
@@ -335,8 +333,8 @@ def main():
             "size_mb": r.get("size_mb"),
             "flops_m": r.get("flops_m"),
             "params_m": r.get("params_m"),
-            "memory_mb": r.get("memory_mb"),
-            "kl_divergence": r.get("kl_divergence"),
+            "memory_mb": None,
+            "kl_divergence": None,
             "is_candidate": True,
         }
 

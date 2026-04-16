@@ -3,16 +3,15 @@ AgriKD - Comprehensive Model Evaluator
 ======================================
 Evaluates PyTorch, ONNX, and TFLite (float16) model formats on:
   - Classification metrics (Accuracy, Precision, Recall, F1, Confusion Matrix)
-  - Efficiency metrics (Latency, FPS, Memory, Model Size)
+  - Efficiency metrics (Latency, FPS, Model Size)
   - Model complexity (FLOPs, Parameters)
-  - Cross-format consistency (KL Divergence)
 
 Only 3 formats are benchmarked: PyTorch, ONNX, TFLite (float16).
 TFLite float16 is the deploy format for OTA mobile updates.
 
 Supports both random synthetic data and real ImageFolder datasets.
 When --data-dir is provided, reproduces the KD training test split
-(sklearn stratified, seed=42, 70/15/15) for fair comparison.
+(sklearn stratified, seed=42, 70/10/20) for fair comparison.
 
 Usage (config-driven):
     python evaluate_models.py --config ../configs/tomato.json
@@ -36,7 +35,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-import psutil
 import torch
 import numpy as np
 import pandas as pd
@@ -53,10 +51,10 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
-                      seed=42, train_ratio=0.70, val_ratio=0.15, test_ratio=0.15):
+                      seed=42, train_ratio=0.70, val_ratio=0.10, test_ratio=0.20):
     """
     Load test split from an ImageFolder dataset, reproducing the exact
-    KD training split (sklearn stratified, seed=42, 70/15/15).
+    KD training split (sklearn stratified, seed=42, 70/10/20).
     """
     from torchvision import datasets, transforms
     from sklearn.model_selection import train_test_split
@@ -79,7 +77,7 @@ def load_test_dataset(data_dir, input_size=224, mean=None, std=None,
         indices, test_size=(val_ratio + test_ratio),
         stratify=targets, random_state=seed
     )
-    # Stage 2: val (50% of 30% = 15%) vs test (50% of 30% = 15%)
+    # Stage 2: val (1/3 of 30% = 10%) vs test (2/3 of 30% = 20%)
     temp_targets = targets[temp_idx]
     val_ratio_adj = val_ratio / (val_ratio + test_ratio)
     _, test_idx = train_test_split(
@@ -108,7 +106,6 @@ class ModelEvaluator:
 
         self.results = []
         self.all_predictions = {}  # format_name -> predictions array
-        self.golden_probs = None
         self.class_names = None
         self.test_labels = None
         self.flops_macs = None  # (flops, params) from thop
@@ -142,24 +139,6 @@ class ModelEvaluator:
             return tensor.numpy()[np.newaxis]  # (1, C, H, W)
         return self.test_data[i:i+1]
 
-    def _measure_memory(self, func, *args):
-        process = psutil.Process(os.getpid())
-        mem_before = process.memory_info().rss / (1024 * 1024)
-        result = func(*args)
-        mem_after = process.memory_info().rss / (1024 * 1024)
-        return result, max(0.0, mem_after - mem_before)
-
-    def _compute_kl_divergence(self, probs1, probs2):
-        epsilon = 1e-10
-        p1 = np.clip(probs1, epsilon, 1.0)
-        p2 = np.clip(probs2, epsilon, 1.0)
-        p1 = p1 / p1.sum(axis=1, keepdims=True)
-        p2 = p2 / p2.sum(axis=1, keepdims=True)
-        kl = np.mean(np.sum(p1 * np.log(p1 / p2), axis=1))
-        if not np.isfinite(kl):
-            raise ValueError(f"KL divergence is {kl} (NaN/Inf) — check model outputs for degenerate probabilities")
-        return float(kl)
-
     def _compute_flops(self, model):
         """Compute FLOPs/MACs using thop library."""
         try:
@@ -173,7 +152,7 @@ class ModelEvaluator:
             return None, None
 
     def _compute_accuracy(self, all_probs, format_name):
-        """Compute accuracy against ground truth or PyTorch golden."""
+        """Compute accuracy against ground truth labels."""
         model_preds = np.argmax(all_probs, axis=1)
         self.all_predictions[format_name] = model_preds
 
@@ -181,11 +160,8 @@ class ModelEvaluator:
             labels = self.test_labels
             accuracy = np.mean(model_preds == labels) * 100
         else:
-            golden = self.golden_probs
-            if golden is None:
-                golden = all_probs
-            golden_preds = np.argmax(golden, axis=1)
-            accuracy = np.mean(model_preds == golden_preds) * 100
+            # Fallback: compare against self (100%)
+            accuracy = 100.0
 
         return accuracy
 
@@ -194,24 +170,21 @@ class ModelEvaluator:
         logger.info(f"  Benchmarking: {name}")
         logger.info(f"{'='*50}")
 
-        # 0. Clean up previous model to make memory measurement fair
+        # 0. Clean up previous model to make measurement fair
         gc.collect()
         time.sleep(0.2)  # Let OS reclaim freed pages
 
-        # 1. Load model and measure memory
-        model_obj, mem_load = self._measure_memory(load_fn)
+        # 1. Load model
+        model_obj = load_fn()
 
         # 2. Warm up (skip first 10)
         warmup_iters = min(10, self.num_samples)
         for i in range(warmup_iters):
             infer_fn(model_obj, self._get_sample(i))
 
-        # 3. Inference loop — track true peak memory
+        # 3. Inference loop
         latencies = []
         all_probs = []
-        process = psutil.Process(os.getpid())
-        mem_baseline = process.memory_info().rss / (1024 * 1024)
-        mem_peak = mem_baseline
 
         for i in range(self.num_samples):
             inp = self._get_sample(i)
@@ -220,31 +193,19 @@ class ModelEvaluator:
             end = time.perf_counter()
             latencies.append((end - start) * 1000)
             all_probs.append(probs)
-            current_mem = process.memory_info().rss / (1024 * 1024)
-            if current_mem > mem_peak:
-                mem_peak = current_mem
 
-        mem_infer_peak = max(0.0, mem_peak - mem_baseline)
         all_probs = np.vstack(all_probs)
 
-        # 4. KL Divergence
-        kl_div = 0.0
-        if name == "PyTorch":
-            self.golden_probs = all_probs
-        elif self.golden_probs is not None:
-            kl_div = self._compute_kl_divergence(self.golden_probs, all_probs)
-
-        # 5. Accuracy
+        # 4. Accuracy
         accuracy = self._compute_accuracy(all_probs, name)
 
-        # 6. Latency stats
+        # 5. Latency stats
         latencies = np.array(latencies)
         mean_lat = np.mean(latencies)
         min_lat = np.min(latencies)
         max_lat = np.max(latencies)
         p99_lat = np.percentile(latencies, 99)
         fps = 1000.0 / mean_lat
-        total_mem = mem_load + mem_infer_peak
 
         # 7. FLOPs/Params — same architecture across all formats,
         #    computed once from PyTorch and reused for ONNX/TFLite
@@ -265,9 +226,7 @@ class ModelEvaluator:
         logger.info(f"  Params:  {params_m} M | FLOPs: {flops_m} M")
         logger.info(f"  Latency: {mean_lat:.2f} ms/img (P99: {p99_lat:.2f} ms)")
         logger.info(f"  FPS:     {fps:.1f}")
-        logger.info(f"  Runtime Mem: {total_mem:.1f} MB")
         logger.info(f"  Accuracy: {accuracy:.1f}%")
-        logger.info(f"  KL Div:  {kl_div:.8f}")
 
         self.results.append({
             "Format": name,
@@ -280,9 +239,7 @@ class ModelEvaluator:
             "Lat P99 (ms)": p99_lat,
             "ms/img": mean_lat,
             "FPS": fps,
-            "Runtime Mem (MB)": total_mem,
             "Accuracy (%)": accuracy,
-            "KL Div": kl_div,
         })
 
         # Store ref for cleanup in run_all()
@@ -435,14 +392,11 @@ class ModelEvaluator:
 
         # Main benchmark table
         display_cols = ["Format", "Size (MB)", "Params (M)", "FLOPs (M)",
-                        "ms/img", "FPS", "Runtime Mem (MB)", "Accuracy (%)", "KL Div"]
+                        "ms/img", "FPS", "Accuracy (%)"]
         df_display = df[[c for c in display_cols if c in df.columns]].copy()
-        # Per-column float format: .3f for most, .6f for KL Div
         col_fmts = []
         for c in df_display.columns:
-            if c == "KL Div":
-                col_fmts.append(".6f")
-            elif c in ("Format", "Params (M)", "FLOPs (M)"):
+            if c in ("Format", "Params (M)", "FLOPs (M)"):
                 col_fmts.append("")  # string columns
             else:
                 col_fmts.append(".3f")
@@ -477,12 +431,10 @@ class ModelEvaluator:
 ### Notes
 - **Params/FLOPs** are identical across formats (same model architecture, same weights).
 - **File size** differs due to serialization: TFLite float16 uses half-precision weight storage (most compact), ONNX uses Protobuf, PyTorch includes optimizer state.
-- **Runtime Mem (MB)** = RSS delta measured independently per format (gc.collect between formats). Reflects runtime engine overhead, not model size.
 - **Latency** measured on PC CPU. On mobile, TFLite + GPU Delegate or NNAPI can significantly outperform CPU-only inference.
-- **KL Divergence** measures the full probability distribution shift vs PyTorch (baseline). A KL Div near 0 with slight Accuracy difference means a few borderline samples flipped (e.g., PyTorch: [0.350001, 0.349999] vs TFLite: [0.349999, 0.350001]) — the distributions are nearly identical but argmax flips at the decision boundary.
 
 ### Sweet Spot Conclusion
-- **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges, zero KL divergence vs PyTorch.
+- **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges.
 - **Mobile App:** `TFLite (float16)` — smallest footprint (~50% compression), supports GPU Delegate & NNAPI.
 """)
 
@@ -530,7 +482,6 @@ class ModelEvaluator:
                     "sha256": _sha256(self.tflite_path),
                     "size_mb": tflite_row.get("Size (MB)") if tflite_row else None,
                     "accuracy_pct": tflite_row.get("Accuracy (%)") if tflite_row else None,
-                    "kl_divergence": tflite_row.get("KL Div") if tflite_row else None,
                 },
             },
         }

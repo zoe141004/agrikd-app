@@ -41,8 +41,8 @@ log = logging.getLogger("validate_engine")
 # Matches the CI pipeline split exactly (evaluate_models.py)
 SEED = 42
 TRAIN_RATIO = 0.70
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
+VAL_RATIO = 0.10
+TEST_RATIO = 0.20
 
 # ImageNet normalization (same as inference.py and evaluate_models.py)
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -224,7 +224,7 @@ def load_test_images(data_dir, input_size=224):
         stratify=all_labels,
         random_state=SEED,
     )
-    # Stage 2: val (15%) vs test (15%)
+    # Stage 2: val (1/3 of 30% = 10%) vs test (2/3 of 30% = 20%)
     temp_labels = all_labels[temp_idx]
     val_ratio_adj = VAL_RATIO / (VAL_RATIO + TEST_RATIO)
     _, test_idx = train_test_split(
