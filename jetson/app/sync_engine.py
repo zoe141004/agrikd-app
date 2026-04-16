@@ -656,9 +656,12 @@ class SyncEngine:
                 else:
                     logger.info("Validation completed: %s v%s", leaf_type, version)
             else:
+                # Log both stdout and stderr for debugging
+                error_info = result.stderr[-500:] if result.stderr else ""
+                stdout_tail = result.stdout[-500:] if result.stdout else ""
                 logger.warning(
-                    "Validation subprocess failed for %s: %s",
-                    leaf_type, result.stderr[-500:] if result.stderr else "no error output"
+                    "Validation subprocess failed for %s (exit %d): stderr=%s stdout=%s",
+                    leaf_type, result.returncode, error_info, stdout_tail
                 )
 
         except subprocess.TimeoutExpired:
