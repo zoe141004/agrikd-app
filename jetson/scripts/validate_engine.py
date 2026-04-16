@@ -264,14 +264,11 @@ def run_tensorrt_inference(engine_path, images, num_classes, input_size=224):
     Returns (predictions, latencies_ms) where predictions is an array of
     predicted class indices and latencies_ms is a list of per-image latencies.
 
-    Note: Explicitly creates CUDA context to work from background threads.
+    Uses pycuda.autoinit for safe CUDA context initialization.
+    This script runs as a subprocess with its own isolated CUDA context.
     """
+    import pycuda.autoinit  # noqa: F401 — auto-creates CUDA context safely
     import pycuda.driver as cuda
-
-    # Initialize CUDA driver (required when called from background thread)
-    cuda.init()
-    device = cuda.Device(0)
-    cuda_ctx = device.make_context()
 
     try:
         import tensorrt as trt
@@ -346,9 +343,8 @@ def run_tensorrt_inference(engine_path, images, num_classes, input_size=224):
         return np.array(predictions), np.array(all_probs), latencies_ms
 
     finally:
-        # Always cleanup CUDA context to avoid resource leaks
-        cuda_ctx.pop()
-        cuda_ctx.detach()
+        # pycuda.autoinit handles context cleanup automatically
+        pass
 
 
 def compute_metrics(predictions, labels, probs, latencies_ms,
