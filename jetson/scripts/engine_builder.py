@@ -215,7 +215,7 @@ def build_engine(onnx_path, engine_path, workspace_mb=1024):
     log.info("Engine built successfully: %s", engine_path)
 
 
-def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
+def process_leaf_type(config, leaf_type, hardware_tag, validate=False, force=False):
     """Process a single leaf type: check cache → download/build → validate → upload.
 
     Validation flow (when --validate is set):
@@ -317,7 +317,7 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
 
     # Step 6: On-device validation (if --validate)
     needs_benchmark = validate
-    if needs_benchmark:
+    if needs_benchmark and not force:
         # Check Supabase for existing benchmark before running expensive eval
         engine_info = supabase_rpc(base_url, key, "get_engine_for_hardware", {
             "p_leaf_type": leaf_type,
@@ -325,7 +325,7 @@ def process_leaf_type(config, leaf_type, hardware_tag, validate=False):
             "p_hardware_tag": hardware_tag,
         })
         if engine_info and engine_info[0].get("benchmark_json"):
-            log.info("Benchmark already exists for %s/%s/%s — skipping validation",
+            log.info("Benchmark already exists for %s/%s/%s — skipping (use --force to overwrite)",
                      leaf_type, version, hardware_tag)
             needs_benchmark = False
 
@@ -407,6 +407,7 @@ def main():
     parser.add_argument("--config", required=True, help="Path to config.json")
     parser.add_argument("--leaf-type", help="Process specific leaf type (default: all)")
     parser.add_argument("--validate", action="store_true", help="Run on-device validation after build")
+    parser.add_argument("--force", action="store_true", help="Force re-run validation even if benchmark exists")
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -431,7 +432,7 @@ def main():
     success_count = 0
     for lt in leaf_types:
         try:
-            if process_leaf_type(config, lt, hardware_tag, args.validate):
+            if process_leaf_type(config, lt, hardware_tag, args.validate, args.force):
                 success_count += 1
         except Exception as e:
             log.error("Failed to process %s: %s", lt, e)
