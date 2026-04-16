@@ -263,161 +263,89 @@ pip3 install --break-system-packages \
 echo "  [OK] Python dependencies installed (including DVC for engine validation)."
 echo ""
 
-# ── 8. Configure Supabase credentials ────────────────────────
-echo "[8/13] Configuring Supabase credentials..."
+# ── 8. Device Provisioning (MANDATORY) ───────────────────────
+echo "[8/13] Device Provisioning..."
 echo ""
+echo "  ┌─────────────────────────────────────────────────────────────┐"
+echo "  │  MANDATORY: Provisioning token required                     │"
+echo "  │                                                             │"
+echo "  │  Get token from: Admin Dashboard → Devices → Provisioning   │"
+echo "  │  Tokens → Generate Token → Copy the Token ID                │"
+echo "  └─────────────────────────────────────────────────────────────┘"
+echo ""
+
 CFG="$INSTALL_DIR/config/config.json"
+STATE_FILE="$INSTALL_DIR/data/device_state.json"
 
-# Ensure config.json exists
+# Check if already provisioned
+if [ -f "$STATE_FILE" ]; then
+    EXISTING_TOKEN=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('device_token',''))" 2>/dev/null || echo "")
+    if [ -n "$EXISTING_TOKEN" ]; then
+        echo "  [OK] Device already provisioned."
+        echo "  Device token: ${EXISTING_TOKEN:0:8}..."
+        echo "  To re-provision, use: python3 $INSTALL_DIR/scripts/provision.py --force <TOKEN>"
+        echo ""
+        # Skip to GCS section
+        PROVISION_OK=1
+    fi
+fi
+
+if [ -z "$PROVISION_OK" ]; then
+    # Get token from env or prompt
+    PROVISION_TOKEN="${AGRIKD_PROVISION_TOKEN:-}"
+    
+    if [ -z "$PROVISION_TOKEN" ]; then
+        echo "  Enter provisioning token (UUID format, e.g., 0808d1c9-1b9f-4722-...):"
+        read -rp "  Token: " PROVISION_TOKEN
+    fi
+    
+    if [ -z "$PROVISION_TOKEN" ]; then
+        echo ""
+        echo "  ┌─────────────────────────────────────────────────────────────┐"
+        echo "  │  ERROR: Provisioning token is required.                     │"
+        echo "  │                                                             │"
+        echo "  │  Without provisioning:                                      │"
+        echo "  │    - Device won't appear in Dashboard                       │"
+        echo "  │    - No cloud sync, no OTA model updates                    │"
+        echo "  │    - No remote configuration                                │"
+        echo "  │                                                             │"
+        echo "  │  Get token: Admin Dashboard → Devices → Provisioning Tokens │"
+        echo "  └─────────────────────────────────────────────────────────────┘"
+        echo ""
+        exit 1
+    fi
+    
+    # Run provisioning
+    echo "  Running provisioning..."
+    set +e
+    python3 "$INSTALL_DIR/scripts/provision.py" "$PROVISION_TOKEN"
+    PROVISION_RESULT=$?
+    set -e
+    
+    if [ $PROVISION_RESULT -ne 0 ]; then
+        echo ""
+        echo "  [ERROR] Provisioning failed (exit code: $PROVISION_RESULT)"
+        echo "  Common issues:"
+        echo "    - Token already used or expired"
+        echo "    - Network connectivity"
+        echo "    - Invalid token format"
+        echo ""
+        echo "  Generate a new token: Admin Dashboard → Devices → Provisioning Tokens"
+        exit 1
+    fi
+    
+    echo "  [OK] Device provisioned successfully."
+fi
+
+# Verify config.json was created by provisioning
 if [ ! -f "$CFG" ]; then
-    echo "  [WARN] config.json not found at $CFG — creating minimal config."
-    cat > "$CFG" << 'MINCFG'
-{
-    "camera": {"source": 0, "width": 640, "height": 480, "mode": "manual"},
-    "inference": {"input_size": 224, "imagenet_mean": [0.485, 0.456, 0.406], "imagenet_std": [0.229, 0.224, 0.225]},
-    "models": {},
-    "sync": {"supabase_url": "", "supabase_key": "", "batch_size": 50, "interval_seconds": 300},
-    "server": {"host": "0.0.0.0", "port": 8080, "api_key": ""},
-    "database": {"path": "data/agrikd_jetson.db"},
-    "logging": {"level": "INFO", "file": "logs/agrikd.log", "max_bytes": 104857600, "backup_count": 5}
-}
-MINCFG
-    chown "$SERVICE_USER:$SERVICE_USER" "$CFG"
-    chmod 640 "$CFG"
+    echo "  [ERROR] config.json not found after provisioning."
+    exit 1
 fi
 
-# Write a temp Python script (avoids heredoc + env var issues entirely)
-INJECT_SCRIPT="/tmp/_agrikd_inject_creds.py"
-cat > "$INJECT_SCRIPT" << 'PYEOF'
-import json, sys, os
-
-def main():
-    cfg_path = sys.argv[1]
-    repo_root = sys.argv[2]
-
-    print(f"  Config: {cfg_path}")
-    print(f"  Repo:   {repo_root}")
-
-    # Load config
-    with open(cfg_path) as f:
-        cfg = json.load(f)
-
-    cfg.setdefault("sync", {})
-    existing_url = cfg["sync"].get("supabase_url", "").strip()
-    existing_key = cfg["sync"].get("supabase_key", "").strip()
-
-    if existing_url and existing_key:
-        print(f"  [OK] Credentials already present.")
-        print(f"  URL: {existing_url[:50]}...")
-        return 0
-
-    print("  Credentials empty — scanning .env files...")
-
-    # Scan .env files in repo root
-    auto_url = ""
-    auto_key = ""
-    for name in [".env", ".env.development"]:
-        path = os.path.join(repo_root, name)
-        exists = os.path.isfile(path)
-        print(f"  {path} → {'FOUND' if exists else 'not found'}")
-        if exists and (not auto_url or not auto_key):
-            with open(path, encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    line = line.strip().replace("\r", "")
-                    if line.startswith("#") or "=" not in line:
-                        continue
-                    key, val = line.split("=", 1)
-                    key = key.strip()
-                    val = val.strip()
-                    if key == "SUPABASE_URL" and not auto_url:
-                        auto_url = val
-                    elif key == "SUPABASE_ANON_KEY" and not auto_key:
-                        auto_key = val
-
-    if not auto_url or not auto_key:
-        print(f"  [FAIL] Could not find credentials.")
-        print(f"  auto_url={'SET' if auto_url else 'EMPTY'}, auto_key={'SET' if auto_key else 'EMPTY'}")
-        return 2
-
-    print(f"  [AUTO] Found credentials:")
-    print(f"  URL: {auto_url[:50]}...")
-    print(f"  KEY: {auto_key[:25]}...")
-
-    # Inject
-    cfg["sync"]["supabase_url"] = auto_url
-    cfg["sync"]["supabase_key"] = auto_key
-    with open(cfg_path, "w") as f:
-        json.dump(cfg, f, indent=4)
-
-    # Verify
-    with open(cfg_path) as f:
-        check = json.load(f)
-    if check.get("sync", {}).get("supabase_url", ""):
-        print(f"  [VERIFIED] config.json updated.")
-        return 0
-    else:
-        print(f"  [ERROR] Write failed verification!")
-        return 1
-
-if __name__ == "__main__":
-    sys.exit(main())
-PYEOF
-
-# Run the injection script with explicit args (no env vars needed)
-set +e
-python3 "$INJECT_SCRIPT" "$CFG" "$REPO_ROOT"
-INJECT_RESULT=$?
-set -e
-rm -f "$INJECT_SCRIPT"
-
-# Fix ownership after writing (script runs as root via sudo)
-chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
-chmod 640 "$CFG" 2>/dev/null || true
-
-if [ $INJECT_RESULT -eq 0 ]; then
-    echo ""
-elif [ $INJECT_RESULT -eq 2 ]; then
-    # Interactive fallback
-    echo ""
-    echo "  Options:"
-    echo "    1) Enter Supabase URL and anon key manually"
-    echo "    2) Skip — configure later"
-    echo ""
-    read -rp "  Choice [1/2]: " CRED_CHOICE
-    case "$CRED_CHOICE" in
-        1)
-            read -rp "  Supabase URL: " MANUAL_URL
-            read -rp "  Supabase Anon Key: " MANUAL_KEY
-            if [ -n "$MANUAL_URL" ] && [ -n "$MANUAL_KEY" ]; then
-                python3 -c "
-import json, sys
-with open(sys.argv[1]) as f:
-    c = json.load(f)
-c.setdefault('sync', {})
-c['sync']['supabase_url'] = sys.argv[2].strip()
-c['sync']['supabase_key'] = sys.argv[3].strip()
-with open(sys.argv[1], 'w') as f:
-    json.dump(c, f, indent=4)
-" "$CFG" "$MANUAL_URL" "$MANUAL_KEY"
-                echo "  [OK] Credentials saved."
-                chown "$SERVICE_USER:$SERVICE_USER" "$CFG" 2>/dev/null || true
-                chmod 640 "$CFG" 2>/dev/null || true
-            else
-                echo "  [WARN] Incomplete — skipping."
-            fi
-            ;;
-        *)
-            echo "  Skipped. Edit later: $CFG"
-            ;;
-    esac
-else
-    echo "  [ERROR] Credential injection failed (exit=$INJECT_RESULT)."
-    echo "  Edit manually: $CFG"
-fi
-
-# Final verification: show config.json credential status
+# Show credential status
+echo ""
 echo "  ── Config.json credential status ──"
-set +e
 python3 -c "
 import json
 with open('$CFG') as f:
@@ -429,11 +357,9 @@ if url and key:
     print(f'  supabase_key: {key[:25]}...')
     print('  Status: CONFIGURED')
 else:
-    print('  supabase_url:', repr(url))
-    print('  supabase_key:', repr(key))
-    print('  Status: NOT CONFIGURED — steps 9-10 will be skipped')
+    print('  [ERROR] Credentials missing after provisioning!')
+    exit(1)
 "
-set -e
 echo ""
 
 # ── 8b. GCS credentials for DVC dataset validation ──────────
@@ -519,16 +445,17 @@ if [ ! -f "$CFG" ]; then
     echo "  [WARN] Config not found: $CFG — skipping model download."
     echo "  Place .onnx files manually at: $INSTALL_DIR/models/"
 else
-    # Re-read credentials (may have been updated by provisioning in step 8)
+    # Read credentials and device token
     CFG_SUPA_URL=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_url',''))" 2>/dev/null || echo "")
     CFG_SUPA_KEY=$(python3 -c "import json; c=json.load(open('$CFG')); print(c.get('sync',{}).get('supabase_key',''))" 2>/dev/null || echo "")
+    DEVICE_TOKEN=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('device_token',''))" 2>/dev/null || echo "")
 
     if [ -z "$CFG_SUPA_URL" ] || [ -z "$CFG_SUPA_KEY" ]; then
         echo "  [WARN] Supabase credentials not found in config.json."
         echo "  Skipping model download. Place files manually at:"
         echo "    $INSTALL_DIR/models/<leaf_type>_student.engine (or .onnx)"
     else
-        # Detect device hardware tag (same as upload in step 10)
+        # Detect device hardware tag
         HW_MODEL="unknown"
         TRT_VER="unknown"
         if [ -f /proc/device-tree/model ]; then
@@ -538,93 +465,213 @@ else
         DEVICE_TAG="${HW_MODEL}_trt${TRT_VER}"
         echo "  Device tag: $DEVICE_TAG"
 
-        for leaf_type in $(python3 -c "import json; c=json.load(open('$CFG')); print(' '.join(c.get('models',{}).keys()))"); do
-
-            # Get latest active version + ONNX URL from Supabase
-            echo "  Querying latest model for $leaf_type..."
-            ONNX_RESP=$(curl -sf --max-time 30 --connect-timeout 10 \
-                "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
+        # Fetch assigned model versions from device config (if provisioned)
+        ASSIGNED_MODELS=""
+        if [ -n "$DEVICE_TOKEN" ]; then
+            echo "  Fetching assigned model versions from device config..."
+            DEVICE_CONFIG=$(curl -sf --max-time 15 \
+                "${CFG_SUPA_URL}/rest/v1/rpc/device_poll_config" \
                 -H "apikey: $CFG_SUPA_KEY" \
                 -H "Authorization: Bearer $CFG_SUPA_KEY" \
                 -H "Content-Type: application/json" \
-                -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
-
-            MODEL_VERSION=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['version'] if r else '')" 2>/dev/null || echo "")
-            ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
-
-            if [ -z "$MODEL_VERSION" ]; then
-                echo "  [WARN] No active model found for $leaf_type — skipping"
-                continue
-            fi
-
-            # Use versioned filenames
-            engine_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.engine"
-            onnx_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.onnx"
-
-            if [ -f "$engine_file" ]; then
-                echo "  Engine already exists: $leaf_type v$MODEL_VERSION — skipping download"
-                continue
-            fi
-
-            # Try 1: Download pre-built .engine for this exact device + TRT version
-            # Path scheme matches sync_engine._upload_engine_cache(): engines/{leaf_type}/{version}/{hw_tag}.engine
-            ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${leaf_type}/${MODEL_VERSION}/${DEVICE_TAG}.engine"
-            echo "  Trying pre-built engine for $leaf_type v$MODEL_VERSION ($DEVICE_TAG)..."
-            HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
-            if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
-                ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
-                # Sanity check: engine should be at least 100KB
-                if [ "$ENGINE_SIZE" -gt 102400 ]; then
-                    chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
-                    chmod 644 "$engine_file"
-                    echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION (${ENGINE_SIZE} bytes)"
-                    echo "       Built on: $DEVICE_TAG — no conversion needed!"
-                    # Update config.json with versioned engine path
-                    ENGINE_REL="models/$(basename "$engine_file")"
-                    python3 -c "
+                -d "{\"p_device_token\": \"$DEVICE_TOKEN\"}" 2>/dev/null || echo "{}")
+            
+            ASSIGNED_MODELS=$(echo "$DEVICE_CONFIG" | python3 -c "
 import json, sys
 try:
-    cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    with open(cfg_path) as f:
-        c = json.load(f)
-    if 'models' not in c: c['models'] = {}
-    if leaf not in c['models']: c['models'][leaf] = {}
-    c['models'][leaf]['engine_path'] = eng_path
-    c['models'][leaf]['version'] = ver
-    with open(cfg_path, 'w') as f:
-        json.dump(c, f, indent=4)
-except Exception as e:
-    print(f'[WARNING] Config update failed: {e}', file=sys.stderr)
-" "$CFG" "$leaf_type" "$ENGINE_REL" "$MODEL_VERSION"
-                    continue
-                else
-                    echo "  [WARN] Downloaded file too small (${ENGINE_SIZE} bytes) — invalid engine"
-                    rm -f "$engine_file"
+    data = json.load(sys.stdin)
+    if data:
+        desired = data.get('desired_config', {}) or {}
+        model_versions = desired.get('model_versions', {}) or {}
+        for lt, ver in model_versions.items():
+            print(f'{lt}:{ver}')
+except: pass
+" 2>/dev/null || echo "")
+        fi
+
+        if [ -n "$ASSIGNED_MODELS" ]; then
+            echo "  Assigned models: $(echo $ASSIGNED_MODELS | tr '\n' ' ')"
+            
+            # Download assigned models
+            for entry in $ASSIGNED_MODELS; do
+                leaf_type=$(echo "$entry" | cut -d: -f1)
+                MODEL_VERSION=$(echo "$entry" | cut -d: -f2)
+                
+                echo "  Querying ONNX for $leaf_type v$MODEL_VERSION..."
+                
+                # Query exact version from model_registry
+                ONNX_RESP=$(curl -sf --max-time 15 \
+                    "${CFG_SUPA_URL}/rest/v1/model_registry?leaf_type=eq.${leaf_type}&version=eq.${MODEL_VERSION}&select=onnx_url" \
+                    -H "apikey: $CFG_SUPA_KEY" \
+                    -H "Authorization: Bearer $CFG_SUPA_KEY" 2>/dev/null || echo "[]")
+                
+                ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r and r[0].get('onnx_url') else '')" 2>/dev/null || echo "")
+                
+                if [ -z "$ONNX_URL" ]; then
+                    # Fallback to active version
+                    echo "  [WARN] No ONNX for $leaf_type v$MODEL_VERSION — trying latest active..."
+                    ONNX_RESP=$(curl -sf --max-time 15 \
+                        "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
+                        -H "apikey: $CFG_SUPA_KEY" \
+                        -H "Authorization: Bearer $CFG_SUPA_KEY" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
+                    
+                    MODEL_VERSION=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['version'] if r else '')" 2>/dev/null || echo "")
+                    ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
+                    
+                    if [ -n "$MODEL_VERSION" ]; then
+                        echo "  Fallback to active: $leaf_type v$MODEL_VERSION"
+                    fi
                 fi
-            else
-                rm -f "$engine_file"
-                echo "  No pre-built engine available — falling back to ONNX download"
-            fi
+                
+                if [ -z "$MODEL_VERSION" ] || [ -z "$ONNX_URL" ]; then
+                    echo "  [WARN] No model found for $leaf_type — skipping"
+                    continue
+                fi
+                
+                # Download model (same logic as before)
+                engine_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.engine"
+                onnx_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.onnx"
+                
+                if [ -f "$engine_file" ]; then
+                    echo "  Engine already exists: $leaf_type v$MODEL_VERSION — skipping"
+                    continue
+                fi
+                
+                # Try pre-built engine first
+                ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${leaf_type}/${MODEL_VERSION}/${DEVICE_TAG}.engine"
+                echo "  Trying pre-built engine for $leaf_type v$MODEL_VERSION ($DEVICE_TAG)..."
+                HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
+                
+                if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
+                    ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
+                    if [ "$ENGINE_SIZE" -gt 102400 ]; then
+                        chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+                        chmod 644 "$engine_file"
+                        echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION (${ENGINE_SIZE} bytes)"
+                        python3 -c "
+import json, sys
+cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(cfg_path) as f: c = json.load(f)
+if 'models' not in c: c['models'] = {}
+if leaf not in c['models']: c['models'][leaf] = {}
+c['models'][leaf]['engine_path'] = eng_path
+c['models'][leaf]['version'] = ver
+with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
+" "$CFG" "$leaf_type" "models/$(basename $engine_file)" "$MODEL_VERSION" 2>/dev/null || true
+                        continue
+                    fi
+                fi
+                
+                # Download ONNX
+                rm -f "$engine_file" 2>/dev/null
+                echo "  Downloading ONNX: $leaf_type v$MODEL_VERSION..."
+                HTTP_CODE=$(curl -sL --max-time 300 --connect-timeout 10 -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
+                
+                if [ "$HTTP_CODE" = "200" ] && [ -s "$onnx_file" ]; then
+                    ONNX_SIZE=$(stat --format=%s "$onnx_file" 2>/dev/null || echo "0")
+                    chown "$SERVICE_USER:$SERVICE_USER" "$onnx_file"
+                    chmod 644 "$onnx_file"
+                    echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION (${ONNX_SIZE} bytes)"
+                    python3 -c "
+import json, sys
+cfg_path, leaf, onnx_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(cfg_path) as f: c = json.load(f)
+if 'models' not in c: c['models'] = {}
+if leaf not in c['models']: c['models'][leaf] = {}
+c['models'][leaf]['onnx_path'] = onnx_path
+c['models'][leaf]['version'] = ver
+with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
+" "$CFG" "$leaf_type" "models/$(basename $onnx_file)" "$MODEL_VERSION" 2>/dev/null || true
+                else
+                    echo "  [WARN] Failed to download ONNX for $leaf_type (HTTP $HTTP_CODE)"
+                fi
+            done
+        else
+            echo "  No assigned models found — downloading latest active models..."
+            # Fallback: download active models for all leaf types in model_registry
+            LEAF_TYPES=$(curl -sf --max-time 15 \
+                "${CFG_SUPA_URL}/rest/v1/model_registry?status=eq.active&select=leaf_type" \
+                -H "apikey: $CFG_SUPA_KEY" \
+                -H "Authorization: Bearer $CFG_SUPA_KEY" 2>/dev/null | \
+                python3 -c "import json,sys; print(' '.join(set(r['leaf_type'] for r in json.load(sys.stdin))))" 2>/dev/null || echo "")
+            
+            for leaf_type in $LEAF_TYPES; do
+                echo "  Querying latest model for $leaf_type..."
+                ONNX_RESP=$(curl -sf --max-time 30 --connect-timeout 10 \
+                    "${CFG_SUPA_URL}/rest/v1/rpc/get_latest_onnx_url" \
+                    -H "apikey: $CFG_SUPA_KEY" \
+                    -H "Authorization: Bearer $CFG_SUPA_KEY" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"p_leaf_type\": \"$leaf_type\"}" 2>/dev/null || echo "[]")
 
-            # Try 2: Download ONNX and convert locally in step 10
-            if [ -z "$ONNX_URL" ]; then
-                echo "  [WARN] No ONNX URL found for $leaf_type — skipping"
-                continue
-            fi
+                MODEL_VERSION=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['version'] if r else '')" 2>/dev/null || echo "")
+                ONNX_URL=$(echo "$ONNX_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r[0]['onnx_url'] if r else '')" 2>/dev/null || echo "")
 
-            echo "  Downloading ONNX: $leaf_type v$MODEL_VERSION..."
-            HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
-            if [ "$HTTP_CODE" = "200" ]; then
-                echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION ($(stat --format=%s "$onnx_file" 2>/dev/null || echo '?') bytes)"
-            else
-                echo "  [WARN] Download failed (HTTP $HTTP_CODE) for $leaf_type"
-                rm -f "$onnx_file"
-            fi
-        done
+                if [ -z "$MODEL_VERSION" ]; then
+                    echo "  [WARN] No active model found for $leaf_type — skipping"
+                    continue
+                fi
+
+                engine_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.engine"
+                onnx_file="$INSTALL_DIR/models/${leaf_type}_student_v${MODEL_VERSION}.onnx"
+
+                if [ -f "$engine_file" ]; then
+                    echo "  Engine already exists: $leaf_type v$MODEL_VERSION — skipping"
+                    continue
+                fi
+
+                # Try pre-built engine
+                ENGINE_STORAGE_URL="${CFG_SUPA_URL}/storage/v1/object/public/models/engines/${leaf_type}/${MODEL_VERSION}/${DEVICE_TAG}.engine"
+                echo "  Trying pre-built engine for $leaf_type v$MODEL_VERSION ($DEVICE_TAG)..."
+                HTTP_CODE=$(curl -sL --max-time 120 --connect-timeout 10 -w "%{http_code}" -o "$engine_file" "$ENGINE_STORAGE_URL" 2>/dev/null || echo "000")
+                if [ "$HTTP_CODE" = "200" ] && [ -s "$engine_file" ]; then
+                    ENGINE_SIZE=$(stat --format=%s "$engine_file" 2>/dev/null || echo "0")
+                    if [ "$ENGINE_SIZE" -gt 102400 ]; then
+                        chown "$SERVICE_USER:$SERVICE_USER" "$engine_file"
+                        chmod 644 "$engine_file"
+                        echo "  [OK] Downloaded pre-built engine for $leaf_type v$MODEL_VERSION"
+                        python3 -c "
+import json, sys
+cfg_path, leaf, eng_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(cfg_path) as f: c = json.load(f)
+if 'models' not in c: c['models'] = {}
+if leaf not in c['models']: c['models'][leaf] = {}
+c['models'][leaf]['engine_path'] = eng_path
+c['models'][leaf]['version'] = ver
+with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
+" "$CFG" "$leaf_type" "models/$(basename $engine_file)" "$MODEL_VERSION" 2>/dev/null || true
+                        continue
+                    fi
+                fi
+
+                # Download ONNX
+                rm -f "$engine_file" 2>/dev/null
+                echo "  Downloading ONNX: $leaf_type v$MODEL_VERSION..."
+                HTTP_CODE=$(curl -sL --max-time 300 --connect-timeout 10 -w "%{http_code}" -o "$onnx_file" "$ONNX_URL" 2>/dev/null || echo "000")
+                if [ "$HTTP_CODE" = "200" ] && [ -s "$onnx_file" ]; then
+                    ONNX_SIZE=$(stat --format=%s "$onnx_file" 2>/dev/null || echo "0")
+                    chown "$SERVICE_USER:$SERVICE_USER" "$onnx_file"
+                    chmod 644 "$onnx_file"
+                    echo "  [OK] Downloaded ONNX for $leaf_type v$MODEL_VERSION (${ONNX_SIZE} bytes)"
+                    python3 -c "
+import json, sys
+cfg_path, leaf, onnx_path, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(cfg_path) as f: c = json.load(f)
+if 'models' not in c: c['models'] = {}
+if leaf not in c['models']: c['models'][leaf] = {}
+c['models'][leaf]['onnx_path'] = onnx_path
+c['models'][leaf]['version'] = ver
+with open(cfg_path, 'w') as f: json.dump(c, f, indent=4)
+" "$CFG" "$leaf_type" "models/$(basename $onnx_file)" "$MODEL_VERSION" 2>/dev/null || true
+                else
+                    echo "  [WARN] Failed to download ONNX for $leaf_type (HTTP $HTTP_CODE)"
+                fi
+            done
+        fi
     fi
 fi
-echo ""
-
 # ── 10. Convert ONNX → TensorRT engines ─────────────────────
 echo "[10/13] Converting ONNX models to TensorRT FP16 engines..."
 
