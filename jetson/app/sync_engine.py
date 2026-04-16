@@ -619,16 +619,17 @@ class SyncEngine:
             env["SUPABASE_URL"] = self.supabase_url
             env["SUPABASE_KEY"] = self.supabase_key
 
-            # Use repo root as cwd (parent of config dir) so DVC can find dvc/ directory
+            # Use repo root as cwd so DVC can find dvc/ directory
             # Config is at /opt/agrikd/config/config.json, repo root is /opt/agrikd
-            repo_root = os.path.dirname(os.path.dirname(self._config_path))
+            config_abs = os.path.abspath(self._config_path)
+            repo_root = os.path.dirname(os.path.dirname(config_abs))
 
             result = subprocess.run(
                 [
                     "python3", validate_script,
-                    "--config", self._config_path,
+                    "--config", config_abs,
                     "--leaf-type", leaf_type,
-                    "--engine-path", engine_path,
+                    "--engine-path", os.path.abspath(engine_path),
                     "--version", version,
                     "--hw-tag", hw_tag,
                 ],
