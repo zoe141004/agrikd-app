@@ -251,13 +251,10 @@ TFLite input is NHWC so no axis conversion is needed, only normalization.
 
 ### 5.4 Benchmark Results
 
-| Dataset | Top-1 Accuracy | KL Div (PyTorch/ONNX) | KL Div (TFLite) | TFLite Size |
-|---|---|---|---|---|
-| Tomato (10 classes) | 87.2% | 0.000000 | 0.000011 | ~0.96 MB |
-| Burmese Grape Leaf (5 classes) | 87.3% | 0.000000 | 0.000002 | ~0.96 MB |
-
-KL Divergence measures numerical fidelity between PyTorch reference output and each
-exported format. Shown with 6 decimal places.
+| Dataset | Top-1 Accuracy | TFLite Size |
+|---|---|---|
+| Tomato (10 classes) | 87.2% | ~0.96 MB |
+| Burmese Grape Leaf (5 classes) | 87.3% | ~0.96 MB |
 
 ---
 
@@ -323,7 +320,7 @@ MobileNetV2 Student (.pth checkpoint)
     |              .tflite (float32)              .engine (FP16)
     |              .tflite (float16)              (Jetson only)
     |                    |
-    +--> validate_models.py  (KL Divergence cross-format check)
+    +--> validate_models.py  (cross-format accuracy check)
     +--> evaluate_models.py  (Top-1 accuracy on test set)
 ```
 
@@ -613,7 +610,7 @@ Alt:    .pth → .tflite (convert_pth_to_tflite.py, ai-edge-torch, Linux only)
 ### 10.3 Evaluation & Validation
 
 - `evaluate_models.py`: Top-1 accuracy on test set for all formats
-- `validate_models.py`: KL Divergence cross-format check
+- `validate_models.py`: cross-format accuracy check
 - Random seeds set globally (`random`, `numpy`, `torch`) for reproducibility
 - `model_metadata.json` emitted after evaluation (SHA-256, accuracy, size)
 

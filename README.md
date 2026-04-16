@@ -49,10 +49,10 @@ All guides are in [`docs/`](docs/README.md):
 
 ## Benchmark Results
 
-| Dataset | Top-1 Accuracy | TFLite Size | KL Divergence |
-|---------|---------------|-------------|---------------|
-| Tomato | 87.2% | ~0.96 MB | 0.000011 |
-| Burmese Grape Leaf | 87.3% | ~0.96 MB | 0.000002 |
+| Dataset | Top-1 Accuracy | TFLite Size |
+|---------|---------------|-------------|
+| Tomato | 87.2% | ~0.96 MB |
+| Burmese Grape Leaf | 87.3% | ~0.96 MB |
 
 ## License
 

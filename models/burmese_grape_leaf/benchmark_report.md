@@ -6,11 +6,11 @@
 
 ### Benchmark Summary
 
-| Format   |   Size (MB) |   Params (M) |   FLOPs (M) |   ms/img |     FPS |   Runtime Mem (MB) |   Top-1 % |   KL Div |
-|----------|-------------|--------------|-------------|----------|---------|--------------------|-----------|----------|
-| PyTorch  |       1.981 |         0.49 |       374.7 |   30.333 |  32.967 |              3.871 |    87.284 | 0.000000 |
-| ONNX     |       1.869 |         0.49 |       374.7 |    3.694 | 270.698 |             11.758 |    87.284 | 0.000000 |
-| TFLite   |       0.955 |         0.49 |       374.7 |    7.525 | 132.893 |             12.234 |    87.069 | 0.000002 |
+| Format   |   Size (MB) |   Params (M) |   FLOPs (M) |   ms/img |     FPS |   Top-1 % |
+|----------|-------------|--------------|-------------|----------|---------|-----------|
+| PyTorch  |       1.981 |         0.49 |       374.7 |   30.333 |  32.967 |    87.284 |
+| ONNX     |       1.869 |         0.49 |       374.7 |    3.694 | 270.698 |    87.284 |
+| TFLite   |       0.955 |         0.49 |       374.7 |    7.525 | 132.893 |    87.069 |
 
 ### Latency Details
 
@@ -70,10 +70,8 @@
 ### Notes
 - **Params/FLOPs** are identical across formats (same model architecture, same weights).
 - **File size** differs due to serialization: TFLite uses FlatBuffer (most compact), ONNX uses Protobuf, PyTorch includes optimizer state.
-- **Runtime Mem (MB)** = RSS delta measured independently per format (gc.collect between formats). Reflects runtime engine overhead, not model size.
 - **Latency** measured on PC CPU. On mobile, TFLite + GPU Delegate or NNAPI can significantly outperform CPU-only inference.
-- **KL Divergence** measures the full probability distribution shift vs PyTorch (baseline). A KL Div near 0 with slight Top-1% difference means a few borderline samples flipped (e.g., PyTorch: [0.350001, 0.349999] vs TFLite: [0.349999, 0.350001]) — the distributions are nearly identical but argmax flips at the decision boundary.
 
 ### Sweet Spot Conclusion
-- **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges, zero KL divergence vs PyTorch.
+- **Jetson Deployment:** `ONNX`/`TensorRT` — highest throughput for GPU-equipped edges.
 - **Mobile App:** `TFLite` — smallest footprint, supports GPU Delegate & NNAPI for hardware acceleration on mobile.
