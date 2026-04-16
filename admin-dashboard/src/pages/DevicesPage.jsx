@@ -102,11 +102,24 @@ export default function DevicesPage() {
       setTokens(tokRes.data || [])
       setUsers(usersRes.data || [])
 
-      // Group model versions by leaf_type
+      // Group model versions by leaf_type, sorted newest first
       const mv = {}
       for (const m of (modelsRes.data || [])) {
         if (!mv[m.leaf_type]) mv[m.leaf_type] = []
         mv[m.leaf_type].push({ version: m.version, status: m.status })
+      }
+      // Sort each leaf_type's versions: newest first (semantic version descending)
+      for (const lt of Object.keys(mv)) {
+        mv[lt].sort((a, b) => {
+          const aParts = a.version.split('.').map(Number)
+          const bParts = b.version.split('.').map(Number)
+          for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+            const aVal = aParts[i] || 0
+            const bVal = bParts[i] || 0
+            if (bVal !== aVal) return bVal - aVal // Descending
+          }
+          return 0
+        })
       }
       setModelVersions(mv)
     } catch (err) {
