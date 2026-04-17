@@ -90,7 +90,7 @@ export default function PredictionsPage() {
     if (!data?.length) return
     const filename = `agrikd-predictions-${new Date().toISOString().slice(0, 10)}`
     if (fmt === 'csv') {
-      const headers = ['id', 'user_id', 'leaf_type', 'predicted_class_name', 'confidence', 'notes', 'model_version', 'created_at']
+      const headers = ['id', 'user_id', 'leaf_type', 'predicted_class_name', 'notes', 'model_version', 'created_at']
       const csv = [headers.join(','), ...data.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(','))].join('\n')
       downloadFile(csv, `${filename}.csv`, 'text/csv')
     } else {

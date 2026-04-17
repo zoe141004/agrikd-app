@@ -360,9 +360,8 @@ def main():
                             continue
                         model_ver = sync.get_model_version(default_leaf)
                         logger.info(
-                            "Prediction: %s (%.1f%%) [model=%s v%s]",
+                            "Prediction: %s [model=%s v%s]",
                             result["class_name"],
-                            result["confidence"] * 100,
                             default_leaf,
                             model_ver,
                         )

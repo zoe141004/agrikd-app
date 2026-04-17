@@ -26,7 +26,6 @@ export default function DataManagementPage() {
   const [dsPredPreview, setDsPredPreview] = useState(null)
   const [dsUploading, setDsUploading] = useState(false)
   const [dsMsg, setDsMsg] = useState(null)
-  const [dsConfidence, setDsConfidence] = useState('0.8')
 
   // Stage Data — Method B (GDrive / Kaggle)
   const [dsExternalSource, setDsExternalSource] = useState('gdrive')
@@ -669,9 +668,7 @@ export default function DataManagementPage() {
   // ── Preview predictions ───────────────────────────────────────────────────
   const previewPredictions = async () => {
     if (!dsLeafType) return
-    let query = supabase.from('predictions').select('predicted_class_name, confidence').eq('leaf_type', dsLeafType).limit(5000)
-    const threshold = parseFloat(dsConfidence)
-    if (!isNaN(threshold) && threshold > 0) query = query.gte('confidence', threshold)
+    let query = supabase.from('predictions').select('predicted_class_name').eq('leaf_type', dsLeafType).limit(5000)
     const { data, error } = await query
     if (error || !data) { setDsPredPreview(null); return }
     const classMap = {}
@@ -1035,24 +1032,19 @@ export default function DataManagementPage() {
                   {leafOptions.map(lt => <option key={lt} value={lt}>{lt}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label className="form-label">Min Confidence Threshold</label>
-                <input className="form-input" type="number" min="0" max="1" step="0.05" value={dsConfidence} onChange={e => { setDsConfidence(e.target.value); setDsPredPreview(null) }} />
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Only predictions with confidence &ge; this value will be exported (default 0.8).</div>
-              </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <button className="btn btn-sm" onClick={previewPredictions} disabled={!dsLeafType}>Preview Count</button>
               </div>
               {dsPredPreview && (
                 <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: 13 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images (confidence &ge; {dsConfidence}):</div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Found {dsPredPreview.total} images:</div>
                   {Object.entries(dsPredPreview.classes).map(([cls, n]) => (
                     <div key={cls} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>{cls}</span><span style={{ color: '#64748b' }}>{n}</span></div>
                   ))}
                 </div>
               )}
               <button className="btn btn-primary" disabled={dsUploading || !dsLeafType || !dsPredPreview?.total || ghNotConfigured || isOperationActive}
-                onClick={() => triggerStaging('predictions', { leaf_type: dsLeafType, confidence_threshold: dsConfidence })}>
+                onClick={() => triggerStaging('predictions', { leaf_type: dsLeafType })}>
                 {dsUploading ? <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Uploading…</> : 'Upload to DVC'}
               </button>
             </div>
@@ -1455,7 +1447,7 @@ export default function DataManagementPage() {
                   <div className="card">
                     <div className="table-wrapper">
                       <table>
-                        <thead><tr><th style={{ width: 64 }}>Preview</th><th>Label</th><th>Confidence</th><th>Leaf Type</th><th>Date</th><th>Actions</th></tr></thead>
+                        <thead><tr><th style={{ width: 64 }}>Preview</th><th>Label</th><th>Leaf Type</th><th>Date</th><th>Actions</th></tr></thead>
                         <tbody>
                           {predImages.map(p => (
                             <tr key={p.id}>
@@ -1488,11 +1480,6 @@ export default function DataManagementPage() {
                                     {p.predicted_class_name || '—'}
                                   </span>
                                 )}
-                              </td>
-                              <td>
-                                <span style={{ fontSize: 12, color: p.confidence >= 0.8 ? '#16a34a' : p.confidence >= 0.5 ? '#f59e0b' : '#ef4444' }}>
-                                  {p.confidence != null ? `${(p.confidence * 100).toFixed(1)}%` : '—'}
-                                </span>
                               </td>
                               <td><span className="badge badge-primary">{p.leaf_type}</span></td>
                               <td style={{ fontSize: 12, color: '#94a3b8' }}>{p.created_at ? formatDateTime(p.created_at) : '—'}</td>
@@ -1535,7 +1522,6 @@ export default function DataManagementPage() {
               <div style={{ fontSize: 13, color: '#334155' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
                   <strong>Label:</strong><span>{previewImg.prediction.predicted_class_name || '—'}</span>
-                  <strong>Confidence:</strong><span>{previewImg.prediction.confidence != null ? `${(previewImg.prediction.confidence * 100).toFixed(1)}%` : '—'}</span>
                   <strong>Leaf Type:</strong><span>{previewImg.prediction.leaf_type}</span>
                   <strong>Date:</strong><span>{previewImg.prediction.created_at ? formatDateTime(previewImg.prediction.created_at) : '—'}</span>
                 </div>

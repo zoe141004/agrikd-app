@@ -30,15 +30,12 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSplitter,
     QStatusBar,
-    QTableWidget,
-    QTableWidgetItem,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -268,31 +265,10 @@ class MainWindow(QMainWindow):
         self.result_class.setStyleSheet("color: #16a34a;")
         right_layout.addWidget(self.result_class)
 
-        self.result_confidence = QLabel("Confidence: —")
-        self.result_confidence.setFont(QFont("", 14))
-        right_layout.addWidget(self.result_confidence)
-
         self.result_time = QLabel("Inference: —")
         self.result_time.setFont(QFont("", 11))
         self.result_time.setStyleSheet("color: #888;")
         right_layout.addWidget(self.result_time)
-
-        right_layout.addSpacing(10)
-
-        table_label = QLabel("All Classes")
-        table_label.setFont(QFont("", 11, QFont.Bold))
-        right_layout.addWidget(table_label)
-
-        self.conf_table = QTableWidget(0, 2)
-        self.conf_table.setHorizontalHeaderLabels(["Class", "Confidence"])
-        self.conf_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.Stretch
-        )
-        self.conf_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeToContents
-        )
-        self.conf_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        right_layout.addWidget(self.conf_table, stretch=1)
 
         self.analyzed_preview = QLabel()
         self.analyzed_preview.setAlignment(Qt.AlignCenter)
@@ -405,23 +381,11 @@ class MainWindow(QMainWindow):
 
         leaf_type = result["leaf_type"]
         class_name = result["class_name"]
-        confidence = result["confidence"]
         time_ms = result["inference_time_ms"]
 
         # Display results
         self.result_class.setText(class_name.replace("_", " "))
-        self.result_confidence.setText(f"Confidence: {confidence * 100:.1f}%")
         self.result_time.setText(f"Inference: {time_ms:.2f} ms")
-
-        # Fill confidence table
-        labels = self.config["models"][leaf_type]["class_labels"]
-        all_conf = result.get("all_confidences", [])
-        self.conf_table.setRowCount(len(labels))
-        for i, (label, conf) in enumerate(zip(labels, all_conf)):
-            self.conf_table.setItem(i, 0, QTableWidgetItem(label.replace("_", " ")))
-            item = QTableWidgetItem(f"{conf * 100:.1f}%")
-            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.conf_table.setItem(i, 1, item)
 
         # Show analyzed image thumbnail
         # Fix 1.4: Use the inference bridge's frozen frame copy, NOT
@@ -444,10 +408,9 @@ class MainWindow(QMainWindow):
         self._update_status()
 
         logger.info(
-            "Prediction: %s/%s confidence=%.3f time=%.2fms image=%s",
+            "Prediction: %s/%s time=%.2fms image=%s",
             leaf_type,
             class_name,
-            confidence,
             time_ms,
             image_path,
         )

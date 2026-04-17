@@ -646,7 +646,7 @@ models/<leaf_type>/
 
 | Table | Key Columns | Purpose |
 |---|---|---|
-| `predictions` | id, leaf_type, predicted_class, confidence, image_path, timestamp | Diagnosis history |
+| `predictions` | id, leaf_type, predicted_class_name, confidence, image_path, timestamp | Diagnosis history |
 | `models` | id, leaf_type, version, file_path, sha256, role, is_selected, UNIQUE(leaf_type, version) | OTA model registry (multi-version, max 2 active) |
 | `user_preferences` | key, value | Theme, language, default leaf type, etc. |
 | `sync_queue` | id, entity_type, entity_id, action, payload, retry_count, max_retries, status, created_at, completed_at | Offline-first sync buffer |
@@ -657,7 +657,7 @@ Default preferences seeded on first run: `default_leaf_type=tomato`, `auto_sync=
 
 | Table | Key Columns | Purpose |
 |---|---|---|
-| `predictions` | id, leaf_type, predicted_class, confidence, image_path, timestamp, is_synced, device_id, uploaded_image_url, sync_retry_count | Inference log with sync tracking |
+| `predictions` | id, leaf_type, predicted_class_name, confidence, image_path, timestamp, is_synced, device_id, uploaded_image_url, sync_retry_count | Inference log with sync tracking |
 
 Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 
@@ -665,7 +665,7 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 
 | Table | Key Columns | Purpose |
 |---|---|---|
-| `predictions` | id, user_id, device_type, leaf_type, predicted_class, confidence, image_url, created_at | Aggregated predictions from all clients |
+| `predictions` | id, user_id, device_type, leaf_type, predicted_class_name, confidence, image_url, created_at | Aggregated predictions from all clients |
 | `model_registry` | id, leaf_type, version, status, model_url, pth_url, sha256, UNIQUE(leaf_type, version) | Published model versions for OTA (status: staging/active/backup) |
 | `profiles` | id (FK auth.users), display_name, role, created_at | User profile and role management |
 | `audit_log` | id, user_id, action, details, created_at | Audit trail for admin actions |
