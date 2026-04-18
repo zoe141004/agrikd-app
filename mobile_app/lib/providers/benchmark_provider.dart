@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/config/supabase_config.dart';
 import 'package:app/core/constants/model_constants.dart';
+import 'package:app/data/database/dao/model_dao.dart';
+import 'database_provider.dart';
 
 /// Remote model benchmark metrics fetched from Supabase `model_benchmarks`.
 class ModelBenchmarkInfo {
@@ -39,7 +41,9 @@ class BenchmarkState {
 }
 
 class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
-  BenchmarkNotifier() : super(const BenchmarkState()) {
+  final ModelDao _modelDao;
+
+  BenchmarkNotifier(this._modelDao) : super(const BenchmarkState()) {
     load();
   }
 
@@ -56,14 +60,33 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
       final result = <String, ModelBenchmarkInfo>{};
 
       for (final leafType in ModelConstants.availableLeafTypes) {
-        // Query for the latest active version's tflite_float16 benchmark
-        final rows = await client
-            .from('model_benchmarks')
-            .select('*')
-            .eq('leaf_type', leafType)
-            .eq('format', 'tflite_float16')
-            .order('version', ascending: false)
-            .limit(1);
+        // Determine the active installed version on this device
+        final activeModel = await _modelDao.getSelected(leafType);
+        final activeVersion = activeModel?['version'] as String?;
+
+        List<dynamic> rows = [];
+
+        if (activeVersion != null) {
+          // Prefer benchmark for the exact installed version
+          rows = await client
+              .from('model_benchmarks')
+              .select('*')
+              .eq('leaf_type', leafType)
+              .eq('format', 'tflite_float16')
+              .eq('version', activeVersion)
+              .limit(1);
+        }
+
+        // Fallback to latest available if exact version has no benchmark entry
+        if (rows.isEmpty) {
+          rows = await client
+              .from('model_benchmarks')
+              .select('*')
+              .eq('leaf_type', leafType)
+              .eq('format', 'tflite_float16')
+              .order('version', ascending: false)
+              .limit(1);
+        }
 
         if (rows.isNotEmpty) {
           final r = rows.first;
@@ -100,5 +123,6 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
 
 final benchmarkProvider =
     StateNotifierProvider<BenchmarkNotifier, BenchmarkState>((ref) {
-      return BenchmarkNotifier();
+      final modelDao = ref.watch(modelDaoProvider);
+      return BenchmarkNotifier(modelDao);
     });

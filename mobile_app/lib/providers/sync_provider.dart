@@ -4,6 +4,9 @@ import 'dart:math' show min;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:app/providers/benchmark_provider.dart';
+import 'package:app/providers/diagnosis_provider.dart';
+import 'package:app/providers/model_version_provider.dart';
 import 'package:app/core/config/supabase_config.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/data/sync/supabase_sync_service.dart';
@@ -117,8 +120,18 @@ class SyncNotifier extends StateNotifier<SyncState>
       }
 
       final updates = await _syncService.checkModelUpdates(localVersionsByLeaf);
+      var downloadedCount = 0;
       for (final update in updates) {
-        await _syncService.downloadModelUpdate(update);
+        final ok = await _syncService.downloadModelUpdate(update);
+        if (ok) downloadedCount++;
+      }
+
+      // After OTA: refresh all model-related providers so UI reflects new versions immediately
+      if (downloadedCount > 0) {
+        _ref.read(modelVersionProvider.notifier).load();
+        _ref.read(benchmarkProvider.notifier).load();
+        // Recreate diagnosis repository so stale model cache is cleared
+        _ref.invalidate(diagnosisRepositoryProvider);
       }
     } catch (e) {
       debugPrint('[SyncProvider] Model update check failed: $e');

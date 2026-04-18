@@ -443,7 +443,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  String _pct(double? v) => v != null ? '${v.toStringAsFixed(1)}%' : '—';
+  String _pct(double? v) {
+    if (v == null) return '—';
+    // Values stored as decimals (0–1) need ×100; values already as % (>1) are used as-is.
+    final pct = v <= 1.0 ? v * 100 : v;
+    return '${pct.toStringAsFixed(1)}%';
+  }
 }
 
 class _SectionHeader extends StatelessWidget {

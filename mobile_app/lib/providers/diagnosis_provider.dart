@@ -5,6 +5,7 @@ import '../features/diagnosis/data/diagnosis_repository_impl.dart';
 import '../features/diagnosis/domain/models/prediction.dart';
 import '../features/diagnosis/domain/repositories/diagnosis_repository.dart';
 import 'database_provider.dart';
+import 'history_provider.dart';
 import 'inference_provider.dart';
 
 final selectedLeafTypeProvider = StateProvider<String>((ref) => 'tomato');
@@ -52,8 +53,10 @@ class DiagnosisState {
 
 class DiagnosisNotifier extends StateNotifier<DiagnosisState> {
   final DiagnosisRepository _repository;
+  final Ref _ref;
 
-  DiagnosisNotifier(this._repository) : super(const DiagnosisState());
+  DiagnosisNotifier(this._repository, this._ref)
+    : super(const DiagnosisState());
 
   Future<void> diagnose(String imagePath, String leafType) async {
     state = const DiagnosisState(status: DiagnosisStatus.loading);
@@ -63,6 +66,8 @@ class DiagnosisNotifier extends StateNotifier<DiagnosisState> {
         status: DiagnosisStatus.success,
         prediction: prediction,
       );
+      // Refresh history so the new prediction appears immediately without restart
+      _ref.read(historyProvider.notifier).refresh();
     } catch (e) {
       state = DiagnosisState(
         status: DiagnosisStatus.error,
@@ -98,5 +103,5 @@ class DiagnosisNotifier extends StateNotifier<DiagnosisState> {
 final diagnosisProvider =
     StateNotifierProvider<DiagnosisNotifier, DiagnosisState>((ref) {
       final repository = ref.watch(diagnosisRepositoryProvider);
-      return DiagnosisNotifier(repository);
+      return DiagnosisNotifier(repository, ref);
     });
