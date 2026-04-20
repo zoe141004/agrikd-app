@@ -44,6 +44,21 @@ jobs:
           touch .env
           flutter test --exclude-tags=widget
 
+      - name: Setup release signing (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${KEYSTORE_PASSWORD}" ] && [ -n "${KEY_PASSWORD}" ] && [ -n "${KEY_ALIAS}" ]; then
+            echo "${KEYSTORE_BASE64}" | base64 -d > android/app/agrikd-release.keystore
+            printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=agrikd-release.keystore\n' \
+              "${KEYSTORE_PASSWORD}" "${KEY_PASSWORD}" "${KEY_ALIAS}" > android/key.properties
+          else
+            echo "Release signing secrets not fully configured; building unsigned release APK."
+          fi
+
       - name: Build release APK
         run: |
           # Strip .env from assets to prevent key leakage in release APK
@@ -58,7 +73,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2

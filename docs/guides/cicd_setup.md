@@ -104,9 +104,10 @@ git push origin v1.0.0-rc1
 
 The workflow:
 1. Runs tests
-2. Builds release APK (with obfuscation + dart-define)
-3. Creates GitHub Release with APK attached
-4. Pre-release tags (`-rc`, `-beta`) are automatically marked
+2. Optionally enables APK signing when all keystore secrets are set (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`)
+3. Builds release APK (with obfuscation + dart-define)
+4. Creates GitHub Release with APK attached
+5. Pre-release tags (`-rc`, `-beta`) are automatically marked
 
 **Artifacts:**
 - `app-release.apk` — attached to the GitHub Release
@@ -234,6 +235,7 @@ Then target it in workflows with `runs-on: self-hosted`.
 | CI fails on `dart format` | Run `dart format .` locally and commit |
 | DVC pull fails | Check `GOOGLE_APPLICATION_CREDENTIALS_DATA` secret and GCS bucket IAM permissions |
 | APK build fails on secrets | Ensure all 4 secrets are set: SUPABASE_URL, SUPABASE_ANON_KEY, SENTRY_DSN, GOOGLE_WEB_CLIENT_ID |
+| Workflow run shows `action_required` with 0 jobs | Usually waiting for repository/organization approval or invalid workflow expression. Avoid direct `secrets.*` checks in `if:`; pass secrets via `env` then validate inside `run` script |
 | Model conversion not running | Commit message must contain `[model]` or change files in `mlops_pipeline/` |
 | Release not created | Tag must match `v*` pattern (e.g., `v1.0.0`) |
 | Export data fails | Check `SUPABASE_SERVICE_ROLE_KEY` secret |
