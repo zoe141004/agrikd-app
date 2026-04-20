@@ -76,5 +76,47 @@ void main() {
           .read(settingsProvider.notifier)
           .setValue('theme', 'system');
     });
+
+    test('returns ThemeMode.light when set', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      await container.read(settingsProvider.notifier).loadAll();
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('theme', 'light');
+
+      final mode = container.read(themeModeProvider);
+      expect(mode, ThemeMode.light);
+
+      // Cleanup
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('theme', 'system');
+    });
+  });
+
+  group('Language setting', () {
+    test('language can be changed between vi and en', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      await container.read(settingsProvider.notifier).loadAll();
+
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('language', 'vi');
+      expect(container.read(settingsProvider)['language'], 'vi');
+
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('language', 'en');
+      expect(container.read(settingsProvider)['language'], 'en');
+
+      // Restore default
+      await container
+          .read(settingsProvider.notifier)
+          .setValue('language', 'en');
+    });
   });
 }

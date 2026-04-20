@@ -245,6 +245,15 @@ class S {
         'Could not analyze the leaf. Please try with a clearer photo.',
     'err_benchmark_failed': 'Benchmark could not complete. Please try again.',
 
+    // Evaluation (remote model metrics + manual model updates)
+    'evaluation': 'Evaluation',
+    'evaluation_sub': 'Model accuracy & performance metrics',
+    'model_updates': 'Model Updates',
+    'model_update_available': 'Update available',
+    'download': 'Download',
+    'downloading': 'Downloading...',
+    'model_update_none': 'All models are up to date',
+
     // Benchmark
     'benchmark': 'Benchmark',
     'benchmark_sub': 'Test model speed on this device',
@@ -541,6 +550,15 @@ class S {
     'lat_max': 'Cao nhất',
     'lat_p99': 'P99',
     'fps': 'FPS',
+
+    // Evaluation (remote model metrics)
+    'evaluation': 'Đánh giá mô hình',
+    'evaluation_sub': 'Chỉ số độ chính xác & hiệu năng',
+    'model_updates': 'Cập nhật mô hình',
+    'model_update_available': 'Có phiên bản mới',
+    'download': 'Tải về',
+    'downloading': 'Đang tải...',
+    'model_update_none': 'Tất cả mô hình đã cập nhật',
 
     // Filters
     'clear': 'Xóa',

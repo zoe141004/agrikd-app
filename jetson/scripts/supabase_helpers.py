@@ -63,27 +63,55 @@ def sha256_file(filepath):
 
 
 def upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, benchmark):
-    """Update model_engines record with benchmark_json."""
-    url = (
+    """Update model_engines record with benchmark metrics via SECURITY DEFINER RPC.
+
+    Migration 024 removed the direct anon REST PATCH on model_engines.
+    We now: 1) GET the engine id, 2) call update_engine_benchmark() RPC.
+    """
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Fetch the engine id by (leaf_type, version, hardware_tag)
+    query_url = (
         f"{base_url}/rest/v1/model_engines"
         f"?leaf_type=eq.{leaf_type}"
         f"&version=eq.{version}"
         f"&hardware_tag=eq.{hardware_tag}"
+        f"&select=id"
     )
-    resp = requests.patch(
-        url,
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        json={"benchmark_json": benchmark},
+    resp = requests.get(query_url, headers=headers, timeout=30, verify=True)
+    resp.raise_for_status()
+    rows = resp.json()
+    if not rows:
+        raise ValueError(
+            f"No model_engines row found for {leaf_type} v{version} {hardware_tag}; "
+            "run engine upload before benchmark upload."
+        )
+    engine_id = rows[0]["id"]
+
+    # 2. Build metrics payload matching the RPC column names
+    metrics = {
+        "benchmark_accuracy": benchmark.get("accuracy"),
+        "benchmark_precision": benchmark.get("precision_macro"),
+        "benchmark_recall": benchmark.get("recall_macro"),
+        "benchmark_f1": benchmark.get("f1_macro"),
+        "benchmark_inference_ms": benchmark.get("latency_mean_ms"),
+    }
+
+    # 3. Call SECURITY DEFINER RPC (anon UPDATE policy was removed in migration 024)
+    rpc_url = f"{base_url}/rest/v1/rpc/update_engine_benchmark"
+    resp = requests.post(
+        rpc_url,
+        headers=headers,
+        json={"p_engine_id": engine_id, "p_metrics": metrics},
         timeout=30,
         verify=True,
     )
     resp.raise_for_status()
-    log.info("Benchmark uploaded to model_engines.benchmark_json")
+    log.info("Benchmark uploaded to model_engines via RPC (id=%s)", engine_id)
 
 
 def upload_model_benchmark(base_url, key, leaf_type, version, benchmark):

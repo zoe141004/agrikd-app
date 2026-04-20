@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/l10n/app_strings.dart';
@@ -71,12 +72,13 @@ class DiagnosisNotifier extends StateNotifier<DiagnosisState> {
     } catch (e) {
       state = DiagnosisState(
         status: DiagnosisStatus.error,
-        errorMessage: _friendlyDiagnosisError(e),
+        errorMessage: friendlyDiagnosisError(e),
       );
     }
   }
 
-  static String _friendlyDiagnosisError(Object e) {
+  @visibleForTesting
+  static String friendlyDiagnosisError(Object e) {
     final msg = e.toString().toLowerCase();
     if (msg.contains('integrity check failed') || msg.contains('corrupted')) {
       return S.get('err_model_corrupted');

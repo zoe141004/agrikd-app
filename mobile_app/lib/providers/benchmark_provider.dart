@@ -93,14 +93,14 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
           result[leafType] = ModelBenchmarkInfo(
             leafType: leafType,
             version: r['version'] as String? ?? '',
-            accuracy: _toDouble(r['accuracy']),
-            precisionMacro: _toDouble(r['precision_macro']),
-            recallMacro: _toDouble(r['recall_macro']),
-            f1Macro: _toDouble(r['f1_macro']),
-            flopsM: _toDouble(r['flops_m']),
-            latencyMeanMs: _toDouble(r['latency_mean_ms']),
-            sizeMb: _toDouble(r['size_mb']),
-            paramsM: _toDouble(r['params_m']),
+            accuracy: toDouble(r['accuracy']),
+            precisionMacro: toDouble(r['precision_macro']),
+            recallMacro: toDouble(r['recall_macro']),
+            f1Macro: toDouble(r['f1_macro']),
+            flopsM: toDouble(r['flops_m']),
+            latencyMeanMs: toDouble(r['latency_mean_ms']),
+            sizeMb: toDouble(r['size_mb']),
+            paramsM: toDouble(r['params_m']),
           );
         }
       }
@@ -112,7 +112,8 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
     }
   }
 
-  static double? _toDouble(dynamic v) {
+  @visibleForTesting
+  static double? toDouble(dynamic v) {
     if (v == null) return null;
     if (v is double) return v;
     if (v is int) return v.toDouble();

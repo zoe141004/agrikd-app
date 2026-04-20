@@ -10,7 +10,7 @@ import 'package:app/providers/settings_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 import 'package:app/features/auth/presentation/screens/login_screen.dart';
 import 'package:app/features/devices/presentation/screens/devices_screen.dart';
-import 'benchmark_screen.dart';
+import 'evaluation_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -143,6 +143,53 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   },
                 ),
               ],
+              // Model updates available for manual download
+              Builder(
+                builder: (context) {
+                  final syncState = ref.watch(syncProvider);
+                  final updates = syncState.pendingModelUpdates;
+                  if (updates.isEmpty) return const SizedBox.shrink();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(),
+                      _SectionHeader(S.get('model_updates')),
+                      ...updates.map((update) {
+                        final isDownloading =
+                            syncState.downloadingLeafType == update.leafType;
+                        final modelInfo = ModelConstants.getModel(
+                          update.leafType,
+                        );
+                        return ListTile(
+                          leading: const Icon(Icons.system_update_alt),
+                          title: Text(modelInfo.localizedName(S.locale)),
+                          subtitle: Text(
+                            isDownloading
+                                ? S.get('downloading')
+                                : 'v${update.version} — ${S.get('model_update_available')}',
+                          ),
+                          trailing: isDownloading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : FilledButton.tonal(
+                                  onPressed: () {
+                                    ref
+                                        .read(syncProvider.notifier)
+                                        .downloadUpdate(update.leafType);
+                                  },
+                                  child: Text(S.get('download')),
+                                ),
+                        );
+                      }),
+                    ],
+                  );
+                },
+              ),
               const Divider(),
               _SectionHeader(S.get('appearance')),
               ListTile(
@@ -161,13 +208,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _SectionHeader(S.get('about')),
               ListTile(
                 leading: const Icon(Icons.speed),
-                title: Text(S.get('benchmark')),
-                subtitle: Text(S.get('benchmark_sub')),
-                trailing: const Icon(Icons.chevron_right),
+                title: Text(S.get('evaluation')),
+                subtitle: Text(S.get('evaluation_sub')),
+                trailing: Builder(
+                  builder: (context) {
+                    final updateCount = ref
+                        .watch(syncProvider)
+                        .pendingModelUpdates
+                        .length;
+                    return Badge(
+                      label: Text('$updateCount'),
+                      isLabelVisible: updateCount > 0,
+                      child: const Icon(Icons.chevron_right),
+                    );
+                  },
+                ),
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const BenchmarkScreen()),
+                    MaterialPageRoute(builder: (_) => const EvaluationScreen()),
                   );
                 },
               ),

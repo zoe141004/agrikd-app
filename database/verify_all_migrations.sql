@@ -1,7 +1,7 @@
 -- =============================================================================
--- AgriKD — Comprehensive Migration Verification (001–022)
+-- AgriKD — Comprehensive Migration Verification (001–025)
 -- =============================================================================
--- Run in Supabase SQL Editor AFTER executing all 22 migrations.
+-- Run in Supabase SQL Editor AFTER executing all 25 migrations.
 -- Outputs a single results table with PASS/FAIL for every expected object.
 -- Expected: 0 FAIL rows = database is fully set up.
 -- =============================================================================
@@ -34,7 +34,8 @@ DECLARE
         'device_poll_config', 'device_ack_config', 'device_heartbeat',
         'device_push_predictions', 'device_update_prediction_image',
         'is_device_assigned_user',
-        'get_system_secret'
+        'get_system_secret',
+        'update_engine_benchmark'
     ];
 
     -- ── Helper: check trigger ──
@@ -46,7 +47,8 @@ DECLARE
         'idx_predictions_user_id', 'idx_predictions_leaf_type',
         'idx_predictions_created_at', 'idx_predictions_confidence',
         'idx_audit_log_created_at', 'idx_model_benchmarks_leaf_type',
-        'idx_model_versions_leaf_type', 'idx_predictions_user_local_dedup',
+        'idx_model_versions_leaf_type',
+        'idx_predictions_mobile_dedup', 'idx_predictions_device_dedup',
         'idx_model_registry_active', 'idx_model_registry_status',
         'idx_pipeline_runs_leaf_version',
         'idx_dvc_operations_leaf_type', 'idx_dvc_operations_active',
@@ -1406,7 +1408,7 @@ SELECT
     COUNT(*) AS total,
     CASE
         WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
-        THEN '✅ ALL CHECKS PASSED (migrations 001–022)'
+        THEN '✅ ALL CHECKS PASSED (migrations 001–025)'
         ELSE '❌ ' || COUNT(*) FILTER (WHERE status = 'FAIL') || ' FAILED — see details above'
     END AS verdict
 FROM _verify_results;

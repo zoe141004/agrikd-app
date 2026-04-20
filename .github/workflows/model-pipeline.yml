@@ -131,6 +131,7 @@ jobs:
 
       - name: Update pipeline status — converting
         if: inputs.pipeline_run_id != ''
+        continue-on-error: true
         run: |
           curl -sf -X PATCH \
             "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \
@@ -165,6 +166,7 @@ jobs:
 
       - name: Update pipeline status — evaluating
         if: inputs.pipeline_run_id != ''
+        continue-on-error: true
         run: |
           curl -sf -X PATCH \
             "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \
@@ -343,6 +345,7 @@ jobs:
 
       - name: Update pipeline status — failed
         if: failure() && inputs.pipeline_run_id != ''
+        continue-on-error: true
         run: |
           curl -sf -X PATCH \
             "$SUPABASE_URL/rest/v1/pipeline_runs?id=eq.$PIPELINE_RUN_ID" \

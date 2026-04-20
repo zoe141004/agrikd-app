@@ -37,7 +37,8 @@ class SupabaseSyncService {
   String? get _userId => _client.auth.currentUser?.id;
 
   /// Sanitize a name for use in file paths — reject path traversal attempts.
-  static String _sanitizeName(String name) {
+  @visibleForTesting
+  static String sanitizeName(String name) {
     if (name.isEmpty || !_safeNamePattern.hasMatch(name)) {
       throw ArgumentError('Invalid name for file path: "$name"');
     }
@@ -265,8 +266,8 @@ class SupabaseSyncService {
 
     try {
       // Sanitize leaf type and version to prevent path traversal
-      final safeLeafType = _sanitizeName(update.leafType);
-      final safeVersion = _sanitizeName(update.version.replaceAll('.', '_'));
+      final safeLeafType = sanitizeName(update.leafType);
+      final safeVersion = sanitizeName(update.version.replaceAll('.', '_'));
 
       // 1. Download the file from Supabase Storage
       // fileUrl may be a full public URL — extract the storage path

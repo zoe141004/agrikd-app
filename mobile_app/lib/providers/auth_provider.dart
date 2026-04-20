@@ -91,7 +91,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   /// Map raw Supabase AuthException messages to user-friendly localized strings.
-  static String _friendlyAuthError(String raw) {
+  @visibleForTesting
+  static String friendlyAuthError(String raw) {
     final lower = raw.toLowerCase();
     if (lower.contains('invalid login credentials') ||
         lower.contains('invalid_credentials')) {
@@ -186,7 +187,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on AuthException catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: _friendlyAuthError(e.message),
+        errorMessage: friendlyAuthError(e.message),
       );
     } catch (e) {
       state = state.copyWith(
@@ -218,7 +219,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on AuthException catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: _friendlyAuthError(e.message),
+        errorMessage: friendlyAuthError(e.message),
       );
     } catch (e) {
       state = state.copyWith(
@@ -240,7 +241,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on AuthException catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: _friendlyAuthError(e.message),
+        errorMessage: friendlyAuthError(e.message),
       );
       return false;
     } catch (e) {
@@ -266,7 +267,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on AuthException catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: _friendlyAuthError(e.message),
+        errorMessage: friendlyAuthError(e.message),
       );
       return false;
     } catch (e) {
@@ -320,7 +321,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on AuthException catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: _friendlyAuthError(e.message),
+        errorMessage: friendlyAuthError(e.message),
       );
     } catch (e) {
       state = state.copyWith(
