@@ -91,6 +91,11 @@ mobile_app/android/.gradle/
 .dvc/config.local
 jetson/config/config.json
 
+# Signing keys — NEVER commit (regenerate if exposed in git history)
+*.keystore
+*.jks
+key.properties
+
 # Build reports
 **/build/reports/
 

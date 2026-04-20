@@ -155,7 +155,7 @@ agrikd/
 │   └── requirements*.txt              # Separate requirement files per stage
 │
 ├── database/                          # Infrastructure-as-Code DB scripts
-│   ├── migrations/                    # 22 SQL migration files (001-022)
+│   ├── migrations/                    # 23 SQL migration files (001-023)
 │   │   ├── 001_tables.sql
 │   │   ├── 002_functions_triggers.sql
 │   │   ├── 003_rls_policies.sql
@@ -177,7 +177,8 @@ agrikd/
 │   │   ├── 019_engine_upload_policy.sql # Storage policy for TensorRT engine uploads
 │   │   ├── 020_device_sync_rpcs.sql   # Device sync RPCs: poll, ack, heartbeat, push
 │   │   ├── 021_tensorrt_benchmark_format.sql # Add tensorrt_fp16 to benchmarks format CHECK
-│   │   └── 022_system_secrets.sql     # system_secrets table + get_system_secret RPC
+│   │   ├── 022_system_secrets.sql     # system_secrets table + get_system_secret RPC
+│   │   └── 023_benchmark_upload_policy.sql # RLS policy for Jetson benchmark uploads
 │   ├── verify_all_migrations.sql
 │   └── verify_rls_policies.sql        # RLS audit
 │
@@ -722,12 +723,12 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 |---|---|
 | `audit` | Security audit (npm audit, pip audit) |
 | `lint` | `dart format --set-exit-if-changed` + `flutter analyze` |
-| `test` | `flutter test` (144 tests) |
+| `test` | `flutter test --exclude-tags=widget` (140 tests) |
 | `build` | `flutter build apk --release` with `--obfuscate` |
 | `dashboard-test` | `npm test` (113 admin dashboard tests) |
 | `jetson-lint` | `ruff check jetson/app/ jetson/scripts/` |
 
-### 12.3 Required Secrets (9 + 1 auto)
+### 12.3 Required Secrets (13 + 1 auto)
 
 | Secret | Used By | Purpose |
 |---|---|---|
@@ -740,6 +741,10 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 | `VERCEL_DEPLOY_HOOK` | deploy | Vercel deploy webhook URL |
 | `KAGGLE_USERNAME` | dataset-upload | Kaggle API username |
 | `KAGGLE_KEY` | dataset-upload | Kaggle API key |
+| `KEYSTORE_BASE64` | release | Base64-encoded release keystore |
+| `KEYSTORE_PASSWORD` | release | Keystore password |
+| `KEY_PASSWORD` | release | Key password |
+| `KEY_ALIAS` | release | Key alias |
 | `GITHUB_TOKEN` | release | Auto-provided by GitHub Actions |
 
 ### 12.4 Build Command
@@ -827,8 +832,8 @@ flutter build apk --release \
 
 1. **Supabase Dashboard**: Set Site URL + Redirect URLs → `com.agrikd.app://callback`
 2. **Google OAuth**: Create OAuth 2.0 Client ID → set `GOOGLE_WEB_CLIENT_ID`
-3. **GitHub Secrets**: Configure all 9 secrets listed in Section 12.3
+3. **GitHub Secrets**: Configure all 13 secrets listed in Section 12.3
 4. **DVC**: Google Drive folder ID in `.dvc/config` (already configured)
-5. **Migrations**: Run 001-022 in order in Supabase SQL Editor
+5. **Migrations**: Run 001-023 in order in Supabase SQL Editor
 6. **Realtime**: Automated in migration 011 (falls back to manual)
 7. **Release**: APK distributed via GitHub Releases (no Play Store)
