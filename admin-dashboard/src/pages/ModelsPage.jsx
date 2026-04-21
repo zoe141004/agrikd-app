@@ -325,13 +325,7 @@ export default function ModelsPage() {
             accuracy: am.accuracy_top1, size_mb: null,
           }, { onConflict: 'leaf_type,version' })
         }
-        // Demote lowest-version active models to backup if already >=2 active
-        if (activeModels.length >= 2) {
-          const sorted = [...activeModels].sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
-          for (let i = 0; i < sorted.length - 1; i++) {
-            await supabase.from('model_registry').update({ status: 'backup', updated_at: new Date().toISOString() }).eq('id', sorted[i].id)
-          }
-        }
+        // Demotion is handled by the enforce_version_lifecycle DB trigger
         const { error } = await supabase.from('model_registry').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', m.id)
         if (!error) { loadModels(); refreshLeafTypes(); triggerRefresh(); logAudit(supabase, 'model_activated', 'model', m.id, { leaf_type: m.leaf_type, version: m.version }) }
         else setError(error.message)

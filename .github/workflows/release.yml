@@ -59,6 +59,13 @@ jobs:
             echo "Release signing secrets not fully configured; building unsigned release APK."
           fi
 
+      - name: Verify release signing
+        run: |
+          if [ ! -f android/key.properties ]; then
+            echo "::error::Release signing not configured. Cannot publish unsigned APK."
+            exit 1
+          fi
+
       - name: Build release APK
         run: |
           # Strip .env from assets to prevent key leakage in release APK
@@ -81,7 +88,42 @@ jobs:
           name: AgriKD v${{ steps.version.outputs.version }}
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            ## AgriKD v${{ steps.version.outputs.version }}
+
+            Plant leaf disease recognition powered by Knowledge Distillation (ViT-Base → MobileNetV2).
+
+            ### Supported Datasets
+            | Dataset | Classes | Top-1 Accuracy | TFLite Size |
+            |---------|---------|---------------|-------------|
+            | Tomato | 10 | 87.2% | ~0.96 MB |
+            | Burmese Grape Leaf | 5 | 87.3% | ~0.96 MB |
+
+            ### App Specifications
+            - **Architecture**: Clean Architecture + Riverpod
+            - **Inference**: TFLite (GPU → XNNPack → CPU delegate fallback)
+            - **Auth**: Email + Google Sign-In (Supabase PKCE)
+            - **Sync**: Offline-first with background cloud sync
+            - **Languages**: English, Vietnamese
+            - **Min Android SDK**: 21 · **Target SDK**: 35 · **Compile SDK**: 36
+
+            ### Features
+            - Real-time leaf disease diagnosis via camera or gallery
+            - OTA model updates with SHA-256 integrity verification
+            - Prediction history with filters, stats, and CSV export
+            - Jetson edge device fleet management
+            - Dark/Light theme support
+
+            ### Installation
+            1. Download `app-release.apk` below
+            2. Enable "Install from unknown sources" on your Android device
+            3. Install and open AgriKD
+
+            > **Note**: This is a signed release APK. First-time users need a Supabase backend — see [setup guide](https://github.com/zoe141004/agrikd-app/blob/main/docs/guides/supabase_setup.md).
+
+            ---
+            *Built with Flutter ${{ env.FLUTTER_VERSION }} · Release signing verified · Code obfuscated*
           files: |
             mobile_app/build/app/outputs/flutter-apk/app-release.apk
         env:

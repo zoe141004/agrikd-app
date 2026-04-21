@@ -121,7 +121,7 @@ export default function DataManagementPage() {
       // Auto-cleanup stale ops (>30 min without update)
       const STALE_MS = 30 * 60 * 1000
       for (const op of ops) {
-        if (['pending', 'staging', 'pushing', 'pulling', 'exporting', 'deleting'].includes(op.status)) {
+        if (['pending', 'staging', 'pushing', 'pulling', 'exporting'].includes(op.status)) {
           const age = Date.now() - new Date(op.started_at).getTime()
           if (age > STALE_MS) {
             await supabase.from('dvc_operations').update({

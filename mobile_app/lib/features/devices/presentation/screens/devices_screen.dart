@@ -193,17 +193,35 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                     DropdownButton<int>(
                       value: _closestInterval(intervalSec),
                       isExpanded: true,
-                      items: const [
-                        DropdownMenuItem(value: 60, child: Text('1 minute')),
-                        DropdownMenuItem(value: 300, child: Text('5 minutes')),
-                        DropdownMenuItem(value: 900, child: Text('15 minutes')),
+                      items: [
+                        DropdownMenuItem(
+                          value: 60,
+                          child: Text(S.get('interval_1m')),
+                        ),
+                        DropdownMenuItem(
+                          value: 300,
+                          child: Text(S.get('interval_5m')),
+                        ),
+                        DropdownMenuItem(
+                          value: 900,
+                          child: Text(S.get('interval_15m')),
+                        ),
                         DropdownMenuItem(
                           value: 1800,
-                          child: Text('30 minutes'),
+                          child: Text(S.get('interval_30m')),
                         ),
-                        DropdownMenuItem(value: 3600, child: Text('1 hour')),
-                        DropdownMenuItem(value: 21600, child: Text('6 hours')),
-                        DropdownMenuItem(value: 86400, child: Text('24 hours')),
+                        DropdownMenuItem(
+                          value: 3600,
+                          child: Text(S.get('interval_1h')),
+                        ),
+                        DropdownMenuItem(
+                          value: 21600,
+                          child: Text(S.get('interval_6h')),
+                        ),
+                        DropdownMenuItem(
+                          value: 86400,
+                          child: Text(S.get('interval_24h')),
+                        ),
                       ],
                       onChanged: (v) {
                         if (v != null) {
@@ -216,14 +234,22 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: () {
+                      onPressed: () async {
                         final updated = Map<String, dynamic>.from(config);
                         updated['mode'] = mode;
                         updated['interval_seconds'] = intervalSec;
-                        ref
-                            .read(devicesProvider.notifier)
-                            .updateConfig(device.id, updated);
-                        Navigator.pop(context);
+                        try {
+                          await ref
+                              .read(devicesProvider.notifier)
+                              .updateConfig(device.id, updated);
+                          if (context.mounted) Navigator.pop(context);
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(S.get('error_saving'))),
+                            );
+                          }
+                        }
                       },
                       child: Text(S.get('save')),
                     ),

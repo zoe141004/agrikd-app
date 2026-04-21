@@ -37,9 +37,14 @@ class Device {
   String get displayName => deviceName ?? hostname;
 
   /// Whether the device has acknowledged the latest desired_config.
+  /// Strips Jetson-added runtime fields before comparison so that
+  /// engine_status and applied_model_versions do not cause false negatives.
   bool get isConfigSynced {
     if (reportedConfig == null) return false;
-    return _jsonEquals(desiredConfig, reportedConfig!);
+    final stripped = Map<String, dynamic>.from(reportedConfig!)
+      ..remove('engine_status')
+      ..remove('applied_model_versions');
+    return _jsonEquals(desiredConfig, stripped);
   }
 
   /// Whether the device is currently reachable.

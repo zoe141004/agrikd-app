@@ -46,13 +46,15 @@ dependencies:
   cupertino_icons: ^1.0.9
   fl_chart: ^0.69.2
   intl: ^0.19.0
-  sqflite_common_ffi_web: ^1.1.1
 
   # Environment
   flutter_dotenv: ^6.0.0
 
   # Error Tracking
   sentry_flutter: ^9.16.1
+
+  # Web database support (conditional import in db_factory_web.dart)
+  sqflite_common_ffi_web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

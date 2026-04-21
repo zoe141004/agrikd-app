@@ -176,7 +176,9 @@ class SyncNotifier extends StateNotifier<SyncState>
         _ref.invalidate(diagnosisRepositoryProvider);
 
         // Remove this update from the pending list
-        final remaining = updates.where((u) => u.leafType != leafType).toList();
+        final remaining = state.pendingModelUpdates
+            .where((u) => u.leafType != leafType)
+            .toList();
         state = state.copyWith(
           pendingModelUpdates: remaining,
           clearDownloading: true,

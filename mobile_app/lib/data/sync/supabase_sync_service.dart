@@ -281,7 +281,8 @@ class SupabaseSyncService {
       }
       final Uint8List bytes = await _client.storage
           .from('models')
-          .download(storagePath);
+          .download(storagePath)
+          .timeout(const Duration(seconds: 60));
 
       // 2. Verify SHA-256 checksum
       final actualHash = ModelIntegrity.sha256Bytes(bytes);

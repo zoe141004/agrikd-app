@@ -46,8 +46,6 @@ void main() {
     test('all en keys exist in vi', () {
       // Ensure no missing translations
       S.setLocale('en');
-      final enKeys = <String>{};
-      // Access keys via get — can't directly access _strings, test behavior
       for (final key in [
         'app_name',
         'history',
@@ -63,8 +61,17 @@ void main() {
         'model_version_label',
         'bundled',
         'ota',
+        // Keys added in production audit
+        'error_saving',
+        'error_timeout',
+        'interval_1m',
+        'interval_5m',
+        'interval_15m',
+        'interval_30m',
+        'interval_1h',
+        'interval_6h',
+        'interval_24h',
       ]) {
-        enKeys.add(key);
         S.setLocale('vi');
         final vi = S.get(key);
         S.setLocale('en');
@@ -75,6 +82,40 @@ void main() {
           reason: 'Missing Vietnamese translation for key: $key',
         );
       }
+    });
+
+    test('interval keys return expected English values', () {
+      S.setLocale('en');
+      expect(S.get('interval_1m'), '1 minute');
+      expect(S.get('interval_5m'), '5 minutes');
+      expect(S.get('interval_15m'), '15 minutes');
+      expect(S.get('interval_30m'), '30 minutes');
+      expect(S.get('interval_1h'), '1 hour');
+      expect(S.get('interval_6h'), '6 hours');
+      expect(S.get('interval_24h'), '24 hours');
+    });
+
+    test('interval keys return expected Vietnamese values', () {
+      S.setLocale('vi');
+      expect(S.get('interval_1m'), '1 phút');
+      expect(S.get('interval_5m'), '5 phút');
+      expect(S.get('interval_15m'), '15 phút');
+      expect(S.get('interval_30m'), '30 phút');
+      expect(S.get('interval_1h'), '1 giờ');
+      expect(S.get('interval_6h'), '6 giờ');
+      expect(S.get('interval_24h'), '24 giờ');
+    });
+
+    test('error keys return expected values both locales', () {
+      S.setLocale('en');
+      expect(S.get('error_saving'), 'Failed to save. Please try again.');
+      expect(S.get('error_timeout'), 'Request timed out. Please try again.');
+      S.setLocale('vi');
+      expect(S.get('error_saving'), 'Lưu thất bại. Vui lòng thử lại.');
+      expect(
+        S.get('error_timeout'),
+        'Yêu cầu hết thời gian chờ. Vui lòng thử lại.',
+      );
     });
   });
 }

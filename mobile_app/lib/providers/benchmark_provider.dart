@@ -74,7 +74,8 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
               .eq('leaf_type', leafType)
               .eq('format', 'tflite_float16')
               .eq('version', activeVersion)
-              .limit(1);
+              .limit(1)
+              .timeout(const Duration(seconds: 30));
         }
 
         // Fallback to latest available if exact version has no benchmark entry
@@ -85,7 +86,8 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
               .eq('leaf_type', leafType)
               .eq('format', 'tflite_float16')
               .order('version', ascending: false)
-              .limit(1);
+              .limit(1)
+              .timeout(const Duration(seconds: 30));
         }
 
         if (rows.isNotEmpty) {

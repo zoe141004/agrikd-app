@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
+import 'package:app/core/utils/format_helpers.dart';
 import 'package:app/providers/auth_provider.dart';
 import 'package:app/providers/benchmark_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
@@ -464,10 +465,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   )
                 else ...[
-                  _SpecRow(S.get('spec_accuracy'), _pct(bench.accuracy)),
-                  _SpecRow(S.get('spec_precision'), _pct(bench.precisionMacro)),
-                  _SpecRow(S.get('spec_recall'), _pct(bench.recallMacro)),
-                  _SpecRow(S.get('spec_f1'), _pct(bench.f1Macro)),
+                  _SpecRow(
+                    S.get('spec_accuracy'),
+                    formatPercent(bench.accuracy),
+                  ),
+                  _SpecRow(
+                    S.get('spec_precision'),
+                    formatPercent(bench.precisionMacro),
+                  ),
+                  _SpecRow(
+                    S.get('spec_recall'),
+                    formatPercent(bench.recallMacro),
+                  ),
+                  _SpecRow(S.get('spec_f1'), formatPercent(bench.f1Macro)),
                   const Divider(height: 24),
                   _SpecRow(
                     S.get('spec_flops'),
@@ -500,13 +510,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       },
     );
-  }
-
-  String _pct(double? v) {
-    if (v == null) return '—';
-    // Values stored as decimals (0–1) need ×100; values already as % (>1) are used as-is.
-    final pct = v <= 1.0 ? v * 100 : v;
-    return '${pct.toStringAsFixed(1)}%';
   }
 }
 

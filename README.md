@@ -29,7 +29,13 @@ That's it. The script installs all dependencies, creates `.env` from `.env.devel
 ## Model Pipeline (4-Format)
 
 ```
-.pth (checkpoint) → .onnx (intermediate) → .tflite fp16 (mobile) → .engine (Jetson TensorRT)
+.pth (checkpoint)
+  |
+  +--> .onnx (intermediate)
+         |
+         +--> .tflite float32 (mobile)
+         +--> .tflite float16 (mobile, smaller)
+         +--> .engine FP16 (Jetson TensorRT)
 ```
 
 All formats uploaded to Supabase Storage. Jetson devices auto-detect hardware (SM arch) and share pre-built engines.

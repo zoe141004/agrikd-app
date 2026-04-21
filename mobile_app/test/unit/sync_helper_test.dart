@@ -176,6 +176,110 @@ void main() {
     });
   });
 
+  group('SyncState.copyWith', () {
+    test('no arguments preserves all fields', () {
+      final now = DateTime.now();
+      const result = SyncResult(synced: 3, failed: 0, message: 'ok');
+      const update = ModelUpdate(
+        leafType: 'tomato',
+        version: '2.0.0',
+        sha256Checksum: 'abc',
+        classLabels: ['Healthy'],
+        numClasses: 1,
+      );
+      final state = SyncState(
+        status: SyncStatus.success,
+        lastResult: result,
+        errorMessage: 'err',
+        lastSyncedAt: now,
+        pendingModelUpdates: const [update],
+        downloadingLeafType: 'tomato',
+      );
+      final copy = state.copyWith();
+      expect(copy.status, SyncStatus.success);
+      expect(copy.lastResult?.synced, 3);
+      expect(copy.errorMessage, 'err');
+      expect(copy.lastSyncedAt, now);
+      expect(copy.pendingModelUpdates, hasLength(1));
+      expect(copy.downloadingLeafType, 'tomato');
+    });
+
+    test('sets downloadingLeafType', () {
+      const state = SyncState();
+      final copy = state.copyWith(downloadingLeafType: 'tomato');
+      expect(copy.downloadingLeafType, 'tomato');
+    });
+
+    test('clearDownloading resets downloadingLeafType to null', () {
+      const state = SyncState(downloadingLeafType: 'tomato');
+      final copy = state.copyWith(clearDownloading: true);
+      expect(copy.downloadingLeafType, isNull);
+    });
+
+    test('clearDownloading when already null stays null', () {
+      const state = SyncState();
+      final copy = state.copyWith(clearDownloading: true);
+      expect(copy.downloadingLeafType, isNull);
+    });
+
+    test('clearDownloading takes precedence over downloadingLeafType', () {
+      const state = SyncState();
+      final copy = state.copyWith(
+        downloadingLeafType: 'burmese_grape_leaf',
+        clearDownloading: true,
+      );
+      expect(copy.downloadingLeafType, isNull);
+    });
+
+    test('replaces pendingModelUpdates', () {
+      const update = ModelUpdate(
+        leafType: 'tomato',
+        version: '2.0.0',
+        sha256Checksum: 'abc',
+        classLabels: ['Healthy'],
+        numClasses: 1,
+      );
+      const state = SyncState();
+      final copy = state.copyWith(pendingModelUpdates: [update]);
+      expect(copy.pendingModelUpdates, hasLength(1));
+      expect(copy.pendingModelUpdates.first.leafType, 'tomato');
+    });
+
+    test('empty pendingModelUpdates clears the list', () {
+      const update = ModelUpdate(
+        leafType: 'tomato',
+        version: '1.0.0',
+        sha256Checksum: 'abc',
+        classLabels: ['Healthy'],
+        numClasses: 1,
+      );
+      const state = SyncState(pendingModelUpdates: [update]);
+      final copy = state.copyWith(pendingModelUpdates: []);
+      expect(copy.pendingModelUpdates, isEmpty);
+    });
+
+    test('clearError resets errorMessage to null', () {
+      const state = SyncState(
+        status: SyncStatus.error,
+        errorMessage: 'timeout',
+      );
+      final copy = state.copyWith(clearError: true);
+      expect(copy.errorMessage, isNull);
+    });
+
+    test('clearError when no error preserves null', () {
+      const state = SyncState();
+      final copy = state.copyWith(clearError: true);
+      expect(copy.errorMessage, isNull);
+    });
+
+    test('sets status independently', () {
+      const state = SyncState();
+      final copy = state.copyWith(status: SyncStatus.syncing);
+      expect(copy.status, SyncStatus.syncing);
+    });
+  });
+
   group('Sync debounce backoff calculation', () {
     // Mirrors SyncNotifier logic:
     // _consecutiveFailures == 0 → 2 seconds

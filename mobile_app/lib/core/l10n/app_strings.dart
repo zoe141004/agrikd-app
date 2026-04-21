@@ -317,8 +317,17 @@ class S {
     'config_synced': 'Synced',
     'config_pending': 'Pending',
     'error_loading': 'Failed to load data',
+    'error_saving': 'Failed to save. Please try again.',
     'retry': 'Retry',
     'error_timeout': 'Request timed out. Please try again.',
+    // Capture intervals
+    'interval_1m': '1 minute',
+    'interval_5m': '5 minutes',
+    'interval_15m': '15 minutes',
+    'interval_30m': '30 minutes',
+    'interval_1h': '1 hour',
+    'interval_6h': '6 hours',
+    'interval_24h': '24 hours',
   };
 
   static const _vi = <String, String>{
@@ -605,7 +614,16 @@ class S {
     'config_synced': 'Đã đồng bộ',
     'config_pending': 'Đang chờ',
     'error_loading': 'Không tải được dữ liệu',
+    'error_saving': 'Lưu thất bại. Vui lòng thử lại.',
     'retry': 'Thử lại',
     'error_timeout': 'Yêu cầu hết thời gian chờ. Vui lòng thử lại.',
+    // Capture intervals
+    'interval_1m': '1 phút',
+    'interval_5m': '5 phút',
+    'interval_15m': '15 phút',
+    'interval_30m': '30 phút',
+    'interval_1h': '1 giờ',
+    'interval_6h': '6 giờ',
+    'interval_24h': '24 giờ',
   };
 }

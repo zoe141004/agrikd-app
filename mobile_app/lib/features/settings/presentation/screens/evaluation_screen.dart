@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
+import 'package:app/core/utils/format_helpers.dart';
 import 'package:app/providers/benchmark_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 
@@ -127,23 +128,23 @@ class EvaluationScreen extends ConsumerWidget {
                         const SizedBox(height: 12),
                         _MetricRow(
                           S.get('spec_accuracy'),
-                          _pct(bench.accuracy),
+                          formatPercent(bench.accuracy),
                           colorScheme,
                           highlight: true,
                         ),
                         _MetricRow(
                           S.get('spec_precision'),
-                          _pct(bench.precisionMacro),
+                          formatPercent(bench.precisionMacro),
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_recall'),
-                          _pct(bench.recallMacro),
+                          formatPercent(bench.recallMacro),
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_f1'),
-                          _pct(bench.f1Macro),
+                          formatPercent(bench.f1Macro),
                           colorScheme,
                         ),
                         const Divider(height: 20),
@@ -198,12 +199,6 @@ class EvaluationScreen extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  String _pct(double? v) {
-    if (v == null) return '—';
-    final pct = v <= 1.0 ? v * 100 : v;
-    return '${pct.toStringAsFixed(1)}%';
   }
 }
 

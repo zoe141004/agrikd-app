@@ -1,7 +1,7 @@
 # AgriKD — System Technical Reference
 
 > Single source of truth for all technical details.
-> Last verified: 2026-04-16.
+> Last verified: 2026-04-21.
 
 ---
 
@@ -99,7 +99,7 @@ agrikd/
 │   │   │   ├── constants/             # AppConstants, ModelConstants
 │   │   │   ├── l10n/                  # Dual-language strings (EN / VI)
 │   │   │   ├── theme/                 # AppTheme (light + dark)
-│   │   │   └── utils/                 # ImagePreprocessor, ModelIntegrity, FileHelper
+│   │   │   └── utils/                 # ImagePreprocessor, ModelIntegrity, FileHelper, FormatHelpers
 │   │   ├── data/
 │   │   │   ├── database/              # AppDatabase, DAOs (prediction, model, preference)
 │   │   │   └── sync/                  # SyncQueue, SupabaseSyncService
@@ -151,11 +151,12 @@ agrikd/
 │   ├── configs/
 │   │   ├── tomato.json
 │   │   ├── burmese_grape_leaf.json
-│   │   └── model_registry.json
+│   │   ├── model_registry.json
+│   │   └── potato_dataset.json
 │   └── requirements*.txt              # Separate requirement files per stage
 │
 ├── database/                          # Infrastructure-as-Code DB scripts
-│   ├── migrations/                    # 25 SQL migration files (001-025)
+│   ├── migrations/                    # 26 SQL migration files (001-026)
 │   │   ├── 001_tables.sql
 │   │   ├── 002_functions_triggers.sql
 │   │   ├── 003_rls_policies.sql
@@ -179,6 +180,9 @@ agrikd/
 │   │   ├── 021_tensorrt_benchmark_format.sql # Add tensorrt_fp16 to benchmarks format CHECK
 │   │   ├── 022_system_secrets.sql     # system_secrets table + get_system_secret RPC
 │   │   └── 023_benchmark_upload_policy.sql # RLS policy for Jetson benchmark uploads
+│   │   ├── 024_restrict_engine_update.sql  # (Superseded by 026) Broken engine benchmark RPC
+│   │   ├── 025_fix_prediction_dedup.sql    # Partial unique indexes for prediction dedup
+│   │   └── 026_fix_engine_benchmark_rpc.sql # Fixed engine benchmark RPC + dedup count fix
 │   ├── verify_all_migrations.sql
 │   └── verify_rls_policies.sql        # RLS audit
 │
@@ -197,7 +201,11 @@ agrikd/
 │   ├── dataset-upload.yml             # Upload datasets to storage (staging + DVC)
 │   └── dataset-delete.yml             # Delete dataset from DVC + GCS cleanup
 ├── .github/scripts/
-│   └── stage_dataset_to_storage.py    # Stage dataset ZIP to Supabase Storage
+│   ├── stage_dataset_to_storage.py    # Stage dataset ZIP to Supabase Storage
+│   ├── upload_benchmarks.py           # Upload benchmark results to Supabase
+│   ├── download_checkpoint.py         # Download model checkpoint from Supabase
+│   ├── prepare_dataset.py             # Prepare dataset for pipeline
+│   └── export_predictions_to_dataset.py # Export predictions as dataset
 │
 ├── docs/                              # Project documentation
 ├── data/                              # DVC-tracked datasets (gitignored)
@@ -498,7 +506,7 @@ lib/
 | Devices | DevicesScreen |
 | Auth | LoginScreen, RegisterScreen, ForgotPasswordScreen, ResetPasswordScreen |
 
-Plus 3 conditional variants: `camera_screen_mobile.dart`, `camera_screen_stub.dart`, `tflite_inference_service_stub.dart`.
+Plus 10 conditional variants (5 pairs): `camera_screen`, `tflite_inference_service`, `file_helper`, `image_widget`, `db_factory` — each has `_mobile.dart`/`_web.dart` + `_stub.dart`.
 
 ### 8.3 Key Dependencies (pubspec.yaml)
 
@@ -558,17 +566,17 @@ Deep link: `com.agrikd.app://callback` (for email confirmation and password rese
 | Release APK (arm64-v8a) | ~31.3 MB |
 | Obfuscation | `--obfuscate --split-debug-info=build/debug-info` |
 
-### 8.7 Test Suite (210 tests across 18 files)
+### 8.7 Test Suite (250 tests across 20 files)
 
 | Category | Files | Tests |
 |---|---|---|
-| Unit | 10 | 100 |
+| Unit | 12 | 140 |
 | DAO | 2 | 31 |
 | Provider | 2 | 22 |
 | Widget | 1 | 4 |
 | Integration | 2 | 35 |
 | Sync | 1 | 18 |
-| **Total** | **18** | **210** |
+| **Total** | **20** | **250** |
 
 ---
 
@@ -687,7 +695,7 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 | `dvc_operations` | id, leaf_type, operation, source, status, metadata, github_run_id, triggered_by | DVC operation tracking with Realtime |
 | `provisioning_tokens` | id, created_by, expires_at, used_at, used_by_hw_id, device_id, label | One-time tokens for Zero-Touch Provisioning (24h expiry) |
 | `devices` | id, hw_id, hostname, device_name, status, user_id, device_token, desired_config, reported_config, config_version, last_seen_at, hw_info | Jetson device registry with Device Shadow pattern |
-| `model_engines` | id, leaf_type, version, hw_tag, engine_url, sha256, created_at | Cached TensorRT engines per hardware type |
+| `model_engines` | id (UUID), leaf_type, version, hardware_tag, engine_url, engine_sha256, benchmark_json, created_by_device, created_at | Cached TensorRT engines per hardware type |
 | `system_secrets` | key, value, description, updated_at, updated_by | Admin-managed secrets (e.g., GCS key for DVC). Devices read via `get_system_secret` RPC |
 
 ### 11.4 RLS Audit (IaC)
@@ -733,7 +741,7 @@ Composite index on `(is_synced, id)` for efficient unsynced-row queries.
 |---|---|
 | `audit` | Security audit (npm audit, pip audit) |
 | `lint` | `dart format --set-exit-if-changed` + `flutter analyze` |
-| `test` | `flutter test --exclude-tags=widget` (206 tests) |
+| `test` | `flutter test --exclude-tags=widget` (246 tests) |
 | `build` | `flutter build apk --release` with `--obfuscate` |
 | `dashboard-test` | `npm test` (113 admin dashboard tests) |
 | `jetson-lint` | `ruff check jetson/app/ jetson/scripts/` |
@@ -844,6 +852,6 @@ flutter build apk --release \
 2. **Google OAuth**: Create OAuth 2.0 Client ID → set `GOOGLE_WEB_CLIENT_ID`
 3. **GitHub Secrets**: Configure all 13 secrets listed in Section 12.3
 4. **DVC**: Google Drive folder ID in `.dvc/config` (already configured)
-5. **Migrations**: Run 001-025 in order in Supabase SQL Editor
+5. **Migrations**: Run 001-026 in order in Supabase SQL Editor
 6. **Realtime**: Automated in migration 011 (falls back to manual)
 7. **Release**: APK distributed via GitHub Releases (no Play Store)
