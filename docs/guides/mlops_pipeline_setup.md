@@ -11,7 +11,7 @@
 ## 1. Create Virtual Environment
 
 ```bash
-cd D:/Capstone/app
+cd <project-root>
 python -m venv venv_mlops
 # Windows:
 venv_mlops\Scripts\activate
@@ -40,7 +40,7 @@ The `requirements.txt` includes two sub-files:
 ## 3. DVC Setup
 
 ```bash
-cd D:/Capstone/app
+cd <project-root>
 
 # Initialize DVC (skip if .dvc/ already exists)
 dvc init
@@ -83,7 +83,7 @@ Each leaf type has a config at `mlops_pipeline/configs/<leaf_type>.json`:
 ## 5. Run the Full Pipeline
 
 ```bash
-cd D:/Capstone/app/mlops_pipeline/scripts
+cd <project-root>/mlops_pipeline/scripts
 
 # Run for tomato:
 python run_pipeline.py --config ../configs/tomato.json

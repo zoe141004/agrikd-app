@@ -4,7 +4,7 @@ import 'dart:math' show min;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:app/providers/benchmark_provider.dart';
+import 'package:app/providers/evaluation_provider.dart';
 import 'package:app/providers/diagnosis_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
 import 'package:app/core/config/supabase_config.dart';
@@ -171,7 +171,7 @@ class SyncNotifier extends StateNotifier<SyncState>
       if (ok) {
         // Refresh UI providers so the new model is immediately available
         _ref.read(modelVersionProvider.notifier).load();
-        _ref.read(benchmarkProvider.notifier).load();
+        _ref.read(evaluationProvider.notifier).load();
         // Invalidate diagnosis repository so the stale model cache is cleared
         _ref.invalidate(diagnosisRepositoryProvider);
 

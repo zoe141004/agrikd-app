@@ -396,7 +396,7 @@ def compute_metrics(predictions, labels, probs, latencies_ms,
 
     benchmark = {
         "format": "tensorrt_fp16",
-        "accuracy": round(accuracy * 100, 4),
+        "accuracy": round(float(accuracy), 4),
         "precision_macro": round(float(precision), 4),
         "recall_macro": round(float(recall), 4),
         "f1_macro": round(float(f1), 4),
@@ -412,7 +412,7 @@ def compute_metrics(predictions, labels, probs, latencies_ms,
     log.info(
         "Benchmark: acc=%.2f%% prec=%.4f rec=%.4f f1=%.4f "
         "latency=%.2fms fps=%.1f size=%.2fMB",
-        benchmark["accuracy"], benchmark["precision_macro"],
+        benchmark["accuracy"] * 100, benchmark["precision_macro"],
         benchmark["recall_macro"], benchmark["f1_macro"],
         benchmark["latency_mean_ms"], benchmark["fps"],
         benchmark["size_mb"],
@@ -496,7 +496,7 @@ def main():
         upload_model_benchmark(base_url, key, leaf_type, version, benchmark)
 
         log.info("Validation done: %s v%s — acc=%.2f%% fps=%.1f",
-                 leaf_type, version, benchmark.get("accuracy", 0), benchmark.get("fps", 0))
+                 leaf_type, version, benchmark.get("accuracy", 0) * 100, benchmark.get("fps", 0))
 
     except Exception as e:
         log.error("Validation failed for %s: %s", leaf_type, e)

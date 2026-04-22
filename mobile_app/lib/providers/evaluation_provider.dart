@@ -6,8 +6,8 @@ import 'package:app/core/constants/model_constants.dart';
 import 'package:app/data/database/dao/model_dao.dart';
 import 'database_provider.dart';
 
-/// Remote model benchmark metrics fetched from Supabase `model_benchmarks`.
-class ModelBenchmarkInfo {
+/// Remote model evaluation metrics fetched from Supabase `model_benchmarks`.
+class ModelEvaluationInfo {
   final String leafType;
   final String version;
   final double? accuracy;
@@ -19,7 +19,7 @@ class ModelBenchmarkInfo {
   final double? sizeMb;
   final double? paramsM;
 
-  const ModelBenchmarkInfo({
+  const ModelEvaluationInfo({
     required this.leafType,
     required this.version,
     this.accuracy,
@@ -33,31 +33,31 @@ class ModelBenchmarkInfo {
   });
 }
 
-class BenchmarkState {
-  final Map<String, ModelBenchmarkInfo> benchmarks; // keyed by leafType
+class EvaluationState {
+  final Map<String, ModelEvaluationInfo> evaluations; // keyed by leafType
   final bool isLoading;
 
-  const BenchmarkState({this.benchmarks = const {}, this.isLoading = false});
+  const EvaluationState({this.evaluations = const {}, this.isLoading = false});
 }
 
-class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
+class EvaluationNotifier extends StateNotifier<EvaluationState> {
   final ModelDao _modelDao;
 
-  BenchmarkNotifier(this._modelDao) : super(const BenchmarkState()) {
+  EvaluationNotifier(this._modelDao) : super(const EvaluationState()) {
     load();
   }
 
   Future<void> load() async {
-    state = BenchmarkState(benchmarks: state.benchmarks, isLoading: true);
+    state = EvaluationState(evaluations: state.evaluations, isLoading: true);
 
     try {
       if (!SupabaseConfig.isInitialized) {
-        state = BenchmarkState(benchmarks: state.benchmarks);
+        state = EvaluationState(evaluations: state.evaluations);
         return;
       }
 
       final client = SupabaseConfig.client;
-      final result = <String, ModelBenchmarkInfo>{};
+      final result = <String, ModelEvaluationInfo>{};
 
       for (final leafType in ModelConstants.availableLeafTypes) {
         // Determine the active installed version on this device
@@ -67,7 +67,7 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
         List<dynamic> rows = [];
 
         if (activeVersion != null) {
-          // Prefer benchmark for the exact installed version
+          // Prefer evaluation for the exact installed version
           rows = await client
               .from('model_benchmarks')
               .select('*')
@@ -78,7 +78,7 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
               .timeout(const Duration(seconds: 30));
         }
 
-        // Fallback to latest available if exact version has no benchmark entry
+        // Fallback to latest available if exact version has no evaluation entry
         if (rows.isEmpty) {
           rows = await client
               .from('model_benchmarks')
@@ -92,7 +92,7 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
 
         if (rows.isNotEmpty) {
           final r = rows.first;
-          result[leafType] = ModelBenchmarkInfo(
+          result[leafType] = ModelEvaluationInfo(
             leafType: leafType,
             version: r['version'] as String? ?? '',
             accuracy: toDouble(r['accuracy']),
@@ -107,10 +107,10 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
         }
       }
 
-      state = BenchmarkState(benchmarks: result);
+      state = EvaluationState(evaluations: result);
     } catch (e) {
-      debugPrint('[BenchmarkProvider] Failed to load benchmarks: $e');
-      state = BenchmarkState(benchmarks: state.benchmarks);
+      debugPrint('[EvaluationProvider] Failed to load evaluations: $e');
+      state = EvaluationState(evaluations: state.evaluations);
     }
   }
 
@@ -124,8 +124,8 @@ class BenchmarkNotifier extends StateNotifier<BenchmarkState> {
   }
 }
 
-final benchmarkProvider =
-    StateNotifierProvider<BenchmarkNotifier, BenchmarkState>((ref) {
+final evaluationProvider =
+    StateNotifierProvider<EvaluationNotifier, EvaluationState>((ref) {
       final modelDao = ref.watch(modelDaoProvider);
-      return BenchmarkNotifier(modelDao);
+      return EvaluationNotifier(modelDao);
     });

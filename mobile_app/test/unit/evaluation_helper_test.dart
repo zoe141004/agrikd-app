@@ -1,61 +1,61 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:app/providers/benchmark_provider.dart';
+import 'package:app/providers/evaluation_provider.dart';
 
 void main() {
-  group('BenchmarkNotifier.toDouble', () {
+  group('EvaluationNotifier.toDouble', () {
     test('null returns null', () {
-      expect(BenchmarkNotifier.toDouble(null), isNull);
+      expect(EvaluationNotifier.toDouble(null), isNull);
     });
 
     test('double returns same value', () {
-      expect(BenchmarkNotifier.toDouble(0.87), 0.87);
+      expect(EvaluationNotifier.toDouble(0.87), 0.87);
     });
 
     test('int returns double', () {
-      expect(BenchmarkNotifier.toDouble(87), 87.0);
-      expect(BenchmarkNotifier.toDouble(87), isA<double>());
+      expect(EvaluationNotifier.toDouble(87), 87.0);
+      expect(EvaluationNotifier.toDouble(87), isA<double>());
     });
 
     test('zero int returns 0.0', () {
-      expect(BenchmarkNotifier.toDouble(0), 0.0);
+      expect(EvaluationNotifier.toDouble(0), 0.0);
     });
 
     test('valid string parses to double', () {
-      expect(BenchmarkNotifier.toDouble('0.872'), closeTo(0.872, 0.0001));
+      expect(EvaluationNotifier.toDouble('0.872'), closeTo(0.872, 0.0001));
     });
 
     test('valid integer string parses to double', () {
-      expect(BenchmarkNotifier.toDouble('100'), 100.0);
+      expect(EvaluationNotifier.toDouble('100'), 100.0);
     });
 
     test('invalid string returns null', () {
-      expect(BenchmarkNotifier.toDouble('not_a_number'), isNull);
+      expect(EvaluationNotifier.toDouble('not_a_number'), isNull);
     });
 
     test('empty string returns null', () {
-      expect(BenchmarkNotifier.toDouble(''), isNull);
+      expect(EvaluationNotifier.toDouble(''), isNull);
     });
 
     test('bool returns null (unsupported type)', () {
-      expect(BenchmarkNotifier.toDouble(true), isNull);
+      expect(EvaluationNotifier.toDouble(true), isNull);
     });
 
     test('list returns null (unsupported type)', () {
-      expect(BenchmarkNotifier.toDouble([1.0]), isNull);
+      expect(EvaluationNotifier.toDouble([1.0]), isNull);
     });
   });
 
-  group('ModelBenchmarkInfo', () {
+  group('ModelEvaluationInfo', () {
     test('constructs with required fields', () {
-      const info = ModelBenchmarkInfo(leafType: 'tomato', version: '1.1.0');
+      const info = ModelEvaluationInfo(leafType: 'tomato', version: '1.1.0');
       expect(info.leafType, 'tomato');
       expect(info.version, '1.1.0');
       expect(info.accuracy, isNull);
     });
 
     test('constructs with all optional metrics', () {
-      const info = ModelBenchmarkInfo(
+      const info = ModelEvaluationInfo(
         leafType: 'tomato',
         version: '1.1.0',
         accuracy: 0.872,
@@ -73,7 +73,7 @@ void main() {
     });
 
     test('supports burmese_grape_leaf type', () {
-      const info = ModelBenchmarkInfo(
+      const info = ModelEvaluationInfo(
         leafType: 'burmese_grape_leaf',
         version: '1.0.0',
       );
@@ -81,24 +81,24 @@ void main() {
     });
   });
 
-  group('BenchmarkState', () {
-    test('defaults to empty benchmarks, not loading', () {
-      const state = BenchmarkState();
-      expect(state.benchmarks, isEmpty);
+  group('EvaluationState', () {
+    test('defaults to empty evaluations, not loading', () {
+      const state = EvaluationState();
+      expect(state.evaluations, isEmpty);
       expect(state.isLoading, isFalse);
     });
 
     test('can be constructed loading', () {
-      const state = BenchmarkState(isLoading: true);
+      const state = EvaluationState(isLoading: true);
       expect(state.isLoading, isTrue);
-      expect(state.benchmarks, isEmpty);
+      expect(state.evaluations, isEmpty);
     });
 
-    test('can be constructed with benchmark data', () {
-      const info = ModelBenchmarkInfo(leafType: 'tomato', version: '1.1.0');
-      final state = BenchmarkState(benchmarks: {'tomato': info});
-      expect(state.benchmarks, hasLength(1));
-      expect(state.benchmarks['tomato']?.version, '1.1.0');
+    test('can be constructed with evaluation data', () {
+      const info = ModelEvaluationInfo(leafType: 'tomato', version: '1.1.0');
+      final state = EvaluationState(evaluations: {'tomato': info});
+      expect(state.evaluations, hasLength(1));
+      expect(state.evaluations['tomato']?.version, '1.1.0');
     });
   });
 }

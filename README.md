@@ -53,7 +53,7 @@ All guides are in [`docs/`](docs/README.md):
 - [Flutter App Build](docs/guides/flutter_app_build.md)
 - [MLOps Pipeline](docs/guides/mlops_pipeline_setup.md)
 
-## Benchmark Results
+## Evaluation Results
 
 | Dataset | Top-1 Accuracy | TFLite Size |
 |---------|---------------|-------------|

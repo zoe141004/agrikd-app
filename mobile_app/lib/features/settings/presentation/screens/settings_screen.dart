@@ -5,7 +5,7 @@ import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/core/utils/format_helpers.dart';
 import 'package:app/providers/auth_provider.dart';
-import 'package:app/providers/benchmark_provider.dart';
+import 'package:app/providers/evaluation_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
 import 'package:app/providers/settings_provider.dart';
 import 'package:app/providers/sync_provider.dart';
@@ -148,7 +148,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Builder(
                 builder: (context) {
                   final syncState = ref.watch(syncProvider);
-                  final updates = syncState.pendingModelUpdates;
+                  final updates = syncState.pendingModelUpdates
+                      .where(
+                        (u) => ModelConstants.models.containsKey(u.leafType),
+                      )
+                      .toList();
                   if (updates.isEmpty) return const SizedBox.shrink();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -388,8 +392,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     WidgetRef ref,
     String leafType,
   ) {
-    final benchState = ref.read(benchmarkProvider);
-    final bench = benchState.benchmarks[leafType];
+    final evalState = ref.read(evaluationProvider);
+    final eval = evalState.evaluations[leafType];
     final modelInfo = ModelConstants.getModel(leafType);
 
     showModalBottomSheet(
@@ -429,10 +433,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                   textAlign: TextAlign.center,
                 ),
-                if (bench != null) ...[
+                if (eval != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'v${bench.version} — TFLite Float16',
+                    'v${eval.version} — TFLite Float16',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -440,7 +444,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                if (bench == null)
+                if (eval == null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 32),
                     child: Column(
@@ -467,40 +471,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 else ...[
                   _SpecRow(
                     S.get('spec_accuracy'),
-                    formatPercent(bench.accuracy),
+                    formatPercent(eval.accuracy),
                   ),
                   _SpecRow(
                     S.get('spec_precision'),
-                    formatPercent(bench.precisionMacro),
+                    formatPercent(eval.precisionMacro),
                   ),
                   _SpecRow(
                     S.get('spec_recall'),
-                    formatPercent(bench.recallMacro),
+                    formatPercent(eval.recallMacro),
                   ),
-                  _SpecRow(S.get('spec_f1'), formatPercent(bench.f1Macro)),
+                  _SpecRow(S.get('spec_f1'), formatPercent(eval.f1Macro)),
                   const Divider(height: 24),
                   _SpecRow(
                     S.get('spec_flops'),
-                    bench.flopsM != null
-                        ? '${bench.flopsM!.toStringAsFixed(1)} M'
+                    eval.flopsM != null
+                        ? '${eval.flopsM!.toStringAsFixed(1)} M'
                         : '—',
                   ),
                   _SpecRow(
                     S.get('spec_latency'),
-                    bench.latencyMeanMs != null
-                        ? '${bench.latencyMeanMs!.toStringAsFixed(1)} ms'
+                    eval.latencyMeanMs != null
+                        ? '${eval.latencyMeanMs!.toStringAsFixed(1)} ms'
                         : '—',
                   ),
                   _SpecRow(
                     S.get('spec_size'),
-                    bench.sizeMb != null
-                        ? '${bench.sizeMb!.toStringAsFixed(2)} MB'
+                    eval.sizeMb != null
+                        ? '${eval.sizeMb!.toStringAsFixed(2)} MB'
                         : '—',
                   ),
                   _SpecRow(
                     S.get('spec_params'),
-                    bench.paramsM != null
-                        ? '${bench.paramsM!.toStringAsFixed(2)} M'
+                    eval.paramsM != null
+                        ? '${eval.paramsM!.toStringAsFixed(2)} M'
                         : '—',
                   ),
                 ],

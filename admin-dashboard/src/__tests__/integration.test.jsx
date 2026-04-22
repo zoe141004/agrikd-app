@@ -164,7 +164,7 @@ const MOCK_BENCHMARKS = [
     leaf_type: 'tomato',
     version: '1.0.0',
     format: 'pytorch',
-    accuracy: 87.2,
+    accuracy: 0.872,
     precision_macro: 0.872,
     recall_macro: 0.871,
     f1_macro: 0.871,
@@ -177,7 +177,7 @@ const MOCK_BENCHMARKS = [
     leaf_type: 'tomato',
     version: '1.0.0',
     format: 'onnx',
-    accuracy: 87.2,
+    accuracy: 0.872,
     precision_macro: 0.872,
     recall_macro: 0.871,
     f1_macro: 0.871,
@@ -190,7 +190,7 @@ const MOCK_BENCHMARKS = [
     leaf_type: 'tomato',
     version: '1.0.0',
     format: 'tflite_float16',
-    accuracy: 87.1,
+    accuracy: 0.871,
     precision_macro: 0.871,
     recall_macro: 0.870,
     f1_macro: 0.870,
@@ -203,7 +203,7 @@ const MOCK_BENCHMARKS = [
     leaf_type: 'tomato',
     version: '2.0.0',
     format: 'pytorch',
-    accuracy: 89.5,
+    accuracy: 0.895,
     precision_macro: 0.895,
     recall_macro: 0.894,
     f1_macro: 0.894,
@@ -216,7 +216,7 @@ const MOCK_BENCHMARKS = [
     leaf_type: 'tomato',
     version: '2.0.0',
     format: 'tflite_float16',
-    accuracy: 89.3,
+    accuracy: 0.893,
     precision_macro: 0.893,
     recall_macro: 0.892,
     f1_macro: 0.892,
@@ -681,7 +681,7 @@ describe('Group 3: Model Reports Page', () => {
   })
 })
 
-describe('Group 4: Models Page — Benchmarks & Registry', () => {
+describe('Group 4: Models Page — Evaluation & Registry', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -726,13 +726,13 @@ describe('Group 4: Models Page — Benchmarks & Registry', () => {
 
     // Tab buttons should all be present
     expect(screen.getByRole('button', { name: 'Registry' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Benchmarks' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Evaluation' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Upload Model' }).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('button', { name: 'Validate' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'OTA Deploy' })).toBeInTheDocument()
   })
 
-  it('shows benchmark data when Benchmarks tab is clicked', async () => {
+  it('shows evaluation data when Evaluation tab is clicked', async () => {
     renderPage(ModelsPage)
 
     // Wait for initial load
@@ -740,10 +740,10 @@ describe('Group 4: Models Page — Benchmarks & Registry', () => {
       expect(screen.getByText('Model Registry')).toBeInTheDocument()
     })
 
-    // Click the Benchmarks tab
-    fireEvent.click(screen.getByText('Benchmarks'))
+    // Click the Evaluation tab
+    fireEvent.click(screen.getByText('Evaluation'))
 
-    // Benchmarks tab should show dataset filter and version filter
+    // Evaluation tab should show dataset filter and version filter
     await waitFor(() => {
       expect(screen.getByText('Dataset')).toBeInTheDocument()
     })

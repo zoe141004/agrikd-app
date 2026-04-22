@@ -124,6 +124,7 @@ def parse_benchmark_report(report_path):
         fmt_key = fmt_map.get(fmt_name.lower())
         if not fmt_key:
             continue
+        raw_accuracy = safe_float(row_dict.get("Accuracy (%)") or row_dict.get("Top-1 %"))
         results.append({
             "format": fmt_key,
             "size_mb": safe_float(row_dict.get("Size (MB)")),
@@ -131,7 +132,7 @@ def parse_benchmark_report(report_path):
             "flops_m": safe_float(row_dict.get("FLOPs (M)")),
             "latency_mean_ms": safe_float(row_dict.get("ms/img")),
             "fps": safe_float(row_dict.get("FPS")),
-            "accuracy": safe_float(row_dict.get("Accuracy (%)") or row_dict.get("Top-1 %")),
+            "accuracy": raw_accuracy / 100.0 if raw_accuracy is not None else None,
         })
 
     # Parse latency details table for P99
@@ -361,7 +362,7 @@ def main():
             "PATCH"
         )
         if ok:
-            print(f"  [OK] model_registry accuracy_top1 = {tflite_result['accuracy']}%")
+            print(f"  [OK] model_registry accuracy_top1 = {tflite_result['accuracy']*100:.1f}%")
         else:
             print(f"  [WARN] Could not update accuracy: {resp}")
 
@@ -385,11 +386,11 @@ def main():
                 diff = new_acc - prev_acc
                 prev_ver = active_rows[0]["version"]
                 if diff < 0:
-                    print(f"  [WARN] REGRESSION: v{version} accuracy ({new_acc:.1f}%) is {abs(diff):.1f}% lower than active v{prev_ver} ({prev_acc:.1f}%)")
+                    print(f"  [WARN] REGRESSION: v{version} accuracy ({new_acc*100:.1f}%) is {abs(diff)*100:.1f}% lower than active v{prev_ver} ({prev_acc*100:.1f}%)")
                 elif diff > 0:
-                    print(f"  [OK] IMPROVEMENT: v{version} accuracy ({new_acc:.1f}%) is +{diff:.1f}% over active v{prev_ver} ({prev_acc:.1f}%)")
+                    print(f"  [OK] IMPROVEMENT: v{version} accuracy ({new_acc*100:.1f}%) is +{diff*100:.1f}% over active v{prev_ver} ({prev_acc*100:.1f}%)")
                 else:
-                    print(f"  [OK] v{version} accuracy ({new_acc:.1f}%) matches active v{prev_ver}")
+                    print(f"  [OK] v{version} accuracy ({new_acc*100:.1f}%) matches active v{prev_ver}")
 
     # Auto-activate if fewer than 2 active versions exist for this leaf_type
     encoded_leaf = urllib.parse.quote(leaf_type, safe="")

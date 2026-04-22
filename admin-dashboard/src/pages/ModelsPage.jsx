@@ -4,7 +4,7 @@ import { useData } from '../lib/DataContext'
 import { formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
-const TABS = ['Registry', 'Benchmarks', 'Upload Model', 'Validate', 'OTA Deploy']
+const TABS = ['Registry', 'Evaluation', 'Upload Model', 'Validate', 'OTA Deploy']
 
 export default function ModelsPage() {
   const { leafTypeOptions: sharedLeafTypes, dvcDatasets, refreshLeafTypes, triggerRefresh, refreshKey } = useData()
@@ -231,7 +231,7 @@ export default function ModelsPage() {
       if (!/^\d+\.\d+\.\d+$/.test(trimmedVersion)) throw new Error('Version must be in semver format (e.g. 1.0.0).')
       if (form.accuracy_top1 !== '' && form.accuracy_top1 != null) {
         const acc = Number(form.accuracy_top1)
-        if (isNaN(acc) || acc < 0 || acc > 100) throw new Error('Accuracy must be between 0 and 100.')
+        if (isNaN(acc) || acc < 0 || acc > 1) throw new Error('Accuracy must be between 0 and 1 (e.g. 0.87).')
       }
       // If version changed, cascade rename to benchmarks & version archives
       const versionChanged = trimmedVersion !== editModal.version
@@ -295,7 +295,7 @@ export default function ModelsPage() {
       }
       if (!m.accuracy_top1) warnings.push('No accuracy metric recorded')
       const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
-      if (!hasBench) warnings.push('No benchmark evaluation results')
+      if (!hasBench) warnings.push('No evaluation results')
       const issues = [...errors, ...warnings]
       setValidateResult(r => ({ ...r, [m.id]: { ok: errors.length === 0, issues, errors, warnings } }))
     } finally {
@@ -306,7 +306,7 @@ export default function ModelsPage() {
   const activateModel = async (m) => {
     const hasBench = benchmarks.some(b => b.leaf_type === m.leaf_type && b.version === m.version)
     if (!hasBench || !m.model_url || !m.sha256_checksum || m.sha256_checksum === 'pending') {
-      setError('Cannot activate: model must have benchmarks, a valid URL, and SHA-256 checksum.')
+      setError('Cannot activate: model must have evaluation results, a valid URL, and SHA-256 checksum.')
       return
     }
     setConfirmAction({
@@ -368,7 +368,7 @@ export default function ModelsPage() {
     const isLastModel = sameLeafModels.length <= 1
     const message = isLastModel
       ? `This is the LAST model for "${m.leaf_type}". Deleting it means no models will be available for OTA. The leaf type will still be available for new uploads.\n\nPermanently delete "${m.display_name || m.leaf_type}" v${m.version}?`
-      : `Permanently delete "${m.display_name || m.leaf_type}" v${m.version}? This will remove the model file from storage, benchmarks, and the registry entry. This cannot be undone.`
+      : `Permanently delete "${m.display_name || m.leaf_type}" v${m.version}? This will remove the model file from storage, evaluation records, and the registry entry. This cannot be undone.`
 
     setConfirmAction({
       title: 'Delete Model Version',
@@ -613,8 +613,8 @@ export default function ModelsPage() {
     const orphaned = benchmarks.filter(b => !registryKeys.has(`${b.leaf_type}|${b.version}`))
     if (!orphaned.length) return
     setConfirmAction({
-      title: 'Purge Orphaned Benchmarks',
-      message: `Delete ${orphaned.length} benchmark records for model versions that no longer exist in registry? This cannot be undone.`,
+      title: 'Purge Orphaned Evaluation Records',
+      message: `Delete ${orphaned.length} evaluation records for model versions that no longer exist in registry? This cannot be undone.`,
       danger: true,
       confirmLabel: `Delete ${orphaned.length} records`,
       onConfirm: async () => {
@@ -695,7 +695,7 @@ export default function ModelsPage() {
                     : 'Pipeline failed'}
                 </strong>
                 {isRunning && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Convert PTH → ONNX → TFLite → Validate → Evaluate → Upload results</div>}
-                {isSuccess && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Benchmark results are now available in the Benchmarks tab.</div>}
+                {isSuccess && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Evaluation results are now available in the Evaluation tab.</div>}
                 {isFailed && pipelineRuns[0]?.error_message && <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>{pipelineRuns[0].error_message}</div>}
               </div>
             </div>
@@ -762,7 +762,7 @@ export default function ModelsPage() {
                         <td>{m.num_classes || '—'}</td>
                         <td>
                           {m.accuracy_top1
-                            ? <span className={`badge ${parseFloat(m.accuracy_top1) >= 95 ? 'badge-green' : parseFloat(m.accuracy_top1) >= 85 ? 'badge-yellow' : 'badge-red'}`}>{m.accuracy_top1}%</span>
+                            ? <span className={`badge ${parseFloat(m.accuracy_top1) >= 0.95 ? 'badge-green' : parseFloat(m.accuracy_top1) >= 0.85 ? 'badge-yellow' : 'badge-red'}`}>{(parseFloat(m.accuracy_top1) * 100).toFixed(1)}%</span>
                             : <span style={{ color: '#94a3b8' }}>—</span>}
                         </td>
                         <td>
@@ -802,7 +802,7 @@ export default function ModelsPage() {
                               </svg>
                               <div>
                                 {validateResult[m.id].ok && !validateResult[m.id].warnings?.length
-                                  ? 'All checks passed — model URL reachable, metadata complete, benchmarks available.'
+                                  ? 'All checks passed — model URL reachable, metadata complete, evaluation available.'
                                   : <>
                                       {(validateResult[m.id].errors || []).map((e, i) => <div key={`e${i}`} style={{ color: '#dc2626' }}>&#x2716; {e}</div>)}
                                       {(validateResult[m.id].warnings || []).map((w, i) => <div key={`w${i}`} style={{ color: '#d97706' }}>&#x26A0; {w}</div>)}
@@ -845,7 +845,7 @@ export default function ModelsPage() {
                                     <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', background: 'rgba(0,0,0,0.02)', borderRadius: 6 }}>
                                       <span className="badge badge-gray">v{v.version}</span>
                                       <span style={{ color: '#64748b' }}>{v.display_name}</span>
-                                      {v.accuracy && <span className="badge badge-yellow">{v.accuracy}%</span>}
+                                      {v.accuracy != null && <span className="badge badge-yellow">{(v.accuracy * 100).toFixed(1)}%</span>}
                                       <span style={{ color: '#94a3b8', marginLeft: 'auto' }}>Archived {new Date(v.archived_at).toLocaleDateString()}</span>
                                     </div>
                                   ))}
@@ -865,8 +865,8 @@ export default function ModelsPage() {
         </>
       )}
 
-      {/* ── Benchmarks Tab ── */}
-      {tab === 'Benchmarks' && (
+      {/* ── Evaluation Tab ── */}
+      {tab === 'Evaluation' && (
         <>
           {/* Filters */}
           <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
@@ -898,7 +898,7 @@ export default function ModelsPage() {
             </div>
           </div>
 
-          {/* Benchmark results for selected leaf + version */}
+          {/* Evaluation results for selected leaf + version */}
           {(() => {
             const modelBench = getBenchmarksForModel(activeBenchLeaf, resolvedBenchVersion)
             const model = models.find(m => m.leaf_type === activeBenchLeaf && m.version === resolvedBenchVersion)
@@ -907,8 +907,8 @@ export default function ModelsPage() {
             if (!activeBenchLeaf || !modelBench.length) return (
               <div className="card" style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
                 {benchmarks.length === 0
-                  ? 'No benchmark data available. Run the pipeline from the Validate tab to generate benchmarks.'
-                  : 'No benchmarks for this selection.'}
+                  ? 'No evaluation data available. Run the pipeline from the Validate tab to generate evaluation results.'
+                  : 'No evaluation data for this selection.'}
               </div>
             )
 
@@ -924,7 +924,7 @@ export default function ModelsPage() {
                 <div className="card-header">
                   <div>
                     <div className="card-label">{model?.display_name || activeBenchLeaf.replace(/_/g, ' ')}</div>
-                    <div className="card-title">v{resolvedBenchVersion} — Full Benchmark Results</div>
+                    <div className="card-title">v{resolvedBenchVersion} — Full Evaluation Results</div>
                   </div>
                   {model && (
                     <span className={`badge ${(model.status || 'staging') === 'active' ? 'badge-green' : (model.status || 'staging') === 'backup' ? 'badge-gray' : 'badge-yellow'}`}>
@@ -936,7 +936,7 @@ export default function ModelsPage() {
                 {/* Summary metrics cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                   {[
-                    { label: 'Accuracy', value: activeTflite?.accuracy != null ? `${activeTflite.accuracy.toFixed(4)}%` : '—', color: '#16a34a' },
+                    { label: 'Accuracy', value: activeTflite?.accuracy != null ? `${(activeTflite.accuracy * 100).toFixed(1)}%` : '—', color: '#16a34a' },
                     { label: 'F1 Score', value: activeTflite?.f1_macro != null ? activeTflite.f1_macro.toFixed(4) : '—', color: '#0284c7' },
                     { label: 'Latency', value: activeTflite?.latency_mean_ms != null ? `${activeTflite.latency_mean_ms.toFixed(1)} ms` : '—', color: '#7c3aed' },
                     { label: 'Model Size', value: activeTflite?.size_mb != null ? `${activeTflite.size_mb.toFixed(2)} MB` : '—', color: '#ca8a04' },
@@ -964,7 +964,7 @@ export default function ModelsPage() {
                         {formats.map(b => (
                           <tr key={b.format}>
                             <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tensorrt_fp16' ? 'TensorRT (f16)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
-                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 85 ? 'badge-green' : 'badge-yellow'}`}>{b.accuracy.toFixed(4)}%</span> : '—'}</td>
+                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 0.85 ? 'badge-green' : 'badge-yellow'}`}>{(b.accuracy * 100).toFixed(1)}%</span> : '—'}</td>
                             <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
                             <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
                             <td>{b.f1_macro != null ? b.f1_macro.toFixed(4) : '—'}</td>
@@ -1034,7 +1034,7 @@ export default function ModelsPage() {
               <br />2. Validate cross-format consistency (PyTorch vs ONNX vs TFLite)
               <br />3. Run full evaluation (accuracy, precision, recall, F1, latency, etc.)
               <br />4. Upload the converted <strong>.tflite</strong> to Supabase Storage for OTA
-              <br />The model starts as <strong>staging</strong> — review benchmarks before activating.
+              <br />The model starts as <strong>staging</strong> — review evaluation results before activating.
             </div>
           </div>
 
@@ -1149,7 +1149,7 @@ export default function ModelsPage() {
             )}
 
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#166534' }}>
-              <strong>Full Pipeline:</strong> .pth → ONNX → TFLite → cross-format validation → full evaluation. The converted <strong>.tflite</strong> and SHA-256 checksum will be set automatically. Model starts as <strong>staging</strong> — review benchmarks before activating.
+              <strong>Full Pipeline:</strong> .pth → ONNX → TFLite → cross-format validation → full evaluation. The converted <strong>.tflite</strong> and SHA-256 checksum will be set automatically. Model starts as <strong>staging</strong> — review evaluation results before activating.
             </div>
 
             {uploading && (
@@ -1192,7 +1192,7 @@ export default function ModelsPage() {
               <strong>1. Format conversion</strong> — Converts .pth checkpoint to ONNX (opset 17) and TFLite (via onnx2tf).<br />
               <strong>2. Cross-format validation</strong> — Checks ONNX and TFLite produce consistent outputs vs PyTorch (tolerance: 1e-4, using 5 random inputs).<br />
               <strong>3. Full evaluation</strong> — Runs all 3 formats on the real test dataset (20% stratified split). Measures accuracy, precision, recall, F1, latency, FPS, model size.<br />
-              <strong>4. Upload results</strong> — Uploads converted .tflite to Supabase Storage, writes metrics to database. View in Benchmarks tab.
+              <strong>4. Upload results</strong> — Uploads converted .tflite to Supabase Storage, writes metrics to database. View in Evaluation tab.
             </div>
 
             <div className="form-group">
@@ -1219,7 +1219,7 @@ export default function ModelsPage() {
 
             <div className="alert alert-info" style={{ marginBottom: 12 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              <div>Dispatches <code>model-pipeline.yml</code> workflow. Requires GitHub token in <strong>Settings → Integrations</strong>. Results appear in Benchmarks tab after ~5-10 minutes.</div>
+              <div>Dispatches <code>model-pipeline.yml</code> workflow. Requires GitHub token in <strong>Settings → Integrations</strong>. Results appear in Evaluation tab after ~5-10 minutes.</div>
             </div>
 
             {valMsg && (
@@ -1304,7 +1304,7 @@ export default function ModelsPage() {
           <div style={{ fontSize: 12, fontWeight: 600, color: '#3d4f62', marginBottom: 8 }}>Deployment Status — {models.find(m => m.leaf_type === activeRegLeaf)?.display_name || activeRegLeaf.replace(/_/g, ' ')}</div>
           <table>
             <thead>
-              <tr><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Benchmarked</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Version</th><th>Model URL</th><th>SHA-256</th><th>Evaluated</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {otaModels.map(m => {
@@ -1343,7 +1343,7 @@ export default function ModelsPage() {
             <strong>Deployment checklist:</strong> A model is OTA-ready when all conditions are met:
             <br />1. Model file uploaded to Supabase Storage (model_url set)
             <br />2. SHA-256 checksum recorded (for integrity verification on device)
-            <br />3. Benchmark evaluation completed (accuracy verified)
+            <br />3. Evaluation completed (accuracy verified)
             <br />4. Model set to Active (status = 'active', max 2 per dataset)
           </div>
         </div>
@@ -1373,8 +1373,8 @@ export default function ModelsPage() {
                 <input className="form-input" value={form.model_url} onChange={e => setForm(f => ({ ...f, model_url: e.target.value }))} placeholder="https://…" />
               </div>
               <div className="form-group">
-                <label className="form-label">Accuracy (%)</label>
-                <input className="form-input" type="number" value={form.accuracy_top1} onChange={e => setForm(f => ({ ...f, accuracy_top1: e.target.value }))} />
+                <label className="form-label">Accuracy (0–1)</label>
+                <input className="form-input" type="number" step="0.01" min="0" max="1" value={form.accuracy_top1} onChange={e => setForm(f => ({ ...f, accuracy_top1: e.target.value }))} />
               </div>
               <div className="form-group">
                 <label className="form-label">SHA-256 Checksum</label>

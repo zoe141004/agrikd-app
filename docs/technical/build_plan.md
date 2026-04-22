@@ -866,7 +866,7 @@ Implement 7 Business Requirements for model version management, hide confidence 
 
 **New files:**
 - `database/migrations/007_multi_version.sql`
-- `mobile_app/lib/providers/benchmark_provider.dart`
+- `mobile_app/lib/providers/evaluation_provider.dart`
 
 **Verification:**
 - `flutter analyze` — 0 issues

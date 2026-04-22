@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/core/utils/format_helpers.dart';
-import 'package:app/providers/benchmark_provider.dart';
+import 'package:app/providers/evaluation_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 
 class EvaluationScreen extends ConsumerWidget {
@@ -12,7 +12,7 @@ class EvaluationScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final benchState = ref.watch(benchmarkProvider);
+    final evalState = ref.watch(evaluationProvider);
     final syncState = ref.watch(syncProvider);
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -25,51 +25,53 @@ class EvaluationScreen extends ConsumerWidget {
           if (syncState.pendingModelUpdates.isNotEmpty) ...[
             _SectionLabel(S.get('model_updates')),
             const SizedBox(height: 8),
-            ...syncState.pendingModelUpdates.map((update) {
-              final modelInfo = ModelConstants.getModel(update.leafType);
-              final isDownloading =
-                  syncState.downloadingLeafType == update.leafType;
-              return Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  leading: Icon(
-                    Icons.system_update_alt,
-                    color: colorScheme.primary,
-                  ),
-                  title: Text(modelInfo.localizedName(S.locale)),
-                  subtitle: Text('v${update.version}'),
-                  trailing: isDownloading
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : FilledButton.tonal(
-                          onPressed: () {
-                            ref
-                                .read(syncProvider.notifier)
-                                .downloadUpdate(update.leafType);
-                          },
-                          child: Text(S.get('download')),
-                        ),
-                ),
-              );
-            }),
+            ...syncState.pendingModelUpdates
+                .where((u) => ModelConstants.models.containsKey(u.leafType))
+                .map((update) {
+                  final modelInfo = ModelConstants.getModel(update.leafType);
+                  final isDownloading =
+                      syncState.downloadingLeafType == update.leafType;
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.system_update_alt,
+                        color: colorScheme.primary,
+                      ),
+                      title: Text(modelInfo.localizedName(S.locale)),
+                      subtitle: Text('v${update.version}'),
+                      trailing: isDownloading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : FilledButton.tonal(
+                              onPressed: () {
+                                ref
+                                    .read(syncProvider.notifier)
+                                    .downloadUpdate(update.leafType);
+                              },
+                              child: Text(S.get('download')),
+                            ),
+                    ),
+                  );
+                }),
             const SizedBox(height: 8),
           ],
 
-          // Benchmark metrics section
+          // Evaluation metrics section
           _SectionLabel(S.get('evaluation_sub')),
           const SizedBox(height: 8),
 
-          if (benchState.isLoading)
+          if (evalState.isLoading)
             const Center(
               child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 32),
                 child: CircularProgressIndicator(),
               ),
             )
-          else if (benchState.benchmarks.isEmpty)
+          else if (evalState.evaluations.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 32),
@@ -89,7 +91,7 @@ class EvaluationScreen extends ConsumerWidget {
             )
           else
             ...ModelConstants.availableLeafTypes.map((leafType) {
-              final bench = benchState.benchmarks[leafType];
+              final eval = evalState.evaluations[leafType];
               final modelInfo = ModelConstants.getModel(leafType);
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -107,9 +109,9 @@ class EvaluationScreen extends ConsumerWidget {
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
-                          if (bench != null)
+                          if (eval != null)
                             Text(
-                              'v${bench.version}',
+                              'v${eval.version}',
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
@@ -117,7 +119,7 @@ class EvaluationScreen extends ConsumerWidget {
                             ),
                         ],
                       ),
-                      if (bench == null) ...[
+                      if (eval == null) ...[
                         const SizedBox(height: 8),
                         Text(
                           S.get('model_specs_unavailable'),
@@ -128,51 +130,51 @@ class EvaluationScreen extends ConsumerWidget {
                         const SizedBox(height: 12),
                         _MetricRow(
                           S.get('spec_accuracy'),
-                          formatPercent(bench.accuracy),
+                          formatPercent(eval.accuracy),
                           colorScheme,
                           highlight: true,
                         ),
                         _MetricRow(
                           S.get('spec_precision'),
-                          formatPercent(bench.precisionMacro),
+                          formatPercent(eval.precisionMacro),
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_recall'),
-                          formatPercent(bench.recallMacro),
+                          formatPercent(eval.recallMacro),
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_f1'),
-                          formatPercent(bench.f1Macro),
+                          formatPercent(eval.f1Macro),
                           colorScheme,
                         ),
                         const Divider(height: 20),
                         _MetricRow(
                           S.get('spec_latency'),
-                          bench.latencyMeanMs != null
-                              ? '${bench.latencyMeanMs!.toStringAsFixed(1)} ms'
+                          eval.latencyMeanMs != null
+                              ? '${eval.latencyMeanMs!.toStringAsFixed(1)} ms'
                               : '—',
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_size'),
-                          bench.sizeMb != null
-                              ? '${bench.sizeMb!.toStringAsFixed(2)} MB'
+                          eval.sizeMb != null
+                              ? '${eval.sizeMb!.toStringAsFixed(2)} MB'
                               : '—',
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_params'),
-                          bench.paramsM != null
-                              ? '${bench.paramsM!.toStringAsFixed(2)} M'
+                          eval.paramsM != null
+                              ? '${eval.paramsM!.toStringAsFixed(2)} M'
                               : '—',
                           colorScheme,
                         ),
                         _MetricRow(
                           S.get('spec_flops'),
-                          bench.flopsM != null
-                              ? '${bench.flopsM!.toStringAsFixed(1)} M'
+                          eval.flopsM != null
+                              ? '${eval.flopsM!.toStringAsFixed(1)} M'
                               : '—',
                           colorScheme,
                         ),
@@ -184,7 +186,7 @@ class EvaluationScreen extends ConsumerWidget {
             }),
 
           if (syncState.pendingModelUpdates.isEmpty &&
-              benchState.benchmarks.isNotEmpty) ...[
+              evalState.evaluations.isNotEmpty) ...[
             const SizedBox(height: 8),
             Center(
               child: Text(

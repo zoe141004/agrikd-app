@@ -243,7 +243,6 @@ class S {
     'err_image_not_found': 'The image file was not found. Please try again.',
     'err_diagnosis_failed':
         'Could not analyze the leaf. Please try with a clearer photo.',
-    'err_benchmark_failed': 'Benchmark could not complete. Please try again.',
 
     // Evaluation (remote model metrics + manual model updates)
     'evaluation': 'Evaluation',
@@ -253,24 +252,6 @@ class S {
     'download': 'Download',
     'downloading': 'Downloading...',
     'model_update_none': 'All models are up to date',
-
-    // Benchmark
-    'benchmark': 'Benchmark',
-    'benchmark_sub': 'Test model speed on this device',
-    'run_benchmark': 'Run Benchmark',
-    'running_benchmark': 'Running benchmark...',
-    'benchmark_done': 'Benchmark complete',
-    'copy_report': 'Copy Report',
-    'report_copied': 'Report copied to clipboard',
-    'warm_up': 'Warm-up',
-    'iterations': '{0} iterations',
-    'delegate': 'Delegate',
-    'model_size': 'Model size',
-    'lat_mean': 'Mean',
-    'lat_min': 'Min',
-    'lat_max': 'Max',
-    'lat_p99': 'P99',
-    'fps': 'FPS',
 
     // Filters
     'clear': 'Clear',
@@ -540,25 +521,6 @@ class S {
     'err_image_not_found': 'Không tìm thấy ảnh. Vui lòng thử lại.',
     'err_diagnosis_failed':
         'Không thể phân tích lá. Vui lòng thử với ảnh rõ hơn.',
-    'err_benchmark_failed': 'Đo hiệu năng thất bại. Vui lòng thử lại.',
-
-    // Benchmark
-    'benchmark': 'Đo hiệu năng',
-    'benchmark_sub': 'Kiểm tra tốc độ mô hình trên thiết bị',
-    'run_benchmark': 'Chạy đo hiệu năng',
-    'running_benchmark': 'Đang đo hiệu năng...',
-    'benchmark_done': 'Đo hiệu năng xong',
-    'copy_report': 'Sao chép báo cáo',
-    'report_copied': 'Đã sao chép báo cáo',
-    'warm_up': 'Khởi động',
-    'iterations': '{0} lần chạy',
-    'delegate': 'Delegate',
-    'model_size': 'Kích thước mô hình',
-    'lat_mean': 'Trung bình',
-    'lat_min': 'Thấp nhất',
-    'lat_max': 'Cao nhất',
-    'lat_p99': 'P99',
-    'fps': 'FPS',
 
     // Evaluation (remote model metrics)
     'evaluation': 'Đánh giá mô hình',
