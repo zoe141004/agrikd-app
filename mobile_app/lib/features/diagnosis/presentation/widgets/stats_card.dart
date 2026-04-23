@@ -102,8 +102,11 @@ class _StatsCardState extends ConsumerState<StatsCard> {
     final leafType = diseaseRow['leaf_type'] as String?;
     if (leafType != null) {
       try {
-        final m = ModelConstants.getModel(leafType);
-        return m.localizedClassName(rawName, S.locale);
+        final m = ModelConstants.tryGetModel(leafType);
+        if (m != null) {
+          return m.localizedClassName(rawName, S.locale);
+        }
+        return LeafModelInfo.cleanLabel(rawName);
       } catch (e) {
         debugPrint('[StatsCard] Label localization failed: $e');
         return LeafModelInfo.cleanLabel(rawName);

@@ -93,13 +93,19 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     }
 
     // 2. Fallback to bundled asset (ultimate fallback)
-    final modelInfo = ModelConstants.getModel(leafType);
+    final modelInfo = ModelConstants.tryGetModel(leafType);
+    if (modelInfo?.assetPath == null) {
+      throw StateError(
+        'No model available for leaf type "$leafType". '
+        'Download a model from Settings first.',
+      );
+    }
     final bundledVersion =
         (active != null && (active['is_bundled'] as int) == 1)
         ? active['version'] as String
         : '1.0.0';
     await _inferenceService.loadModel(
-      modelInfo.assetPath,
+      modelInfo!.assetPath!,
       leafType: leafType,
       version: bundledVersion,
     );
@@ -134,10 +140,12 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
         debugPrint('[DiagnosisRepo] Failed to decode class labels: $e');
       }
     }
-    // Fallback to bundled constants
-    final modelInfo = ModelConstants.getModel(leafType);
-    _loadedClassLabels = modelInfo.classLabels;
-    _loadedNumClasses = modelInfo.numClasses;
+    // Fallback to bundled constants (if available)
+    final modelInfo = ModelConstants.tryGetModel(leafType);
+    if (modelInfo != null) {
+      _loadedClassLabels = modelInfo.classLabels;
+      _loadedNumClasses = modelInfo.numClasses;
+    }
   }
 
   @override
@@ -169,9 +177,13 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
       );
     }
 
-    // 3. Validate leaf type
-    if (!ModelConstants.availableLeafTypes.contains(leafType)) {
-      throw ArgumentError('Unknown leaf type: $leafType');
+    // 3. Validate leaf type — must be bundled or have a downloaded model in DB
+    final hasBundled = ModelConstants.availableLeafTypes.contains(leafType);
+    if (!hasBundled) {
+      final dbModel = await _modelDao.getSelected(leafType);
+      if (dbModel == null) {
+        throw ArgumentError('Unknown leaf type: $leafType');
+      }
     }
 
     // 4. Load model if needed (with OTA fallback chain)
@@ -182,9 +194,9 @@ class DiagnosisRepositoryImpl implements DiagnosisRepository {
     final input = await compute(preprocessImageFromPath, normalizedPath);
 
     // 6. Run inference (must stay on main thread — native TFLite pointer)
-    final modelInfo = ModelConstants.getModel(leafType);
-    final numClasses = _loadedNumClasses ?? modelInfo.numClasses;
-    final classLabels = _loadedClassLabels ?? modelInfo.classLabels;
+    final bundledInfo = ModelConstants.tryGetModel(leafType);
+    final numClasses = _loadedNumClasses ?? bundledInfo?.numClasses ?? 0;
+    final classLabels = _loadedClassLabels ?? bundledInfo?.classLabels ?? [];
     final result = _inferenceService.runInference(input, numClasses);
 
     // 7. Build prediction

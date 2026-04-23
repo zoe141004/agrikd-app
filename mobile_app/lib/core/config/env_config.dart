@@ -16,21 +16,30 @@ class EnvConfig {
   );
   static const _kSentryDsn = String.fromEnvironment('SENTRY_DSN');
 
+  /// Safe dotenv lookup — returns empty string if dotenv is not initialized
+  /// (e.g., .env file missing in debug build without --dart-define).
+  static String _env(String key) {
+    try {
+      return dotenv.env[key] ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// Supabase project URL.
   static String get supabaseUrl =>
-      _kUrl.isNotEmpty ? _kUrl : (dotenv.env['SUPABASE_URL'] ?? '');
+      _kUrl.isNotEmpty ? _kUrl : _env('SUPABASE_URL');
 
   /// Supabase anonymous (publishable) key.
-  static String get supabaseAnonKey => _kAnonKey.isNotEmpty
-      ? _kAnonKey
-      : (dotenv.env['SUPABASE_ANON_KEY'] ?? '');
+  static String get supabaseAnonKey =>
+      _kAnonKey.isNotEmpty ? _kAnonKey : _env('SUPABASE_ANON_KEY');
 
   /// Google OAuth Web Client ID for Google Sign-In.
   static String get googleWebClientId => _kGoogleClientId.isNotEmpty
       ? _kGoogleClientId
-      : (dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '');
+      : _env('GOOGLE_WEB_CLIENT_ID');
 
   /// Sentry DSN for error tracking.
   static String get sentryDsn =>
-      _kSentryDsn.isNotEmpty ? _kSentryDsn : (dotenv.env['SENTRY_DSN'] ?? '');
+      _kSentryDsn.isNotEmpty ? _kSentryDsn : _env('SENTRY_DSN');
 }

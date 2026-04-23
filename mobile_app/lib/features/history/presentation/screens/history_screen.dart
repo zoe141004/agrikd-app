@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/history_provider.dart';
 import 'detail_screen.dart';
 import 'stats_screen.dart';
@@ -124,6 +125,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(historyProvider);
     final colorScheme = Theme.of(context).colorScheme;
+    final availableModels = ref.watch(availableModelsProvider);
     final hasDateFilter =
         state.filterStartDate != null && state.filterEndDate != null;
 
@@ -195,7 +197,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           value: null,
                           child: Text(S.get('all_types')),
                         ),
-                        ...ModelConstants.models.values.map((model) {
+                        ...availableModels.values.map((model) {
                           return PopupMenuItem<String?>(
                             value: model.leafType,
                             child: Text(model.localizedName(S.locale)),
@@ -206,9 +208,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           ? InputChip(
                               avatar: const Icon(Icons.filter_list, size: 18),
                               label: Text(
-                                ModelConstants.getModel(
-                                  state.filterLeafType!,
-                                ).localizedName(S.locale),
+                                (availableModels[state.filterLeafType!] ??
+                                            ModelConstants.tryGetModel(
+                                              state.filterLeafType!,
+                                            ))
+                                        ?.localizedName(S.locale) ??
+                                    LeafModelInfo.cleanLabel(
+                                      state.filterLeafType!,
+                                    ),
                               ),
                               onPressed: () {},
                               onDeleted: () {
@@ -306,9 +313,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                             }
 
                             final prediction = state.predictions[index];
-                            final predModelInfo = ModelConstants.getModel(
-                              prediction.leafType,
-                            );
+                            final predModelInfo =
+                                availableModels[prediction.leafType] ??
+                                ModelConstants.tryGetModel(prediction.leafType);
 
                             return Card(
                               margin: const EdgeInsets.symmetric(
@@ -326,10 +333,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                   ),
                                 ),
                                 title: Text(
-                                  predModelInfo.localizedClassName(
-                                    prediction.predictedClassName,
-                                    S.locale,
-                                  ),
+                                  predModelInfo?.localizedClassName(
+                                        prediction.predictedClassName,
+                                        S.locale,
+                                      ) ??
+                                      LeafModelInfo.cleanLabel(
+                                        prediction.predictedClassName,
+                                      ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),

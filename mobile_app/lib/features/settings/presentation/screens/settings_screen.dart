@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/core/utils/format_helpers.dart';
 import 'package:app/providers/auth_provider.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/evaluation_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
 import 'package:app/providers/settings_provider.dart';
@@ -30,6 +30,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final currentTheme = settings['theme'] ?? 'system';
     final defaultLeafType = settings['default_leaf_type'] ?? 'tomato';
     final autoSync = settings['auto_sync'] != 'false';
+    final availableModels = ref.watch(availableModelsProvider);
+    final leafTypes = ref.watch(allLeafTypesProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(S.get('settings'))),
@@ -70,9 +72,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 leading: const Icon(Icons.eco),
                 title: Text(S.get('default_crop')),
                 subtitle: Text(
-                  ModelConstants.getModel(
-                    defaultLeafType,
-                  ).localizedName(S.locale),
+                  availableModels[defaultLeafType]?.localizedName(S.locale) ??
+                      defaultLeafType,
                 ),
                 onTap: () => _showLeafTypePicker(notifier, defaultLeafType),
               ),
@@ -148,11 +149,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Builder(
                 builder: (context) {
                   final syncState = ref.watch(syncProvider);
-                  final updates = syncState.pendingModelUpdates
-                      .where(
-                        (u) => ModelConstants.models.containsKey(u.leafType),
-                      )
-                      .toList();
+                  final updates = syncState.pendingModelUpdates;
                   if (updates.isEmpty) return const SizedBox.shrink();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,14 +157,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       const Divider(),
                       _SectionHeader(S.get('model_updates')),
                       ...updates.map((update) {
+                        final dl = syncState.downloadingModel;
                         final isDownloading =
-                            syncState.downloadingLeafType == update.leafType;
-                        final modelInfo = ModelConstants.getModel(
-                          update.leafType,
-                        );
+                            dl?.leafType == update.leafType &&
+                            dl?.version == update.version;
+                        final displayName =
+                            availableModels[update.leafType]?.localizedName(
+                              S.locale,
+                            ) ??
+                            update.displayName ??
+                            update.leafType;
                         return ListTile(
                           leading: const Icon(Icons.system_update_alt),
-                          title: Text(modelInfo.localizedName(S.locale)),
+                          title: Text(displayName),
                           subtitle: Text(
                             isDownloading
                                 ? S.get('downloading')
@@ -185,7 +187,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   onPressed: () {
                                     ref
                                         .read(syncProvider.notifier)
-                                        .downloadUpdate(update.leafType);
+                                        .downloadUpdate(
+                                          update.leafType,
+                                          update.version,
+                                        );
                                   },
                                   child: Text(S.get('download')),
                                 ),
@@ -240,8 +245,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: Text(S.get('app_name')),
                 subtitle: Text(S.get('app_version')),
               ),
-              ...ModelConstants.availableLeafTypes.map((leafType) {
-                final modelInfo = ModelConstants.getModel(leafType);
+              ...leafTypes.map((leafType) {
+                final modelInfo = availableModels[leafType];
+                if (modelInfo == null) return const SizedBox.shrink();
                 return ListTile(
                   leading: const Icon(Icons.memory),
                   title: Text(modelInfo.localizedName(S.locale)),
@@ -287,12 +293,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _showLeafTypePicker(SettingsNotifier notifier, String current) {
+    final models = ref.read(availableModelsProvider);
+    final types = ref.read(allLeafTypesProvider);
     showDialog(
       context: context,
       builder: (context) => SimpleDialog(
         title: Text(S.get('default_crop')),
-        children: ModelConstants.availableLeafTypes.map((type) {
-          final info = ModelConstants.getModel(type);
+        children: types.map((type) {
+          final info = models[type];
           return SimpleDialogOption(
             onPressed: () {
               notifier.setValue('default_leaf_type', type);
@@ -307,7 +315,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   color: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(width: 12),
-                Expanded(child: Text(info.localizedName(S.locale))),
+                Expanded(child: Text(info?.localizedName(S.locale) ?? type)),
               ],
             ),
           );
@@ -380,11 +388,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mvState.isLoading) return const Text('...');
 
     final versions = mvState.versions[leafType] ?? [];
-    final selected = versions.where((v) => v.isSelected).firstOrNull;
-    if (selected == null) return Text(S.get('no_data'));
+    if (versions.isEmpty) return Text(S.get('no_data'));
 
-    final label = 'v${selected.version}${selected.isBundled ? '' : ' (OTA)'}';
-    return Text(label);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: versions.map((v) {
+        final tag = v.isBundled ? 'Bundled' : 'OTA';
+        final marker = v.isSelected ? ' \u2713' : '';
+        return Text('v${v.version} ($tag)$marker');
+      }).toList(),
+    );
   }
 
   void _showModelSpecsSheet(
@@ -394,7 +407,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   ) {
     final evalState = ref.read(evaluationProvider);
     final eval = evalState.evaluations[leafType];
-    final modelInfo = ModelConstants.getModel(leafType);
+    final models = ref.read(availableModelsProvider);
+    final modelInfo = models[leafType];
+    final displayName = modelInfo?.localizedName(S.locale) ?? leafType;
 
     showModalBottomSheet(
       context: context,
@@ -427,7 +442,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  modelInfo.localizedName(S.locale),
+                  displayName,
                   style: Theme.of(
                     context,
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),

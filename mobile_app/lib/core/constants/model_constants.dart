@@ -3,7 +3,7 @@ class LeafModelInfo {
   final String displayName;
   final String vietnameseName;
   final String englishName;
-  final String assetPath;
+  final String? assetPath;
   final int numClasses;
   final List<String> classLabels;
   final Map<String, String> classDisplayNames;
@@ -14,12 +14,40 @@ class LeafModelInfo {
     required this.displayName,
     required this.vietnameseName,
     required this.englishName,
-    required this.assetPath,
+    this.assetPath,
     required this.numClasses,
     required this.classLabels,
     required this.classDisplayNames,
     required this.classEnglishNames,
   });
+
+  /// Build a LeafModelInfo from server/DB data (for OTA-only models not bundled in app).
+  factory LeafModelInfo.fromServer({
+    required String leafType,
+    required int numClasses,
+    required List<String> classLabels,
+    String? displayName,
+  }) {
+    final name = displayName ?? _capitalize(leafType.replaceAll('_', ' '));
+    final cleanedNames = {for (final l in classLabels) l: cleanLabel(l)};
+    return LeafModelInfo(
+      leafType: leafType,
+      displayName: name,
+      vietnameseName: name,
+      englishName: name,
+      numClasses: numClasses,
+      classLabels: classLabels,
+      classDisplayNames: cleanedNames,
+      classEnglishNames: cleanedNames,
+    );
+  }
+
+  static String _capitalize(String s) {
+    return s
+        .split(' ')
+        .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
 
   /// Labels for diseases only (excludes any "healthy" class).
   List<String> get diseaseLabels =>
@@ -141,6 +169,9 @@ class ModelConstants {
     }
     return model;
   }
+
+  /// Returns null instead of throwing for unknown leaf types (server-only models).
+  static LeafModelInfo? tryGetModel(String leafType) => models[leafType];
 
   static List<String> get availableLeafTypes => models.keys.toList();
 

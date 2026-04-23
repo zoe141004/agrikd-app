@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/core/utils/format_helpers.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/evaluation_provider.dart';
 import 'package:app/providers/sync_provider.dart';
 
@@ -15,6 +15,8 @@ class EvaluationScreen extends ConsumerWidget {
     final evalState = ref.watch(evaluationProvider);
     final syncState = ref.watch(syncProvider);
     final colorScheme = Theme.of(context).colorScheme;
+    final availableModels = ref.watch(availableModelsProvider);
+    final leafTypes = ref.watch(allLeafTypesProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(S.get('evaluation'))),
@@ -25,38 +27,44 @@ class EvaluationScreen extends ConsumerWidget {
           if (syncState.pendingModelUpdates.isNotEmpty) ...[
             _SectionLabel(S.get('model_updates')),
             const SizedBox(height: 8),
-            ...syncState.pendingModelUpdates
-                .where((u) => ModelConstants.models.containsKey(u.leafType))
-                .map((update) {
-                  final modelInfo = ModelConstants.getModel(update.leafType);
-                  final isDownloading =
-                      syncState.downloadingLeafType == update.leafType;
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: ListTile(
-                      leading: Icon(
-                        Icons.system_update_alt,
-                        color: colorScheme.primary,
-                      ),
-                      title: Text(modelInfo.localizedName(S.locale)),
-                      subtitle: Text('v${update.version}'),
-                      trailing: isDownloading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : FilledButton.tonal(
-                              onPressed: () {
-                                ref
-                                    .read(syncProvider.notifier)
-                                    .downloadUpdate(update.leafType);
-                              },
-                              child: Text(S.get('download')),
-                            ),
-                    ),
-                  );
-                }),
+            ...syncState.pendingModelUpdates.map((update) {
+              final dl = syncState.downloadingModel;
+              final isDownloading =
+                  dl?.leafType == update.leafType &&
+                  dl?.version == update.version;
+              final displayName =
+                  availableModels[update.leafType]?.localizedName(S.locale) ??
+                  update.displayName ??
+                  update.leafType;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: Icon(
+                    Icons.system_update_alt,
+                    color: colorScheme.primary,
+                  ),
+                  title: Text(displayName),
+                  subtitle: Text('v${update.version}'),
+                  trailing: isDownloading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : FilledButton.tonal(
+                          onPressed: () {
+                            ref
+                                .read(syncProvider.notifier)
+                                .downloadUpdate(
+                                  update.leafType,
+                                  update.version,
+                                );
+                          },
+                          child: Text(S.get('download')),
+                        ),
+                ),
+              );
+            }),
             const SizedBox(height: 8),
           ],
 
@@ -90,9 +98,14 @@ class EvaluationScreen extends ConsumerWidget {
               ),
             )
           else
-            ...ModelConstants.availableLeafTypes.map((leafType) {
+            ...leafTypes.map((leafType) {
               final eval = evalState.evaluations[leafType];
-              final modelInfo = ModelConstants.getModel(leafType);
+              final modelInfo = availableModels[leafType];
+              if (modelInfo == null && eval == null) {
+                return const SizedBox.shrink();
+              }
+              final displayName =
+                  modelInfo?.localizedName(S.locale) ?? leafType;
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: Padding(
@@ -104,7 +117,7 @@ class EvaluationScreen extends ConsumerWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              modelInfo.localizedName(S.locale),
+                              displayName,
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),

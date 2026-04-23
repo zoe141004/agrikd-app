@@ -59,9 +59,20 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
       final client = SupabaseConfig.client;
       final result = <String, ModelEvaluationInfo>{};
 
-      for (final leafType in ModelConstants.availableLeafTypes) {
+      // Discover all leaf types from local DB + bundled constants
+      final allModels = await _modelDao.getAll();
+      if (!mounted) return;
+
+      final leafTypes = <String>{
+        ...ModelConstants.availableLeafTypes,
+        ...allModels.map((m) => m['leaf_type'] as String),
+      };
+
+      for (final leafType in leafTypes) {
         // Determine the active installed version on this device
         final activeModel = await _modelDao.getSelected(leafType);
+        if (!mounted) return;
+
         final activeVersion = activeModel?['version'] as String?;
 
         List<dynamic> rows = [];
@@ -76,6 +87,7 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
               .eq('version', activeVersion)
               .limit(1)
               .timeout(const Duration(seconds: 30));
+          if (!mounted) return;
         }
 
         // Fallback to latest available if exact version has no evaluation entry
@@ -88,6 +100,7 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
               .order('version', ascending: false)
               .limit(1)
               .timeout(const Duration(seconds: 30));
+          if (!mounted) return;
         }
 
         if (rows.isNotEmpty) {
@@ -107,9 +120,11 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
         }
       }
 
+      if (!mounted) return;
       state = EvaluationState(evaluations: result);
     } catch (e) {
       debugPrint('[EvaluationProvider] Failed to load evaluations: $e');
+      if (!mounted) return;
       state = EvaluationState(evaluations: state.evaluations);
     }
   }

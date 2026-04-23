@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/features/diagnosis/domain/models/prediction.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/database_provider.dart';
 
 class DetailScreen extends ConsumerStatefulWidget {
@@ -61,11 +62,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   Widget build(BuildContext context) {
     final prediction = widget.prediction;
-    final modelInfo = ModelConstants.getModel(prediction.leafType);
-    final displayName = modelInfo.localizedClassName(
-      prediction.predictedClassName,
-      S.locale,
-    );
+    final availableModels = ref.watch(availableModelsProvider);
+    final modelInfo =
+        availableModels[prediction.leafType] ??
+        ModelConstants.tryGetModel(prediction.leafType);
+    final displayName =
+        modelInfo?.localizedClassName(
+          prediction.predictedClassName,
+          S.locale,
+        ) ??
+        LeafModelInfo.cleanLabel(prediction.predictedClassName);
 
     return Scaffold(
       appBar: AppBar(title: Text(S.get('scan_detail'))),
@@ -132,16 +138,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                         _InfoRow(
                           S.get('local_name'),
                           S.locale == 'vi'
-                              ? (modelInfo.classEnglishNames[prediction
+                              ? (modelInfo?.classEnglishNames[prediction
                                         .predictedClassName] ??
                                     prediction.predictedClassName)
-                              : (modelInfo.classDisplayNames[prediction
+                              : (modelInfo?.classDisplayNames[prediction
                                         .predictedClassName] ??
                                     prediction.predictedClassName),
                         ),
                         _InfoRow(
                           S.get('leaf_type'),
-                          modelInfo.localizedName(S.locale),
+                          modelInfo?.localizedName(S.locale) ??
+                              LeafModelInfo.cleanLabel(prediction.leafType),
                         ),
                         _InfoRow(S.get('model_ver'), prediction.modelVersion),
                         if (prediction.inferenceTimeMs != null)

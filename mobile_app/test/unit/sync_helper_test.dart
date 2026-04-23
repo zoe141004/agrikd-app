@@ -193,7 +193,7 @@ void main() {
         errorMessage: 'err',
         lastSyncedAt: now,
         pendingModelUpdates: const [update],
-        downloadingLeafType: 'tomato',
+        downloadingModel: (leafType: 'tomato', version: '2.0.0'),
       );
       final copy = state.copyWith();
       expect(copy.status, SyncStatus.success);
@@ -201,34 +201,38 @@ void main() {
       expect(copy.errorMessage, 'err');
       expect(copy.lastSyncedAt, now);
       expect(copy.pendingModelUpdates, hasLength(1));
-      expect(copy.downloadingLeafType, 'tomato');
+      expect(copy.downloadingModel?.leafType, 'tomato');
     });
 
-    test('sets downloadingLeafType', () {
+    test('sets downloadingModel', () {
       const state = SyncState();
-      final copy = state.copyWith(downloadingLeafType: 'tomato');
-      expect(copy.downloadingLeafType, 'tomato');
+      final copy = state.copyWith(
+        downloadingModel: (leafType: 'tomato', version: '1.0.0'),
+      );
+      expect(copy.downloadingModel?.leafType, 'tomato');
     });
 
-    test('clearDownloading resets downloadingLeafType to null', () {
-      const state = SyncState(downloadingLeafType: 'tomato');
+    test('clearDownloading resets downloadingModel to null', () {
+      final state = SyncState(
+        downloadingModel: (leafType: 'tomato', version: '1.0.0'),
+      );
       final copy = state.copyWith(clearDownloading: true);
-      expect(copy.downloadingLeafType, isNull);
+      expect(copy.downloadingModel, isNull);
     });
 
     test('clearDownloading when already null stays null', () {
       const state = SyncState();
       final copy = state.copyWith(clearDownloading: true);
-      expect(copy.downloadingLeafType, isNull);
+      expect(copy.downloadingModel, isNull);
     });
 
-    test('clearDownloading takes precedence over downloadingLeafType', () {
+    test('clearDownloading takes precedence over downloadingModel', () {
       const state = SyncState();
       final copy = state.copyWith(
-        downloadingLeafType: 'burmese_grape_leaf',
+        downloadingModel: (leafType: 'burmese_grape_leaf', version: '1.0.0'),
         clearDownloading: true,
       );
-      expect(copy.downloadingLeafType, isNull);
+      expect(copy.downloadingModel, isNull);
     });
 
     test('replaces pendingModelUpdates', () {

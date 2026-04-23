@@ -1,8 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/config/supabase_config.dart';
-import 'package:app/core/constants/model_constants.dart';
 import 'package:app/data/database/dao/model_dao.dart';
 import 'database_provider.dart';
 
@@ -13,6 +14,8 @@ class ModelVersionInfo {
   final String role; // 'active' or 'fallback'
   final bool isBundled;
   final bool isSelected;
+  final int numClasses;
+  final List<String> classLabels;
 
   const ModelVersionInfo({
     required this.leafType,
@@ -20,6 +23,8 @@ class ModelVersionInfo {
     required this.role,
     required this.isBundled,
     required this.isSelected,
+    required this.numClasses,
+    required this.classLabels,
   });
 }
 
@@ -42,25 +47,41 @@ class ModelVersionNotifier extends StateNotifier<ModelVersionState> {
     state = ModelVersionState(versions: state.versions, isLoading: true);
 
     try {
+      // Load ALL models from DB (discovers server-only leaf types too)
+      final allRows = await _modelDao.getAll();
+      if (!mounted) return;
+
       final result = <String, List<ModelVersionInfo>>{};
-      for (final leafType in ModelConstants.availableLeafTypes) {
-        final rows = await _modelDao.getByLeafType(leafType);
-        result[leafType] = rows
-            .map(
-              (r) => ModelVersionInfo(
-                leafType: r['leaf_type'] as String,
+      for (final r in allRows) {
+        final leafType = r['leaf_type'] as String;
+        final labelsRaw = r['class_labels'];
+        List<String> labels = [];
+        if (labelsRaw is String && labelsRaw.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(labelsRaw);
+            if (decoded is List) labels = decoded.cast<String>();
+          } catch (_) {}
+        }
+
+        result
+            .putIfAbsent(leafType, () => [])
+            .add(
+              ModelVersionInfo(
+                leafType: leafType,
                 version: r['version'] as String,
-                role: r['role'] as String,
+                role: r['role'] as String? ?? 'active',
                 isBundled: (r['is_bundled'] as int) == 1,
                 isSelected: (r['is_selected'] as int) == 1,
+                numClasses: r['num_classes'] as int? ?? labels.length,
+                classLabels: labels,
               ),
-            )
-            .toList();
+            );
       }
 
       state = ModelVersionState(versions: result);
     } catch (e) {
       debugPrint('[ModelVersion] Failed to load versions: $e');
+      if (!mounted) return;
       state = ModelVersionState(versions: state.versions, isLoading: false);
     }
   }

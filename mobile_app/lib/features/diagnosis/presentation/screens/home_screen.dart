@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/diagnosis_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
 import 'package:app/features/history/presentation/screens/history_screen.dart';
@@ -89,7 +90,7 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
   @override
   Widget build(BuildContext context) {
     final selectedLeafType = ref.watch(selectedLeafTypeProvider);
-    final allModels = ModelConstants.modelsList;
+    final allModels = ref.watch(availableModelsProvider).values.toList();
     final colorScheme = Theme.of(context).colorScheme;
 
     final filteredModels = _searchQuery.isEmpty

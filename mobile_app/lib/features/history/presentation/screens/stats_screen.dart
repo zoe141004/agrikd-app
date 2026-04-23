@@ -298,11 +298,15 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                         String displayName = rawName;
                         if (leafType != null) {
                           try {
-                            final m = ModelConstants.getModel(leafType);
-                            displayName = m.localizedClassName(
-                              rawName,
-                              S.locale,
-                            );
+                            final m = ModelConstants.tryGetModel(leafType);
+                            if (m != null) {
+                              displayName = m.localizedClassName(
+                                rawName,
+                                S.locale,
+                              );
+                            } else {
+                              displayName = LeafModelInfo.cleanLabel(rawName);
+                            }
                           } catch (e) {
                             debugPrint(
                               '[StatsScreen] Label localization failed: $e',

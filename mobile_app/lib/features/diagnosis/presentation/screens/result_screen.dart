@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:app/core/constants/model_constants.dart';
 import 'package:app/core/l10n/app_strings.dart';
 import 'package:app/features/diagnosis/domain/models/prediction.dart';
+import 'package:app/providers/available_models_provider.dart';
 import 'package:app/providers/database_provider.dart';
 import 'package:app/providers/diagnosis_provider.dart';
 import 'package:app/providers/model_version_provider.dart';
@@ -59,11 +60,16 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
       );
     }
 
-    final modelInfo = ModelConstants.getModel(widget.leafType);
-    final displayName = modelInfo.localizedClassName(
-      prediction.predictedClassName,
-      S.locale,
-    );
+    final availableModels = ref.watch(availableModelsProvider);
+    final modelInfo =
+        availableModels[widget.leafType] ??
+        ModelConstants.tryGetModel(widget.leafType);
+    final displayName =
+        modelInfo?.localizedClassName(
+          prediction.predictedClassName,
+          S.locale,
+        ) ??
+        LeafModelInfo.cleanLabel(prediction.predictedClassName);
 
     return Scaffold(
       appBar: AppBar(title: Text(S.get('your_result'))),

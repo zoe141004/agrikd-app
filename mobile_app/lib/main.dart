@@ -31,11 +31,6 @@ bool _showOfflineNotification = false;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Enforce SSL certificate validation in production builds
-  HttpOverrides.global = SslPinningHttpOverrides(
-    allowedHost: Uri.tryParse(EnvConfig.supabaseUrl)?.host ?? '',
-  );
-
   // Load .env for local dev; silently skip in production (no .env in release APK)
   try {
     await dotenv.load(fileName: '.env');
@@ -43,6 +38,12 @@ Future<void> main() async {
     debugPrint('[Main] .env not loaded (expected in production): $e');
     // Production build: .env not bundled, --dart-define values used instead
   }
+
+  // Enforce SSL certificate validation in production builds
+  // Must come AFTER dotenv.load() so EnvConfig can read .env values
+  HttpOverrides.global = SslPinningHttpOverrides(
+    allowedHost: Uri.tryParse(EnvConfig.supabaseUrl)?.host ?? '',
+  );
 
   // Initialize Sentry for error tracking (no-op if DSN is empty)
   final sentryDsn = EnvConfig.sentryDsn;
@@ -122,6 +123,7 @@ Future<void> _seedBundledModels() async {
       .map((m) => '${m['leaf_type']}@${m['version']}')
       .toSet();
   final bundledKeys = ModelConstants.models.entries
+      .where((e) => e.value.assetPath != null)
       .map((e) => '${e.value.leafType}@1.0.0')
       .toSet();
   if (bundledKeys.difference(existingKeys).isEmpty) return;
@@ -131,10 +133,13 @@ Future<void> _seedBundledModels() async {
   for (final entry in ModelConstants.models.entries) {
     final info = entry.value;
 
+    // Skip models without a bundled asset (server-only models)
+    if (info.assetPath == null) continue;
+
     // On web, skip SHA-256 checksum (asset loading for hashing not reliable)
     String checksum = '';
     if (!kIsWeb) {
-      checksum = await ModelIntegrity.sha256Asset(info.assetPath);
+      checksum = await ModelIntegrity.sha256Asset(info.assetPath!);
     }
 
     models.add({

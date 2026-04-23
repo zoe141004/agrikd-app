@@ -245,6 +245,7 @@ class SupabaseSyncService {
               sha256Checksum: row['sha256_checksum'] as String,
               classLabels: labels,
               numClasses: row['num_classes'] as int? ?? labels.length,
+              displayName: row['display_name'] as String?,
             ),
           );
         }
@@ -338,6 +339,7 @@ class ModelUpdate {
   final String sha256Checksum;
   final List<String> classLabels;
   final int numClasses;
+  final String? displayName;
 
   const ModelUpdate({
     required this.leafType,
@@ -346,5 +348,6 @@ class ModelUpdate {
     required this.sha256Checksum,
     required this.classLabels,
     required this.numClasses,
+    this.displayName,
   });
 }

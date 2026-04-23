@@ -35,8 +35,10 @@ void main() {
       expect(result, matches(r'^\d+\.\d%$'));
     });
 
-    test('value > 1 produces percentage > 100', () {
-      expect(formatPercent(1.5), '150.0%');
+    test('value > 1 treated as already-percentage (pre-migration guard)', () {
+      // Values > 1 are assumed to be already in percentage form (e.g. 87.6 not 0.876)
+      expect(formatPercent(1.5), '1.5%');
+      expect(formatPercent(87.603), '87.6%');
     });
 
     test('very small value near zero', () {

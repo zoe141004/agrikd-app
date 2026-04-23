@@ -37,8 +37,9 @@ class SyncState {
   /// Model updates available for manual download (check-only, no auto-download).
   final List<ModelUpdate> pendingModelUpdates;
 
-  /// Leaf type currently being downloaded (null = idle).
-  final String? downloadingLeafType;
+  /// Model currently being downloaded (null = idle).
+  /// Tracks both leafType and version to support per-version download buttons.
+  final ({String leafType, String version})? downloadingModel;
 
   const SyncState({
     this.status = SyncStatus.idle,
@@ -46,7 +47,7 @@ class SyncState {
     this.errorMessage,
     this.lastSyncedAt,
     this.pendingModelUpdates = const [],
-    this.downloadingLeafType,
+    this.downloadingModel,
   });
 
   SyncState copyWith({
@@ -55,7 +56,7 @@ class SyncState {
     String? errorMessage,
     DateTime? lastSyncedAt,
     List<ModelUpdate>? pendingModelUpdates,
-    String? downloadingLeafType,
+    ({String leafType, String version})? downloadingModel,
     bool clearDownloading = false,
     bool clearError = false,
   }) {
@@ -65,9 +66,9 @@ class SyncState {
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
       pendingModelUpdates: pendingModelUpdates ?? this.pendingModelUpdates,
-      downloadingLeafType: clearDownloading
+      downloadingModel: clearDownloading
           ? null
-          : (downloadingLeafType ?? this.downloadingLeafType),
+          : (downloadingModel ?? this.downloadingModel),
     );
   }
 }
@@ -109,9 +110,11 @@ class SyncNotifier extends StateNotifier<SyncState>
     state = state.copyWith(status: SyncStatus.syncing, clearError: true);
     try {
       final result = await _syncService.pushPendingPredictions();
+      if (!mounted) return;
 
       // Check-only: detect available updates and store in state for manual download
       await _checkModelUpdates();
+      if (!mounted) return;
 
       final now = DateTime.now();
       state = state.copyWith(
@@ -124,8 +127,12 @@ class SyncNotifier extends StateNotifier<SyncState>
           .read(settingsProvider.notifier)
           .setValue('last_synced_at', now.toIso8601String());
       _consecutiveFailures = 0;
+
+      // Refresh evaluation data (may have been empty if loaded before Supabase init)
+      _ref.read(evaluationProvider.notifier).load();
     } catch (e) {
       _consecutiveFailures++;
+      if (!mounted) return;
       state = state.copyWith(
         status: SyncStatus.error,
         errorMessage: S.get('sync_failed'),
@@ -137,6 +144,8 @@ class SyncNotifier extends StateNotifier<SyncState>
     try {
       final modelDao = _ref.read(modelDaoProvider);
       final allModels = await modelDao.getAll();
+      if (!mounted) return;
+
       final localVersionsByLeaf = <String, Set<String>>{};
       for (final m in allModels) {
         final lt = m['leaf_type'] as String;
@@ -146,6 +155,8 @@ class SyncNotifier extends StateNotifier<SyncState>
       }
 
       final updates = await _syncService.checkModelUpdates(localVersionsByLeaf);
+      if (!mounted) return;
+
       // Store available updates in state — user triggers download manually from Settings
       state = state.copyWith(pendingModelUpdates: updates);
     } catch (e) {
@@ -154,20 +165,24 @@ class SyncNotifier extends StateNotifier<SyncState>
     }
   }
 
-  /// Manually download a model update for the given leaf type.
-  /// Called from the Settings screen when the user taps the download button.
-  Future<void> downloadUpdate(String leafType) async {
+  /// Manually download a specific model version.
+  /// Called from the Settings/Evaluation screen when the user taps a download button.
+  Future<void> downloadUpdate(String leafType, String version) async {
     final updates = state.pendingModelUpdates;
     final update = updates.cast<ModelUpdate?>().firstWhere(
-      (u) => u?.leafType == leafType,
+      (u) => u?.leafType == leafType && u?.version == version,
       orElse: () => null,
     );
     if (update == null) return;
-    if (state.downloadingLeafType != null) return; // already downloading
+    if (state.downloadingModel != null) return; // already downloading
 
-    state = state.copyWith(downloadingLeafType: leafType);
+    state = state.copyWith(
+      downloadingModel: (leafType: leafType, version: version),
+    );
     try {
       final ok = await _syncService.downloadModelUpdate(update);
+      if (!mounted) return;
+
       if (ok) {
         // Refresh UI providers so the new model is immediately available
         _ref.read(modelVersionProvider.notifier).load();
@@ -175,9 +190,9 @@ class SyncNotifier extends StateNotifier<SyncState>
         // Invalidate diagnosis repository so the stale model cache is cleared
         _ref.invalidate(diagnosisRepositoryProvider);
 
-        // Remove this update from the pending list
+        // Remove only this specific version from the pending list
         final remaining = state.pendingModelUpdates
-            .where((u) => u.leafType != leafType)
+            .where((u) => !(u.leafType == leafType && u.version == version))
             .toList();
         state = state.copyWith(
           pendingModelUpdates: remaining,
@@ -188,6 +203,7 @@ class SyncNotifier extends StateNotifier<SyncState>
       }
     } catch (e) {
       debugPrint('[SyncProvider] Model download failed: $e');
+      if (!mounted) return;
       state = state.copyWith(clearDownloading: true);
     }
   }
@@ -205,6 +221,7 @@ class SyncNotifier extends StateNotifier<SyncState>
         ? 2
         : min(2 * (1 << _consecutiveFailures), _maxBackoffSeconds);
     _debounce = Timer(Duration(seconds: backoffSeconds), () {
+      if (_disposed) return;
       syncNow();
     });
   }
