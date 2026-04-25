@@ -1140,12 +1140,21 @@ class SyncEngine:
             logger.warning("Network error during batch sync: %s", e)
 
         stats = self.db.get_stats()
-        logger.info(
-            "Sync complete. Total: %d, Synced: %d, Pending: %d",
-            stats["total_predictions"],
-            stats["synced"],
-            stats["unsynced"],
-        )
+        if stats["failed"]:
+            logger.info(
+                "Sync complete. Total: %d, Synced: %d, Pending: %d, Failed: %d",
+                stats["total_predictions"],
+                stats["synced"],
+                stats["pending"],
+                stats["failed"],
+            )
+        else:
+            logger.info(
+                "Sync complete. Total: %d, Synced: %d, Pending: %d",
+                stats["total_predictions"],
+                stats["synced"],
+                stats["pending"],
+            )
 
     def _retry_image_uploads(self):
         """Retry uploading images for predictions that synced without image_url.
@@ -1215,6 +1224,12 @@ class SyncEngine:
             if desired_mv:
                 logger.info("Startup engine check: verifying assigned model versions")
                 self._check_model_versions(self._active_config)
+
+        # Reset permanently failed predictions on startup — gives them another
+        # chance after a code/schema fix is deployed (e.g., missing column fix).
+        reset_count = self.db.reset_failed_retries()
+        if reset_count:
+            logger.info("Reset %d permanently failed predictions for retry", reset_count)
 
         base_interval = self.interval
         current_interval = base_interval

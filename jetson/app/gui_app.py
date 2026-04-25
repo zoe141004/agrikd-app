@@ -257,23 +257,28 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right)
 
         title = QLabel("Results")
-        title.setFont(QFont("", 14, QFont.Bold))
+        title.setFont(QFont("", 12, QFont.Bold))
         right_layout.addWidget(title)
 
+        self.analyzed_preview = QLabel()
+        self.analyzed_preview.setAlignment(Qt.AlignCenter)
+        self.analyzed_preview.setMinimumHeight(200)
+        self.analyzed_preview.setStyleSheet(
+            "background-color: #1a1a2e; border: 1px solid #333;"
+        )
+        right_layout.addWidget(self.analyzed_preview, stretch=1)
+
         self.result_class = QLabel("—")
-        self.result_class.setFont(QFont("", 22, QFont.Bold))
+        self.result_class.setFont(QFont("", 16, QFont.Bold))
+        self.result_class.setAlignment(Qt.AlignCenter)
         self.result_class.setStyleSheet("color: #16a34a;")
         right_layout.addWidget(self.result_class)
 
         self.result_time = QLabel("Inference: —")
-        self.result_time.setFont(QFont("", 11))
+        self.result_time.setFont(QFont("", 10))
+        self.result_time.setAlignment(Qt.AlignCenter)
         self.result_time.setStyleSheet("color: #888;")
         right_layout.addWidget(self.result_time)
-
-        self.analyzed_preview = QLabel()
-        self.analyzed_preview.setAlignment(Qt.AlignCenter)
-        self.analyzed_preview.setFixedHeight(120)
-        right_layout.addWidget(self.analyzed_preview)
 
         splitter.addWidget(right)
         splitter.setSizes([600, 400])

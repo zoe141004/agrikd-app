@@ -171,6 +171,20 @@ class JetsonDatabase:
             columns = [d[0] for d in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def reset_failed_retries(self):
+        """Reset retry counts for permanently failed predictions so they get retried.
+
+        Called at sync engine startup — gives previously failed predictions
+        another chance after a code/schema fix is deployed.
+        """
+        with self._lock:
+            cursor = self.conn.execute(
+                "UPDATE predictions SET sync_retry_count = 0 WHERE is_synced = 0 AND sync_retry_count >= ?",
+                (self.MAX_SYNC_RETRIES,),
+            )
+            self.conn.commit()
+            return cursor.rowcount
+
     def get_stats(self):
         """Get basic statistics."""
         with self._lock:
@@ -180,12 +194,18 @@ class JetsonDatabase:
             synced = self.conn.execute(
                 "SELECT COUNT(*) FROM predictions WHERE is_synced = 1"
             ).fetchone()[0]
+            failed = self.conn.execute(
+                "SELECT COUNT(*) FROM predictions WHERE is_synced = 0 AND sync_retry_count >= ?",
+                (self.MAX_SYNC_RETRIES,),
+            ).fetchone()[0]
             last_pred = self.conn.execute(
                 "SELECT created_at FROM predictions ORDER BY id DESC LIMIT 1"
             ).fetchone()
             return {
                 "total_predictions": total,
                 "synced": synced,
+                "pending": total - synced - failed,
+                "failed": failed,
                 "unsynced": total - synced,
                 "last_prediction": last_pred[0] if last_pred else None,
             }
