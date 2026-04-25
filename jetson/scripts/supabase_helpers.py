@@ -86,10 +86,12 @@ def upload_engine_benchmark(base_url, key, leaf_type, version, hardware_tag, ben
     resp.raise_for_status()
     rows = resp.json()
     if not rows:
-        raise ValueError(
-            f"No model_engines row found for {leaf_type} v{version} {hardware_tag}; "
-            "run engine upload before benchmark upload."
+        log.warning(
+            "No model_engines row found for %s v%s %s — engine not registered in DB. "
+            "Benchmark metrics will still be uploaded to model_benchmarks for dashboard display.",
+            leaf_type, version, hardware_tag,
         )
+        return False
     engine_id = rows[0]["id"]
 
     # 2. Build metrics payload matching the RPC column names

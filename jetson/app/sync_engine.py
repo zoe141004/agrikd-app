@@ -897,7 +897,7 @@ class SyncEngine:
                 # Register in model_engines table (upsert for re-builds)
                 engine_url = f"{self.supabase_url}/storage/v1/object/public/models/{storage_path}"
                 device_id = self._device_state.get("device_id") if self._device_state else None
-                self._session.post(
+                reg_resp = self._session.post(
                     f"{self.supabase_url}/rest/v1/model_engines",
                     headers={**self._get_headers(), "Prefer": "return=minimal,resolution=merge-duplicates"},
                     json={
@@ -910,7 +910,14 @@ class SyncEngine:
                     },
                     timeout=10, verify=True,
                 )
-                logger.info("Engine cached: %s v%s %s", leaf_type, version, hw_tag)
+                if reg_resp.status_code in (200, 201, 204):
+                    logger.info("Engine cached: %s v%s %s", leaf_type, version, hw_tag)
+                else:
+                    logger.warning(
+                        "Engine uploaded to storage but model_engines registration failed "
+                        "(HTTP %d): %s — validation will still upload to model_benchmarks",
+                        reg_resp.status_code, reg_resp.text[:200],
+                    )
             else:
                 logger.warning("Engine upload failed (curl): %s", result.stderr[:500])
         except Exception as e:
