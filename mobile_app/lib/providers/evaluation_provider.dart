@@ -35,9 +35,15 @@ class ModelEvaluationInfo {
 
 class EvaluationState {
   final Map<String, ModelEvaluationInfo> evaluations; // keyed by leafType
+  final Map<String, List<String>>
+  availableVersions; // leafType → [versions desc]
   final bool isLoading;
 
-  const EvaluationState({this.evaluations = const {}, this.isLoading = false});
+  const EvaluationState({
+    this.evaluations = const {},
+    this.availableVersions = const {},
+    this.isLoading = false,
+  });
 }
 
 class EvaluationNotifier extends StateNotifier<EvaluationState> {
@@ -48,16 +54,24 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
   }
 
   Future<void> load() async {
-    state = EvaluationState(evaluations: state.evaluations, isLoading: true);
+    state = EvaluationState(
+      evaluations: state.evaluations,
+      availableVersions: state.availableVersions,
+      isLoading: true,
+    );
 
     try {
       if (!SupabaseConfig.isInitialized) {
-        state = EvaluationState(evaluations: state.evaluations);
+        state = EvaluationState(
+          evaluations: state.evaluations,
+          availableVersions: state.availableVersions,
+        );
         return;
       }
 
       final client = SupabaseConfig.client;
       final result = <String, ModelEvaluationInfo>{};
+      final versions = <String, List<String>>{};
 
       // Discover all leaf types from local DB + bundled constants
       final allModels = await _modelDao.getAll();
@@ -69,6 +83,24 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
       };
 
       for (final leafType in leafTypes) {
+        // Fetch available versions for this leaf type
+        final versionRows = await client
+            .from('model_benchmarks')
+            .select('version')
+            .eq('leaf_type', leafType)
+            .eq('format', 'tflite_float16')
+            .order('version', ascending: false)
+            .timeout(const Duration(seconds: 30));
+        if (!mounted) return;
+
+        final leafVersions = versionRows
+            .map((r) => r['version'] as String)
+            .toSet()
+            .toList();
+        if (leafVersions.isNotEmpty) {
+          versions[leafType] = leafVersions;
+        }
+
         // Determine the active installed version on this device
         final activeModel = await _modelDao.getSelected(leafType);
         if (!mounted) return;
@@ -104,29 +136,66 @@ class EvaluationNotifier extends StateNotifier<EvaluationState> {
         }
 
         if (rows.isNotEmpty) {
-          final r = rows.first;
-          result[leafType] = ModelEvaluationInfo(
-            leafType: leafType,
-            version: r['version'] as String? ?? '',
-            accuracy: toDouble(r['accuracy']),
-            precisionMacro: toDouble(r['precision_macro']),
-            recallMacro: toDouble(r['recall_macro']),
-            f1Macro: toDouble(r['f1_macro']),
-            flopsM: toDouble(r['flops_m']),
-            latencyMeanMs: toDouble(r['latency_mean_ms']),
-            sizeMb: toDouble(r['size_mb']),
-            paramsM: toDouble(r['params_m']),
-          );
+          result[leafType] = _parseRow(rows.first, leafType);
         }
       }
 
       if (!mounted) return;
-      state = EvaluationState(evaluations: result);
+      state = EvaluationState(evaluations: result, availableVersions: versions);
     } catch (e) {
       debugPrint('[EvaluationProvider] Failed to load evaluations: $e');
       if (!mounted) return;
-      state = EvaluationState(evaluations: state.evaluations);
+      state = EvaluationState(
+        evaluations: state.evaluations,
+        availableVersions: state.availableVersions,
+      );
     }
+  }
+
+  /// Load evaluation metrics for a specific version of a leaf type.
+  Future<void> loadVersion(String leafType, String version) async {
+    if (!SupabaseConfig.isInitialized) return;
+
+    try {
+      final client = SupabaseConfig.client;
+      final rows = await client
+          .from('model_benchmarks')
+          .select('*')
+          .eq('leaf_type', leafType)
+          .eq('format', 'tflite_float16')
+          .eq('version', version)
+          .limit(1)
+          .timeout(const Duration(seconds: 30));
+      if (!mounted) return;
+
+      if (rows.isNotEmpty) {
+        final updated = Map<String, ModelEvaluationInfo>.from(
+          state.evaluations,
+        );
+        updated[leafType] = _parseRow(rows.first, leafType);
+        state = EvaluationState(
+          evaluations: updated,
+          availableVersions: state.availableVersions,
+        );
+      }
+    } catch (e) {
+      debugPrint('[EvaluationProvider] Failed to load version $version: $e');
+    }
+  }
+
+  ModelEvaluationInfo _parseRow(Map<String, dynamic> r, String leafType) {
+    return ModelEvaluationInfo(
+      leafType: leafType,
+      version: r['version'] as String? ?? '',
+      accuracy: toDouble(r['accuracy']),
+      precisionMacro: toDouble(r['precision_macro']),
+      recallMacro: toDouble(r['recall_macro']),
+      f1Macro: toDouble(r['f1_macro']),
+      flopsM: toDouble(r['flops_m']),
+      latencyMeanMs: toDouble(r['latency_mean_ms']),
+      sizeMb: toDouble(r['size_mb']),
+      paramsM: toDouble(r['params_m']),
+    );
   }
 
   @visibleForTesting

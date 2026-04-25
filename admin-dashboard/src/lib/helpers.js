@@ -35,6 +35,16 @@ export function formatBytes(bytes) {
   return `${bytes.toFixed(1)} ${units[i]}`
 }
 
+// ── Metric formatting ─────────────────────────────────────────────────────
+
+/** Format a classification metric (0-1 fraction or 0-100 percentage) as "XX.XX%".
+ *  Guard: values > 1 are treated as already in percentage form. */
+export function formatPercent(v, decimals = 2) {
+  if (v == null) return '—'
+  const pct = v > 1 ? v : v * 100
+  return `${pct.toFixed(decimals)}%`
+}
+
 // ── GitHub Actions integration ─────────────────────────────────────────────
 
 // GitHub slug validation: owner/repo names must be alphanumeric + limited punctuation.

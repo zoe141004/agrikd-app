@@ -85,6 +85,7 @@ void main() {
     test('defaults to empty evaluations, not loading', () {
       const state = EvaluationState();
       expect(state.evaluations, isEmpty);
+      expect(state.availableVersions, isEmpty);
       expect(state.isLoading, isFalse);
     });
 
@@ -92,6 +93,7 @@ void main() {
       const state = EvaluationState(isLoading: true);
       expect(state.isLoading, isTrue);
       expect(state.evaluations, isEmpty);
+      expect(state.availableVersions, isEmpty);
     });
 
     test('can be constructed with evaluation data', () {
@@ -99,6 +101,16 @@ void main() {
       final state = EvaluationState(evaluations: {'tomato': info});
       expect(state.evaluations, hasLength(1));
       expect(state.evaluations['tomato']?.version, '1.1.0');
+    });
+
+    test('can be constructed with available versions', () {
+      final state = EvaluationState(
+        availableVersions: {
+          'tomato': ['1.2.0', '1.1.0', '1.0.0'],
+        },
+      );
+      expect(state.availableVersions['tomato'], hasLength(3));
+      expect(state.availableVersions['tomato']!.first, '1.2.0');
     });
   });
 }

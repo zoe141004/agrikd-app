@@ -123,12 +123,14 @@ class EvaluationScreen extends ConsumerWidget {
                             ),
                           ),
                           if (eval != null)
-                            Text(
-                              'v${eval.version}',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
+                            _VersionDropdown(
+                              leafType: leafType,
+                              currentVersion: eval.version,
+                              versions:
+                                  evalState.availableVersions[leafType] ??
+                                  [eval.version],
+                              ref: ref,
+                              colorScheme: colorScheme,
                             ),
                         ],
                       ),
@@ -213,6 +215,52 @@ class EvaluationScreen extends ConsumerWidget {
           const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+}
+
+class _VersionDropdown extends StatelessWidget {
+  final String leafType;
+  final String currentVersion;
+  final List<String> versions;
+  final WidgetRef ref;
+  final ColorScheme colorScheme;
+
+  const _VersionDropdown({
+    required this.leafType,
+    required this.currentVersion,
+    required this.versions,
+    required this.ref,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (versions.length <= 1) {
+      return Text(
+        'v$currentVersion',
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+      );
+    }
+    return DropdownButton<String>(
+      value: versions.contains(currentVersion)
+          ? currentVersion
+          : versions.first,
+      isDense: true,
+      underline: const SizedBox.shrink(),
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+      items: versions
+          .map((v) => DropdownMenuItem(value: v, child: Text('v$v')))
+          .toList(),
+      onChanged: (v) {
+        if (v != null && v != currentVersion) {
+          ref.read(evaluationProvider.notifier).loadVersion(leafType, v);
+        }
+      },
     );
   }
 }

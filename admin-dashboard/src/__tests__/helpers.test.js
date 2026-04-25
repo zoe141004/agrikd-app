@@ -5,6 +5,7 @@ import {
   maskUrl,
   formatDateTime,
   formatBytes,
+  formatPercent,
   validateGitHubSlugs,
   checkRateLimit,
 } from '../lib/helpers'
@@ -114,6 +115,42 @@ describe('formatBytes', () => {
 
   it('formats fractional MB', () => {
     expect(formatBytes(5242880)).toBe('5.0 MB')
+  })
+})
+
+// ── formatPercent ──────────────────────────────────────────────────────────
+
+describe('formatPercent', () => {
+  it('returns dash for null', () => {
+    expect(formatPercent(null)).toBe('—')
+  })
+
+  it('returns dash for undefined', () => {
+    expect(formatPercent(undefined)).toBe('—')
+  })
+
+  it('converts fraction (0-1) to percentage with 2 decimals', () => {
+    expect(formatPercent(0.872)).toBe('87.20%')
+  })
+
+  it('treats values > 1 as already percentage', () => {
+    expect(formatPercent(84.79)).toBe('84.79%')
+  })
+
+  it('handles 0', () => {
+    expect(formatPercent(0)).toBe('0.00%')
+  })
+
+  it('handles 1 (boundary — treated as fraction)', () => {
+    expect(formatPercent(1)).toBe('100.00%')
+  })
+
+  it('respects custom decimals', () => {
+    expect(formatPercent(0.8719, 1)).toBe('87.2%')
+  })
+
+  it('handles very small fractions', () => {
+    expect(formatPercent(0.001)).toBe('0.10%')
   })
 })
 

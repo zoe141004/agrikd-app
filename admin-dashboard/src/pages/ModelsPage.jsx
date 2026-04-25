@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
-import { formatBytes, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
+import { formatBytes, formatPercent, uploadToStorage, ensureBucket, triggerGitHubWorkflow, getGitHubWorkflowRuns, getGitHubConfig, logAudit } from '../lib/helpers'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const TABS = ['Registry', 'Evaluation', 'Upload Model', 'Validate', 'OTA Deploy']
@@ -762,7 +762,7 @@ export default function ModelsPage() {
                         <td>{m.num_classes || '—'}</td>
                         <td>
                           {m.accuracy_top1
-                            ? <span className={`badge ${parseFloat(m.accuracy_top1) >= 0.95 ? 'badge-green' : parseFloat(m.accuracy_top1) >= 0.85 ? 'badge-yellow' : 'badge-red'}`}>{(parseFloat(m.accuracy_top1) * 100).toFixed(1)}%</span>
+                            ? <span className={`badge ${parseFloat(m.accuracy_top1) >= 0.95 ? 'badge-green' : parseFloat(m.accuracy_top1) >= 0.85 ? 'badge-yellow' : 'badge-red'}`}>{formatPercent(parseFloat(m.accuracy_top1))}</span>
                             : <span style={{ color: '#94a3b8' }}>—</span>}
                         </td>
                         <td>
@@ -845,7 +845,7 @@ export default function ModelsPage() {
                                     <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', background: 'rgba(0,0,0,0.02)', borderRadius: 6 }}>
                                       <span className="badge badge-gray">v{v.version}</span>
                                       <span style={{ color: '#64748b' }}>{v.display_name}</span>
-                                      {v.accuracy != null && <span className="badge badge-yellow">{(v.accuracy * 100).toFixed(1)}%</span>}
+                                      {v.accuracy != null && <span className="badge badge-yellow">{formatPercent(v.accuracy)}</span>}
                                       <span style={{ color: '#94a3b8', marginLeft: 'auto' }}>Archived {new Date(v.archived_at).toLocaleDateString()}</span>
                                     </div>
                                   ))}
@@ -936,8 +936,8 @@ export default function ModelsPage() {
                 {/* Summary metrics cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                   {[
-                    { label: 'Accuracy', value: activeTflite?.accuracy != null ? `${(activeTflite.accuracy * 100).toFixed(1)}%` : '—', color: '#16a34a' },
-                    { label: 'F1 Score', value: activeTflite?.f1_macro != null ? activeTflite.f1_macro.toFixed(4) : '—', color: '#0284c7' },
+                    { label: 'Accuracy', value: formatPercent(activeTflite?.accuracy), color: '#16a34a' },
+                    { label: 'F1 Score', value: formatPercent(activeTflite?.f1_macro), color: '#0284c7' },
                     { label: 'Latency', value: activeTflite?.latency_mean_ms != null ? `${activeTflite.latency_mean_ms.toFixed(1)} ms` : '—', color: '#7c3aed' },
                     { label: 'Model Size', value: activeTflite?.size_mb != null ? `${activeTflite.size_mb.toFixed(2)} MB` : '—', color: '#ca8a04' },
                   ].map(s => (
@@ -964,10 +964,10 @@ export default function ModelsPage() {
                         {formats.map(b => (
                           <tr key={b.format}>
                             <td><strong>{b.format === 'tflite_float16' ? 'TFLite (f16)' : b.format === 'tensorrt_fp16' ? 'TensorRT (f16)' : b.format.charAt(0).toUpperCase() + b.format.slice(1)}</strong></td>
-                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 0.85 ? 'badge-green' : 'badge-yellow'}`}>{(b.accuracy * 100).toFixed(1)}%</span> : '—'}</td>
-                            <td>{b.precision_macro != null ? b.precision_macro.toFixed(4) : '—'}</td>
-                            <td>{b.recall_macro != null ? b.recall_macro.toFixed(4) : '—'}</td>
-                            <td>{b.f1_macro != null ? b.f1_macro.toFixed(4) : '—'}</td>
+                            <td>{b.accuracy != null ? <span className={`badge ${b.accuracy >= 0.85 ? 'badge-green' : 'badge-yellow'}`}>{formatPercent(b.accuracy)}</span> : '—'}</td>
+                            <td>{formatPercent(b.precision_macro)}</td>
+                            <td>{formatPercent(b.recall_macro)}</td>
+                            <td>{formatPercent(b.f1_macro)}</td>
                             <td>{b.latency_mean_ms != null ? `${b.latency_mean_ms.toFixed(1)} ms` : '—'}</td>
                             <td>{b.fps != null ? b.fps.toFixed(0) : '—'}</td>
                             <td>{b.size_mb != null ? `${b.size_mb.toFixed(2)} MB` : '—'}</td>
@@ -991,11 +991,11 @@ export default function ModelsPage() {
                           {activeTflite.per_class_metrics.map((c, i) => (
                             <tr key={i}>
                               <td style={{ fontWeight: 500 }}>{c.class?.replace(/_/g, ' ')}</td>
-                              <td>{c.precision?.toFixed(4)}</td>
-                              <td>{c.recall?.toFixed(4)}</td>
+                              <td>{formatPercent(c.precision)}</td>
+                              <td>{formatPercent(c.recall)}</td>
                               <td>
                                 <span className={`badge ${c.f1 >= 0.9 ? 'badge-green' : c.f1 >= 0.7 ? 'badge-yellow' : 'badge-red'}`}>
-                                  {c.f1?.toFixed(4)}
+                                  {formatPercent(c.f1)}
                                 </span>
                               </td>
                               <td style={{ color: '#94a3b8' }}>{c.support}</td>
