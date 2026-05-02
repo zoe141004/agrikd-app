@@ -13,24 +13,24 @@ and Burmese Grape Leaf datasets or extend the system to new leaf types with mini
 
 ## Datasets
 
-| Dataset | Classes | Status |
-|---|---|---|
-| Tomato | 10 | Active |
-| Burmese Grape Leaf | 5 | Active |
-| Potato | TBD | Added |
+| Dataset            | Classes | Status |
+| ------------------ | ------- | ------ |
+| Tomato             | 10      | Active |
+| Burmese Grape Leaf | 5       | Active |
+| Potato             | 7       | Active |
 
 Adding a new leaf type requires only a labeled dataset folder and a config JSON in
 `mlops_pipeline/configs/` — no code changes needed.
 
 ## Components
 
-| Component | Technology | Description |
-|---|---|---|
-| Mobile App | Flutter 3.x + Riverpod + TFLite | Offline-first diagnosis, cloud sync |
-| Admin Dashboard | React 18 + Vite 6 + Supabase | Model, user, and data management (Vercel) |
-| MLOps Pipeline | Python 3.10 + DVC + GitHub Actions | 4-format conversion & evaluation |
-| Jetson Edge | TensorRT FP16 + PyQt5 + Flask | Real-time edge inference + Active Learning |
-| Database (IaC) | Supabase PostgreSQL + RLS | 28 SQL migrations, 13 tables |
+| Component       | Technology                         | Description                                |
+| --------------- | ---------------------------------- | ------------------------------------------ |
+| Mobile App      | Flutter 3.x + Riverpod + TFLite    | Offline-first diagnosis, cloud sync        |
+| Admin Dashboard | React 18 + Vite 6 + Supabase       | Model, user, and data management (Vercel)  |
+| MLOps Pipeline  | Python 3.10 + DVC + GitHub Actions | 4-format conversion & evaluation           |
+| Jetson Edge     | TensorRT FP16 + PyQt5 + Flask      | Real-time edge inference + Active Learning |
+| Database (IaC)  | Supabase PostgreSQL + RLS          | 28 SQL migrations, 13 tables               |
 
 ## Model Pipeline
 
@@ -131,13 +131,10 @@ python jetson/scripts/provision.py
 
 ## Evaluation Results
 
-| Dataset | Classes | Top-1 Accuracy | TFLite Size | KL Divergence (PyTorch ↔ ONNX) |
-|---|---|---|---|---|
-| Tomato | 10 | 87.2% | ~0.96 MB | 0.000000 |
-| Burmese Grape Leaf | 5 | 87.3% | ~0.96 MB | 0.000000 |
-
-KL Divergence across PyTorch → ONNX → TFLite is ≤ 0.000011, confirming numerical equivalence
-between all exported formats.
+| Dataset            | Classes | Accuracy | TFLite Size |
+| ------------------ | ------- | -------- | ----------- |
+| Tomato             | 10      | 87.2%    | ~0.96 MB    |
+| Burmese Grape Leaf | 5       | 87.3%    | ~0.96 MB    |
 
 ## Real-world Deployment
 
@@ -150,16 +147,16 @@ APK is 84.2 MB (fat) / 31.3 MB (arm64-v8a) — and syncs diagnosis records to Su
 
 All guides are in [`docs/`](docs/README.md):
 
-| Guide | Path |
-|---|---|
-| System Technical Reference | [docs/technical/system_reference.md](docs/technical/system_reference.md) |
-| MLOps Pipeline Setup | [docs/guides/mlops_pipeline_setup.md](docs/guides/mlops_pipeline_setup.md) |
-| Jetson Deployment & GUI | [docs/guides/jetson_deployment_guide.md](docs/guides/jetson_deployment_guide.md) |
-| Flutter App Build | [docs/guides/flutter_app_build.md](docs/guides/flutter_app_build.md) |
-| Admin Dashboard Manual | [docs/guides/admin_dashboard_manual.md](docs/guides/admin_dashboard_manual.md) |
-| Supabase Setup | [docs/guides/supabase_setup.md](docs/guides/supabase_setup.md) |
-| CI/CD Setup | [docs/guides/cicd_setup.md](docs/guides/cicd_setup.md) |
-| Product Release Guide | [docs/guides/product_release.md](docs/guides/product_release.md) |
+| Guide                      | Path                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| System Technical Reference | [docs/technical/system_reference.md](docs/technical/system_reference.md)         |
+| MLOps Pipeline Setup       | [docs/guides/mlops_pipeline_setup.md](docs/guides/mlops_pipeline_setup.md)       |
+| Jetson Deployment & GUI    | [docs/guides/jetson_deployment_guide.md](docs/guides/jetson_deployment_guide.md) |
+| Flutter App Build          | [docs/guides/flutter_app_build.md](docs/guides/flutter_app_build.md)             |
+| Admin Dashboard Manual     | [docs/guides/admin_dashboard_manual.md](docs/guides/admin_dashboard_manual.md)   |
+| Supabase Setup             | [docs/guides/supabase_setup.md](docs/guides/supabase_setup.md)                   |
+| CI/CD Setup                | [docs/guides/cicd_setup.md](docs/guides/cicd_setup.md)                           |
+| Product Release Guide      | [docs/guides/product_release.md](docs/guides/product_release.md)                 |
 
 ## Acknowledgements
 
